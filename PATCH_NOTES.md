@@ -1,6 +1,6 @@
 # Afterglow patch notes
 
-## Oct 19, 2026 · 16:00 UTC
+## Oct 19, 2026 · 18:00 UTC
 
 - **The Seraph.** A third boss now descends at 6:00. It spins a wheel of burning lasers you must ride the gaps of, fires lances aimed where you are going, then vanishes and reappears beside you in a ring of fire. Wounded, it grows a fourth arm and fires three lances at once. Defeat it for a boss cache, a core and a heart.
 - **Three new enemies.** Phantoms fade out and blink into a ring of light beside you. Sentinels anchor, track you with a warning line and fire a long beam: step out of the line. Bastions hang back behind the swarm and halve the damage taken by everything inside their blue aegis, so break them first. Watch for the new Phantom ring at 2:30 and the Laser Grid at 3:25.
