@@ -8,6 +8,7 @@ var sim: Sim
 
 var _stick: Joystick
 var _hud: Hud
+var _od: OverdriveButton
 var _cards: LevelUpPanel
 var _chest: ChestPanel
 var _pause: Modal
@@ -27,6 +28,9 @@ func _ready() -> void:
 	_hud.top = main.safe_top()
 	_hud.pause_pressed.connect(open_pause)
 	add_child(_hud)
+	_od = OverdriveButton.new()
+	add_child(_od)
+	resized.connect(_layout_od)
 	_cards = LevelUpPanel.new()
 	_cards.visible = false
 	_cards.picked.connect(_on_pick)
@@ -46,6 +50,9 @@ func begin(seed_value: int) -> void:
 	arena.chest_opened.connect(_on_chest)
 	arena.hurt.connect(func(): _stick.modulate = Color(1.4, 0.6, 0.6))
 	_hud.bind(arena)
+	_od.arena = arena
+	_layout_od()
+	arena.overdrive_ready.connect(_on_od_ready)
 	Sfx.music("run")
 	if not bool(Save.data.tutorial_done):
 		_show_hint()
@@ -62,6 +69,26 @@ func _process(delta: float) -> void:
 			_open_cards()
 	elif sim.state == Sim.CHOOSING and not _cards.visible and not _chest.visible and _pause == null and not _over:
 		_card_delay = 0.01
+
+
+## The first few times the meter fills, say what the glowing button is for.
+func _on_od_ready() -> void:
+	var tips := int(Save.data.get("od_tips", 0))
+	if tips < 3:
+		Save.data.od_tips = tips + 1
+		_hud.show_banner("OVERDRIVE READY", arena.ship_color)
+
+
+func _layout_od() -> void:
+	if _od == null:
+		return
+	_od.position = Vector2(size.x - _od.size.x - 26.0, size.y - _od.size.y - 120.0)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_SPACE or event.physical_keycode == KEY_E:
+			_od.trigger()
 
 
 func _on_level() -> void:
@@ -134,6 +161,7 @@ func _on_end(won: bool) -> void:
 	r.retry.connect(func(): main.start_run())
 	r.forge.connect(func(): main.go_forge())
 	r.home.connect(func(): main.go_title())
+	r.hangar.connect(func(): main.go_hangar())
 	add_child(r)
 	Sfx.music("menu")
 

@@ -13,6 +13,7 @@ signal boss_ended(type: int)
 signal card_taken(id: String, lvl: int)
 signal hurt
 signal chest_opened(rewards: Array, big: bool)
+signal overdrive_ready
 
 const TICK := 1.0 / 60.0
 
@@ -20,6 +21,9 @@ var sim: Sim
 var demo := false
 var paused := false
 var input_vec := Vector2.ZERO
+## Set by the HUD button; consumed by the next simulation step.
+var burst_request := false
+var ship_color := Color(0.35, 0.95, 1.0)
 var alpha := 1.0
 var vtime := 0.0
 var ship_angle := -PI * 0.5
@@ -69,6 +73,8 @@ func start(new_sim: Sim, is_demo: bool) -> void:
 	sim = new_sim
 	demo = is_demo
 	paused = false
+	burst_request = false
+	ship_color = Defs.ship(sim.ship_id).color
 	_acc = 0.0
 	_slow = 1.0
 	_hitstop = 0.0
@@ -117,10 +123,13 @@ func _process(delta: float) -> void:
 		var steps := 0
 		while _acc >= TICK and steps < 5:
 			var mv := input_vec
+			var burst := burst_request and sim.od_ready()
+			burst_request = false
 			if demo:
 				var m := Autopilot.move(sim)
 				mv = Vector2(m.x, m.y) / 100.0
-			sim.step(int(round(mv.x * 100.0)), int(round(mv.y * 100.0)))
+				burst = Autopilot.burst(sim)
+			sim.step(int(round(mv.x * 100.0)), int(round(mv.y * 100.0)), burst)
 			_acc -= TICK
 			steps += 1
 			handle_events()
@@ -153,9 +162,10 @@ func _update_view(delta: float) -> void:
 		ship_bank = lerpf(ship_bank, clampf(diff, -1.2, 1.2), clampf(delta * 8.0, 0.0, 1.0))
 		if randf() < 0.9 and sim.state == Sim.RUNNING:
 			var back := Vector2(cos(ship_angle), sin(ship_angle)) * -26.0
+			var tc := Color(ship_color.r, ship_color.g, ship_color.b) * 1.6
 			fx.particle(p.x + back.x + randf_range(-4, 4), p.y + back.y + randf_range(-4, 4),
 					-cos(ship_angle) * 260.0 + randf_range(-40, 40), -sin(ship_angle) * 260.0 + randf_range(-40, 40),
-					0.32, 0.9, Color(0.35, 0.9, 1.6), 0, 4.0)
+					0.32, 0.9, tc, 0, 4.0)
 	else:
 		ship_bank = lerpf(ship_bank, 0.0, clampf(delta * 6.0, 0.0, 1.0))
 	# Missile trails.
@@ -450,7 +460,41 @@ func handle_events() -> void:
 			Sim.EV_PICK:
 				if loud:
 					card_taken.emit(e[1], e[2])
+			Sim.EV_OVERDRIVE:
+				_on_overdrive(String(e[1]), e[2], e[3], loud)
+			Sim.EV_OD_READY:
+				if loud:
+					Sfx.play("od_ready")
+					Sfx.buzz(25)
+					overdrive_ready.emit()
+			Sim.EV_AEGIS:
+				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
+				if randf() < 0.5:
+					fx.spray(e[1], e[2], ship_color * 1.6, 6, randf() * TAU, TAU, 420.0, 0.8, 0.25)
 	sim.events.clear()
+
+
+## Every ship's Overdrive opens with the same punch: a flash, a shockwave,
+## a beat of slow motion and the ability's name.
+func _on_overdrive(id: String, x: float, y: float, loud: bool) -> void:
+	var col: Color = Defs.ship(id).color
+	_flash = 0.8
+	for k in 3:
+		fx.ring(x, y, 20.0, 420.0 + 260.0 * k, 0.5 + 0.18 * k, col, 1.8)
+	fx.burst(x, y, col * 2.0, 70, 1200.0, 1.5, 0.8)
+	add_wave(x, y, 2.6, 1300.0)
+	shake(0.6)
+	slowmo(0.3, 0.35)
+	_hitstop = 0.06
+	if id == "lumen":
+		fx.flash(x, y, 1100.0, 0.6, col)
+		fx.ring(x, y, 40.0, 1000.0, 0.45, Color(1.0, 1.0, 1.0), 2.4)
+	elif id == "nyx":
+		fx.flash(x, y, 900.0, 0.8, Color(0.4, 0.2, 0.9))
+	if loud:
+		Sfx.play("overdrive")
+		Sfx.buzz(140)
+		banner.emit(String(Defs.ship(id).od).to_upper(), col)
 
 
 func _on_kill(e: Array, loud: bool) -> void:

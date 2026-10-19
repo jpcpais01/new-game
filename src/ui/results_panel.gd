@@ -5,6 +5,7 @@ extends Modal
 signal retry
 signal forge
 signal home
+signal hangar
 
 var sim: Sim
 var won := false
@@ -35,6 +36,7 @@ func build() -> void:
 	cc.add_child(grid)
 	body.add_child(cc)
 	_evolutions()
+	_missions()
 	var flux_box := PanelContainer.new()
 	var fsb := UiKit.box(UiKit.GOLD, Color(0.1, 0.07, 0.02, 0.6), 24, 2, 12)
 	fsb.content_margin_top = 16
@@ -56,6 +58,11 @@ func build() -> void:
 	f.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	f.pressed.connect(func(): forge.emit())
 	row.add_child(f)
+	if not (beat.get("ships", []) as Array).is_empty():
+		var hg := UiKit.button("HANGAR", UiKit.CYAN, 40)
+		hg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hg.pressed.connect(func(): hangar.emit())
+		row.add_child(hg)
 	var h := UiKit.button("HOME", UiKit.MAGENTA, 40)
 	h.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.pressed.connect(func(): home.emit())
@@ -82,6 +89,61 @@ func _evolutions() -> void:
 		return
 	body.add_child(row)
 	UiKit.pop_in(row, 0.6, 20)
+
+
+## Missions completed this run, and any ship they unlocked.
+func _missions() -> void:
+	var ids: Array = beat.get("missions", [])
+	if ids.is_empty():
+		return
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	var shown := 0
+	for id in ids:
+		for m in Defs.MISSIONS:
+			if m.id != id:
+				continue
+			if shown < 3:
+				var line := HBoxContainer.new()
+				line.add_theme_constant_override("separation", 14)
+				var name := UiKit.label("✓  " + String(m.name).to_upper(), 30, UiKit.GREEN, UiKit.display(),
+						HORIZONTAL_ALIGNMENT_LEFT)
+				name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				line.add_child(name)
+				line.add_child(UiKit.label("+◆ %s" % UiKit.fmt_int(int(m.flux)), 30, UiKit.GOLD, UiKit.display()))
+				box.add_child(line)
+				UiKit.pop_in(line, 0.8 + 0.25 * shown, 0)
+			shown += 1
+	if shown > 3:
+		box.add_child(UiKit.label("+%d MORE MISSIONS" % (shown - 3), 26, UiKit.DIM, UiKit.display_light()))
+	body.add_child(box)
+	for k in mini(shown, 3):
+		get_tree().create_timer(0.8 + 0.25 * k).timeout.connect(func(): Sfx.play("mission", 1.0 + 0.06 * k))
+	for sid in beat.get("ships", []):
+		var sd := Defs.ship(String(sid))
+		var p := PanelContainer.new()
+		var sb := UiKit.box(sd.color, Color(sd.color, 0.12), 24, 3, 18)
+		sb.content_margin_left = 20
+		sb.content_margin_right = 20
+		sb.content_margin_top = 12
+		sb.content_margin_bottom = 12
+		p.add_theme_stylebox_override("panel", sb)
+		var h := HBoxContainer.new()
+		h.alignment = BoxContainer.ALIGNMENT_CENTER
+		h.add_theme_constant_override("separation", 18)
+		h.add_child(UiKit.icon_rect("ship_" + String(sd.id), 90))
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 0)
+		v.add_child(UiKit.label("NEW SHIP UNLOCKED", 24, Color(1, 1, 1, 0.75), UiKit.display_light(),
+				HORIZONTAL_ALIGNMENT_LEFT))
+		v.add_child(UiKit.glow_label(String(sd.name).to_upper(), 50, sd.color))
+		h.add_child(v)
+		p.add_child(h)
+		body.add_child(p)
+		UiKit.pop_in(p, 1.4, 0)
+		var tw := p.create_tween().set_loops()
+		tw.tween_property(p, "modulate", Color(1.3, 1.3, 1.3), 0.7).set_delay(1.8)
+		tw.tween_property(p, "modulate", Color.WHITE, 0.7)
 
 
 func _stat(grid: GridContainer, name: String, value: String, record: bool, k: int) -> void:

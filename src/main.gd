@@ -65,7 +65,7 @@ func _ready() -> void:
 func go_title() -> void:
 	Sfx.music("menu")
 	_switch(func():
-		arena.start(Sim.new(fresh_seed(), {"hull": 5, "power": 3}), true)
+		arena.start(Sim.new(fresh_seed(), demo_loadout()), true)
 		var t := TitleScreen.new()
 		t.main = self
 		return t)
@@ -82,10 +82,30 @@ func start_run() -> void:
 func go_forge() -> void:
 	_switch(func():
 		if not arena.demo:
-			arena.start(Sim.new(fresh_seed(), {"hull": 5, "power": 3}), true)
+			arena.start(Sim.new(fresh_seed(), demo_loadout()), true)
 		var f := ForgeScreen.new()
 		f.main = self
 		return f)
+
+
+func go_hangar() -> void:
+	_switch(func():
+		var h := HangarScreen.new()
+		h.main = self
+		return h)
+
+
+func go_missions() -> void:
+	_switch(func():
+		var m := MissionsScreen.new()
+		m.main = self
+		return m)
+
+
+## The title demo flies a random ship from the fleet (locked ones too, as a tease).
+func demo_loadout() -> Dictionary:
+	var sd: Dictionary = Defs.SHIPS[randi() % Defs.SHIPS.size()]
+	return {"hull": 5, "power": 3, "ship": sd.id}
 
 
 func _switch(make: Callable) -> void:
@@ -104,7 +124,8 @@ func _switch(make: Callable) -> void:
 
 
 func _disconnect_arena() -> void:
-	for sig in ["leveled_up", "ended", "banner", "boss_started", "boss_ended", "card_taken", "hurt"]:
+	for sig in ["leveled_up", "ended", "banner", "boss_started", "boss_ended", "card_taken", "hurt",
+			"chest_opened", "overdrive_ready"]:
 		for c in arena.get_signal_connection_list(sig):
 			arena.disconnect(sig, c.callable)
 
