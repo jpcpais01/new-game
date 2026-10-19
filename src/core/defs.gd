@@ -272,7 +272,51 @@ const MISSIONS := [
 		"goal": 3, "flux": 500},
 	{"id": "nightfall", "name": "Nightfall", "text": "Reach the dawn flying Nyx.", "kind": "win_nyx", "goal": 1,
 		"flux": 800},
+	{"id": "daybreaker", "name": "Daybreaker", "text": "Fly a Daily Run.", "kind": "dailies", "goal": 1,
+		"flux": 60},
+	{"id": "ritual", "name": "Ritual", "text": "Fly the Daily Run 3 days in a row.", "kind": "streak", "goal": 3,
+		"flux": 250},
+	{"id": "luminary", "name": "Luminary", "text": "Score 100,000 in one run.", "kind": "score", "goal": 100000,
+		"flux": 250},
+	{"id": "afterdark", "name": "Into the Afterdark", "text": "Survive 3:00 past the dawn.", "kind": "afterdark",
+		"goal": 180, "flux": 300},
+	{"id": "nightmare", "name": "Nightmare", "text": "Defeat 4 bosses in one run.", "kind": "bosses", "goal": 4,
+		"flux": 400},
 ]
+
+
+## Mutators: rule twists. The Daily Run rolls one boon and two banes; each bane
+## adds to the score multiplier. Applied inside Sim from `loadout.mods`.
+const MUTATORS := {
+	"volatile": {"name": "Volatile", "boon": true, "score": 0.0, "color": Color(1.0, 0.55, 0.2),
+		"text": "One in four enemies detonates when it dies, scorching its neighbours."},
+	"lucky": {"name": "Lucky Star", "boon": true, "score": 0.0, "color": Color(1.0, 0.85, 0.35),
+		"text": "+15% critical chance. Prism Caches pay double Flux."},
+	"overcharged": {"name": "Overcharged", "boon": true, "score": 0.0, "color": Color(0.35, 0.95, 1.0),
+		"text": "Overdrive charges twice as fast."},
+	"gravity": {"name": "Gravity", "boon": true, "score": 0.0, "color": Color(0.45, 0.8, 1.0),
+		"text": "Pickup range is tripled."},
+	"gilded": {"name": "Gilded", "boon": true, "score": 0.0, "color": Color(1.0, 0.75, 0.3),
+		"text": "Elites hunt you from the first minute, every 35 seconds."},
+	"glass": {"name": "Glass Heart", "boon": false, "score": 0.3, "color": Color(1.0, 0.35, 0.5),
+		"text": "Half max HP. You deal +40% damage."},
+	"horde": {"name": "Horde", "boon": false, "score": 0.25, "color": Color(1.0, 0.3, 0.65),
+		"text": "Twice the swarm. Each enemy is a third frailer."},
+	"frenzy": {"name": "Frenzy", "boon": false, "score": 0.25, "color": Color(1.0, 0.3, 0.3),
+		"text": "The swarm moves 20% faster."},
+	"giants": {"name": "Giants", "boon": false, "score": 0.3, "color": Color(0.4, 1.0, 0.5),
+		"text": "Enemies are larger with double HP, and drop double experience."},
+	"bloodlight": {"name": "Bloodlight", "boon": false, "score": 0.2, "color": Color(0.9, 0.15, 0.3),
+		"text": "Hearts never drop and Renewal is gone. Every kill restores 0.25 HP."},
+	"dusk": {"name": "Short Night", "boon": false, "score": 0.35, "color": Color(0.75, 0.45, 1.0),
+		"text": "The night runs a quarter faster: the bosses arrive at 3:00 and 6:00."},
+}
+const BOONS := ["volatile", "lucky", "overcharged", "gravity", "gilded"]
+const BANES := ["glass", "horde", "frenzy", "giants", "bloodlight", "dusk"]
+
+## Afterdark: after the dawn you may fly on. Bosses return stronger.
+const NIGHT_BOSS_EVERY := 90
+const NIGHT_BOSS_GROWTH := 0.75
 
 
 ## The mission that unlocks a ship, or {} for ships you start with.

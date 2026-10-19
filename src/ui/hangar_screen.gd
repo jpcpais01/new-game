@@ -144,6 +144,13 @@ func _show(i: int, dir: int) -> void:
 	for c in _info.get_children():
 		c.queue_free()
 	if unlocked:
+		var rec: Dictionary = (Save.data.ship_best as Dictionary).get(sd.id, {})
+		if not rec.is_empty():
+			var line := "BEST  %s   ·   SCORE  %s" % [UiKit.fmt_time(float(rec.time)), UiKit.fmt_int(int(rec.score))]
+			if bool(rec.get("dawn", false)):
+				line += "   ·   DAWN ✓"
+			_info.add_child(UiKit.label(line, 28, UiKit.GOLD if bool(rec.get("dawn", false)) else UiKit.DIM,
+					UiKit.display_light()))
 		var w: String = sd.weapon
 		_info.add_child(_section("STARTS WITH", w, String(Defs.WEAPONS[w].name),
 				String(Defs.WEAPONS[w].blurb), Defs.WEAPONS[w].color))

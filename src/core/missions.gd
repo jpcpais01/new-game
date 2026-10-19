@@ -29,10 +29,10 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = 1 if run != null and run.warden_down else 0
 		"win":
 			v = int(data.get("wins", 0))
-			if run != null and run.state == Sim.WON:
+			if run != null and run.dawn:
 				v = maxi(v, 1)
 		"win_nyx":
-			v = 1 if run != null and run.state == Sim.WON and run.ship_id == "nyx" else 0
+			v = 1 if run != null and run.dawn and run.ship_id == "nyx" else 0
 		"evolutions":
 			if run != null:
 				v = run.evolutions
@@ -46,6 +46,20 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = run.od_uses if run != null else 0
 		"caches":
 			v = run.caches_opened if run != null else 0
+		"dailies":
+			v = int(data.get("daily_runs", 0))
+		"streak":
+			v = int(data.get("daily_streak_best", 0))
+		"score":
+			v = int(data.get("best_score", 0))
+			if run != null:
+				v = maxi(v, run.score())
+		"afterdark":
+			v = int(data.get("best_afterdark", 0))
+			if run != null:
+				v = maxi(v, run.afterdark_seconds())
+		"bosses":
+			v = run.bosses_killed if run != null else 0
 		"untouched":
 			if run != null:
 				var clean := run.tick if run.first_hurt < 0 else run.first_hurt

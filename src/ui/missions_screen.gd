@@ -96,7 +96,7 @@ static func progress_bar(m: Dictionary, value: int, col: Color) -> Control:
 	var bar := ProgressBarView.new()
 	bar.value = value
 	bar.goal = int(m.goal)
-	bar.clock = String(m.kind) == "time" or String(m.kind) == "untouched"
+	bar.clock = String(m.kind) in ["time", "untouched", "afterdark"]
 	bar.color = col
 	bar.custom_minimum_size = Vector2(0, 40)
 	return bar

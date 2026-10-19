@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 3
+const RULES_VERSION := 4
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -54,6 +54,7 @@ const EV_IMPLODE := 25    # x, y, r (a singularity detonates)
 const EV_OVERDRIVE := 26  # ship id, x, y
 const EV_OD_READY := 27
 const EV_AEGIS := 28      # x, y, r (shield pulse)
+const EV_NIGHT := 29      # night number (a run pushes on into the Afterdark)
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -134,6 +135,17 @@ var curse := 1.0             # enemy HP multiplier (Nyx)
 var caches_opened := 0
 var warden_down := false
 var first_hurt := -1         # tick of the first damage taken, -1 if none
+var elite_kills := 0
+
+# --- mutators and the Afterdark --------------------------------------------------
+var mods := {}               # mutator id -> true (from loadout.mods)
+var sched_scale := 1.0       # Short Night runs the schedule faster
+var dawn := false            # the Eclipse fell: the run counts as a win
+var dawn_tick := -1
+var endless := false         # flying on into the Afterdark
+var night := 0               # Afterdark bosses summoned so far
+var night_next := 0          # tick of the next Afterdark boss
+var boss_mult := 1.0         # HP multiplier for bosses (grows each night)
 var _arc_cd := 0
 var _in_arc := false
 
@@ -231,6 +243,13 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 	ship_stats = sd.stats
 	if ship_id == "nyx":
 		curse = 1.4
+	for id in loadout.get("mods", []):
+		if Defs.MUTATORS.has(id):
+			mods[id] = true
+	if mods.has("dusk"):
+		sched_scale = 0.75
+	if mods.has("gilded"):
+		elite_next = 60 * TPS
 	revives = int(loadout.get("revive", 0))
 	rerolls = int(loadout.get("reroll", 0)) + int(ship_stats.get("reroll", 0))
 	weapons.append({"id": sd.weapon, "lvl": int(ship_stats.get("wlvl", 1)), "t": 20, "k": 0, "a": 0})
@@ -319,6 +338,20 @@ func choose(k: int) -> void:
 		state = RUNNING
 
 
+## After the dawn: keep flying into the Afterdark. The run stays a win; the
+## swarm keeps growing and the bosses return, stronger every night.
+func continue_night() -> void:
+	if state != WON or endless:
+		return
+	events.clear()
+	log_actions.append(tick)
+	log_actions.append(8)
+	endless = true
+	state = RUNNING
+	night_next = tick + 20 * TPS
+	events.append([EV_WAVE, "AFTERDARK"])
+
+
 func reroll() -> void:
 	if state != CHOOSING or rerolls <= 0:
 		return
@@ -381,12 +414,29 @@ func boss_index() -> int:
 
 func flux_earned() -> int:
 	var base := kills / 6 + tick / (TPS * 3) + (level - 1) * 4 + bosses_killed * 80 + flux_bonus
-	if state == WON:
+	if dawn:
 		base += 300
 	var mult := 1.0 + 0.12 * float(loadout.get("greed", 0))
 	if ship_id == "nyx":
 		mult *= 1.5
 	return int(float(base) * mult)
+
+
+## The run's score: what the Daily Run ranks by. Banes multiply it.
+func score() -> int:
+	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50
+	if dawn:
+		base += 10000
+	return int(float(base) * score_mult())
+
+
+func score_mult() -> float:
+	return Daily.multiplier(mods.keys())
+
+
+## Seconds survived past the dawn (0 before it).
+func afterdark_seconds() -> int:
+	return 0 if dawn_tick < 0 else (tick - dawn_tick) / TPS
 
 
 func checksum() -> int:
@@ -432,6 +482,12 @@ static func from_replay(data: Dictionary, upto_tick: int = -1) -> Sim:
 			else:
 				s.choose(act)
 			continue
+		if s.state == WON:
+			if ai + 1 < actions.size() and int(actions[ai + 1]) == 8:
+				ai += 2
+				s.continue_night()
+				continue
+			break
 		if s.state != RUNNING:
 			break
 		if left <= 0:
@@ -508,28 +564,47 @@ func _move_player(ix: int, iy: int) -> void:
 func _director() -> void:
 	var t := seconds()
 	var tm := t / 60.0
-	while sched_i < SCHEDULE.size() and tick >= int(SCHEDULE[sched_i][0]) * TPS:
+	while sched_i < SCHEDULE.size() and tick >= int(float(SCHEDULE[sched_i][0]) * sched_scale) * TPS:
 		_scheduled(SCHEDULE[sched_i])
 		sched_i += 1
+	if endless and tick >= night_next and boss_index() < 0:
+		_night_boss()
 	var rate := 1.7 + 1.3 * tm + 0.16 * tm * tm
+	if mods.has("horde"):
+		rate *= 2.0
 	if boss_index() >= 0:
 		rate *= 0.55
 	if tick < surge_until:
 		rate *= 1.8
 	if tick >= elite_next:
-		elite_next = tick + (55 + rng.range_i(25)) * TPS
+		elite_next = tick + ((35 + rng.range_i(15)) if mods.has("gilded") else (55 + rng.range_i(25))) * TPS
 		if boss_index() < 0:
 			var kinds := [Defs.DRIFTER, Defs.DART, Defs.WEAVER, Defs.SPLITTER, Defs.SPITTER, Defs.BRUTE]
 			var type: int = kinds[rng.range_i(mini(kinds.size(), 2 + int(tm)))]
 			var a := rng.range_i(Trig.STEPS)
 			_spawn_at_safe(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0, true, 70)
 			events.append([EV_ELITE, type])
-	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0))
+	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0) + (60 if mods.has("horde") else 0))
 	if en < cap:
 		spawn_acc += rate * DT
 	while spawn_acc >= 1.0:
 		spawn_acc -= 1.0
 		_spawn_random(tm)
+
+
+## The Afterdark: every night a boss returns, alternating Warden and Eclipse,
+## each one tougher than the last.
+func _night_boss() -> void:
+	night += 1
+	night_next = tick + Defs.NIGHT_BOSS_EVERY * TPS
+	boss_mult = 1.0 + Defs.NIGHT_BOSS_GROWTH * float(night)
+	var type := Defs.WARDEN if (night & 1) == 1 else Defs.ECLIPSE
+	var a := rng.range_i(Trig.STEPS)
+	_spawn_at_safe(type, px + Trig.cos_i(a) * 620.0, py + Trig.sin_i(a) * 620.0, false, 150)
+	events.append([EV_NIGHT, night])
+	events.append([EV_BOSS, type])
+	# The swarm surges with them.
+	surge_until = tick + 20 * TPS
 
 
 func _spawn_random(tm: float) -> void:
@@ -612,9 +687,16 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	var spm := 1.0 + minf(0.3, 0.04 * tm)
 	var dmm := 1.0 + 0.14 * tm
 	if type >= Defs.WARDEN:
-		hpm = 1.0
+		hpm = boss_mult
 		spm = 1.0
-		dmm = 1.0
+		dmm = 1.0 + 0.15 * float(night)
+	else:
+		if mods.has("horde"):
+			hpm *= 0.67
+		if mods.has("giants"):
+			hpm *= 2.0
+		if mods.has("frenzy"):
+			spm *= 1.2
 	var i := en
 	en += 1
 	e_type[i] = type
@@ -626,6 +708,8 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	e_vy[i] = 0.0
 	var hpv: float = def.hp * hpm * curse
 	var r: float = def.r
+	if mods.has("giants") and type < Defs.WARDEN:
+		r *= 1.3
 	var dmg: float = def.dmg * dmm
 	var kb: float = def.kb
 	if elite:
@@ -1645,15 +1729,26 @@ func _on_death(i: int) -> void:
 		events.append([EV_KILL, x, y, type, false, e_r[i]])
 		return
 	kills += 1
+	if elite:
+		elite_kills += 1
 	events.append([EV_KILL, x, y, type, elite, e_r[i]])
+	if mods.has("bloodlight"):
+		hp = minf(max_hp, hp + 0.25)
+	if mods.has("volatile") and type < Defs.WARDEN and rng.unit() < 0.25:
+		_blasts.append([x, y, 95.0, 16.0 * _od_scale()])
 	if od_t <= 0:
 		var was_ready := od >= od_need
-		od = minf(od_need, od + (40.0 if type >= Defs.WARDEN else (12.0 if elite else 1.0)))
+		var gain := 40.0 if type >= Defs.WARDEN else (12.0 if elite else 1.0)
+		if mods.has("overcharged"):
+			gain *= 2.0
+		od = minf(od_need, od + gain)
 		if not was_ready and od >= od_need:
 			events.append([EV_OD_READY])
 	var xpv: int = Defs.ENEMY[type].xp
 	if elite:
 		xpv = xpv * 8 + 10
+	if mods.has("giants"):
+		xpv *= 2
 	if xpv > 0:
 		_drop_gem(x, y, float(xpv))
 	match type:
@@ -1676,14 +1771,24 @@ func _on_death(i: int) -> void:
 		Defs.ECLIPSE:
 			bosses_killed += 1
 			events.append([EV_BOSS_DOWN, type, x, y])
-			state = WON
-			events.append([EV_WIN])
+			if endless:
+				_drop_pickup("bigchest", x, y)
+				_drop_pickup("heart", x - 70.0, y)
+				for k in 16:
+					var a3 := k * Trig.STEPS / 16
+					_drop_gem(x + Trig.cos_i(a3) * 110.0, y + Trig.sin_i(a3) * 110.0, 14.0)
+			else:
+				dawn = true
+				dawn_tick = tick
+				state = WON
+				events.append([EV_WIN])
 	if elite:
 		_drop_pickup("chest", x, y)
 	elif type < Defs.WARDEN:
 		var roll := rng.unit()
 		if roll < 0.004:
-			_drop_pickup("heart", x, y)
+			if not mods.has("bloodlight"):
+				_drop_pickup("heart", x, y)
 		elif roll < 0.0055:
 			_drop_pickup("magnet", x, y)
 
@@ -1824,6 +1929,8 @@ func _open_chest(big: bool, x: float, y: float) -> void:
 		hp = minf(max_hp, hp + max_hp * 0.5)
 		rewards.append(["heal", 0])
 	var fl := 30 if big else 10
+	if mods.has("lucky"):
+		fl *= 2
 	flux_bonus += fl
 	rewards.append(["flux", fl])
 	events.append([EV_CHEST, rewards, big, x, y])
@@ -1849,6 +1956,8 @@ func _roll_choices() -> Array:
 			pool.append(id)
 			wts.append(2.2)
 	for id in Defs.PASSIVE_ORDER:
+		if id == "renewal" and mods.has("bloodlight"):
+			continue
 		var l := int(passives.get(id, 0))
 		if l > 0 and l < Defs.MAX_LEVEL:
 			pool.append(id)
@@ -1909,16 +2018,24 @@ func _recompute() -> void:
 	var fl := func(f: String) -> float: return float(loadout.get(f, 0))
 	var sh := func(k: String, d: float) -> float: return float(ship_stats.get(k, d))
 	var new_max: float = 100.0 + sh.call("hp", 0.0) + 20.0 * lv.call("vitality") + 12.0 * fl.call("hull")
+	if mods.has("glass"):
+		new_max *= 0.5
 	if new_max > max_hp:
 		hp += new_max - max_hp
 	max_hp = new_max
 	hp = minf(hp, max_hp)
 	st_speed = 300.0 * sh.call("speed", 1.0) * (1.0 + 0.08 * lv.call("thrusters") + 0.04 * fl.call("engine"))
 	st_magnet = 125.0 * (1.0 + sh.call("magnet", 0.0) + 0.35 * lv.call("magnet") + 0.12 * fl.call("magnet"))
+	if mods.has("gravity"):
+		st_magnet *= 3.0
 	st_haste = 1.0 - 0.08 * lv.call("overclock")
 	st_might = 1.0 + sh.call("might", 0.0) + 0.12 * lv.call("amplifier") + 0.06 * fl.call("power")
+	if mods.has("glass"):
+		st_might += 0.4
 	st_area = 1.0 + 0.12 * lv.call("lens")
 	st_armor = sh.call("armor", 0.0) + 2.0 * lv.call("plating")
 	st_crit = 0.05 + sh.call("crit", 0.0) + 0.07 * lv.call("fortune")
+	if mods.has("lucky"):
+		st_crit += 0.15
 	st_xp = 1.0 + sh.call("xp", 0.0) + 0.12 * lv.call("scholar")
 	st_regen = 0.4 * lv.call("renewal")

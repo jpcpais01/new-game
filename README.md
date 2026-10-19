@@ -8,7 +8,10 @@ system, and a cache evolves it into one of six evolved forms. Pick one of seven
 ships in the Hangar, each with its own starting weapon, quirk and an
 Overdrive you charge with kills and unleash with a tap. Missions unlock new
 ships and pay Flux, and every run earns Flux for permanent upgrades in the
-Forge. Built with
+Forge. The Daily Run gives every pilot the same seeded run each day (fixed ship,
+one boon and two bane mutators, no Forge) with a bounty and a streak, and after
+the dawn you can fly on into the Afterdark, where the bosses return stronger
+every night and everything counts towards your score. Built with
 Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
@@ -19,12 +22,12 @@ publishes a new release automatically.
 
 | Path | What lives there |
 | --- | --- |
-| `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions), `missions.gd` (mission progress), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). |
+| `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions), `missions.gd` (mission progress), `daily.gd` (the day's seed, ship and mutators), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). |
 | `src/view/` | Drawing only: `arena.gd` (runs the sim in real time, camera, shake, slow-mo, events → effects/sound), `entities.gd`, `fx.gd` (particles, rings, beams, lightning, damage numbers), `background.gdshader` (warping grid). |
-| `src/ui/` | Screens: title (live autopilot demo behind it), game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Forge, settings. |
+| `src/ui/` | Screens: title (live autopilot demo behind it), game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex, Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |
 | `assets/` | Generated sprites/icons/audio (see `tools/`) and fonts (Orbitron, Rajdhani; OFL). |
-| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `shots.tscn` (screenshots). |
+| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `daily_probe.gd` (bot plays Daily Runs), `shots.tscn` (screenshots). |
 
 ```sh
 godot --headless --path . --import

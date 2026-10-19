@@ -75,8 +75,32 @@ func start_run() -> void:
 	_switch(func():
 		var g := GameScreen.new()
 		g.main = self
-		g.ready.connect(func(): g.begin(fresh_seed()), CONNECT_ONE_SHOT)
+		g.ready.connect(func(): g.begin(fresh_seed(), Save.loadout()), CONNECT_ONE_SHOT)
 		return g)
+
+
+## Today's Daily Run: the same seed, ship and mutators for everyone, no Forge.
+func start_daily() -> void:
+	var d := Daily.for_day(Save.today())
+	_switch(func():
+		var g := GameScreen.new()
+		g.main = self
+		g.ready.connect(func(): g.begin(int(d.seed), d.loadout), CONNECT_ONE_SHOT)
+		return g)
+
+
+func go_daily() -> void:
+	_switch(func():
+		var d := DailyScreen.new()
+		d.main = self
+		return d)
+
+
+func go_codex() -> void:
+	_switch(func():
+		var c := CodexScreen.new()
+		c.main = self
+		return c)
 
 
 func go_forge() -> void:

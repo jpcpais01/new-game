@@ -13,6 +13,14 @@ func build() -> void:
 	var info := UiKit.label("%s   ·   LV %d   ·   %s KILLS" % [UiKit.fmt_time(sim.seconds()), sim.level,
 			UiKit.fmt_int(sim.kills)], 32, UiKit.DIM, UiKit.display_light())
 	body.add_child(info)
+	body.add_child(UiKit.label("SCORE  %s" % UiKit.fmt_int(sim.score()), 30, Color.WHITE, UiKit.display()))
+	for id in sim.loadout.get("mods", []):
+		var m: Dictionary = Defs.MUTATORS[id]
+		var ml := UiKit.label("%s %s  ·  %s" % ["+" if m.boon else "-", String(m.name).to_upper(), m.text], 24,
+				m.color, UiKit.body())
+		ml.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ml.custom_minimum_size = Vector2(760, 0)
+		body.add_child(ml)
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 20)

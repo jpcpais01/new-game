@@ -359,6 +359,53 @@ OD_ICONS = {
 }
 
 
+def heart(steps=36, s=1.0 / 17.0):
+    pts = []
+    for t in np.linspace(0, 2 * math.pi, steps, endpoint=False):
+        x = 16 * math.sin(t) ** 3
+        y = -(13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t))
+        pts.append((x * s, y * s + 0.08))
+    return pts
+
+
+def drop(steps=30):
+    pts = [(0.0, -0.95)]
+    for a in np.linspace(-0.25 * math.pi, 1.25 * math.pi, steps):
+        pts.append((0.6 * math.cos(a), 0.3 + 0.6 * math.sin(a)))
+    return pts
+
+
+def tri_at(cx, cy, r, rot=-math.pi / 2):
+    return [(cx + x, cy + y) for x, y in regular(3, r, rot)]
+
+
+# Mutators (Daily Run rule twists) and the daily sun.
+MOD_ICONS = {
+    "volatile": ([star(10, 0.95, 0.55), regular(20, 0.25)], [], (1.0, 0.55, 0.2)),
+    "lucky": ([star(5, 0.95, 0.4, -math.pi / 2)], [], (1.0, 0.85, 0.35)),
+    "overcharged": ([[(0.15, -0.95), (-0.5, 0.1), (-0.02, 0.1), (-0.2, 0.95), (0.55, -0.15), (0.05, -0.15),
+                      (0.35, -0.95)]], [], (0.35, 0.95, 1.0)),
+    "gravity": ([regular(24, 0.26)], spiral(3, 0.42, 0.98, -0.35), (0.45, 0.8, 1.0)),
+    "gilded": ([[(-0.85, 0.55), (-0.85, -0.35), (-0.42, 0.05), (0.0, -0.7), (0.42, 0.05), (0.85, -0.35),
+                 (0.85, 0.55)]], [[(-0.6, 0.78), (0.6, 0.78)]], (1.0, 0.75, 0.3)),
+    "glass": ([heart()], [[(0.05, -0.5), (-0.12, -0.1), (0.12, 0.15), (-0.04, 0.55)]], (1.0, 0.35, 0.5)),
+    "horde": ([tri_at(0.0, -0.45, 0.42), tri_at(-0.5, 0.4, 0.42), tri_at(0.5, 0.4, 0.42)], [], (1.0, 0.3, 0.65)),
+    "frenzy": ([], [[(-0.75, -0.7), (-0.05, 0.0), (-0.75, 0.7)], [(0.0, -0.7), (0.7, 0.0), (0.0, 0.7)]],
+               (1.0, 0.3, 0.3)),
+    "giants": ([regular(6, 0.95, math.pi / 6), regular(6, 0.36, math.pi / 6)], [], (0.4, 1.0, 0.5)),
+    "bloodlight": ([drop()], [[(0.18, 0.05), (0.32, 0.35)]], (0.9, 0.15, 0.3)),
+    "dusk": ([crescent(0.95, 0.72, 0.4)], [], (0.75, 0.45, 1.0)),
+}
+
+
+def mod_icons():
+    for name, (shapes, lines, col) in MOD_ICONS.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
+             "i_mod_" + name)
+    save(neon([regular(28, 0.5)], (1.0, 0.82, 0.35), size=96, radius=34, line=3.8, glow=8.0, fill=0.45,
+              lines=rays(12, 0.66, 0.98), core_white=0.75), "i_daily")
+
+
 def ship_sprites():
     for name, (shapes, lines, col) in SHIPS.items():
         save(neon(shapes, col, radius=40, line=4.0, glow=10, fill=0.35, core_white=0.75, lines=lines),
@@ -416,10 +463,16 @@ def app_icon():
 
 
 if __name__ == "__main__":
+    import sys
+    if "--mods" in sys.argv:
+        mod_icons()
+        print("mutator icons ok")
+        sys.exit(0)
     enemy_sprites()
     fx_sprites()
     player_sprites()
     icons()
     ship_sprites()
+    mod_icons()
     app_icon()
     print("art ok")

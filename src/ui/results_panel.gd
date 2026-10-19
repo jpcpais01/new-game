@@ -14,19 +14,27 @@ var beat := {}
 var _flux_label: Label
 var _flux_shown := 0.0
 var _flux_target := 0
+var _score_label: Label
+var _score_shown := 0.0
+var _score_target := 0
 
 
 func build() -> void:
 	accent = UiKit.GOLD if won else UiKit.MAGENTA
-	var t := heading("DAWN REACHED" if won else "SIGNAL LOST", UiKit.GOLD if won else UiKit.RED, 76)
+	var night := won and sim.endless
+	var t := heading("BEYOND THE DAWN" if night else ("DAWN REACHED" if won else "SIGNAL LOST"),
+			UiKit.MAGENTA if night else (UiKit.GOLD if won else UiKit.RED), 70 if night else 76)
 	t.pivot_offset = Vector2(386, 50)
 	t.scale = Vector2(1.5, 1.5)
 	create_tween().tween_property(t, "scale", Vector2.ONE, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	var sub := "You outlasted the Eclipse." if won else "The swarm took you. The light remembers."
+	if night:
+		sub = "You held the Afterdark for %s through %d night%s." % [
+				UiKit.fmt_time(float(sim.afterdark_seconds())), sim.night, "" if sim.night == 1 else "s"]
 	body.add_child(UiKit.label(sub, 34, UiKit.DIM))
 	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 30)
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 22)
 	_stat(grid, "SURVIVED", UiKit.fmt_time(sim.seconds()), beat.has("time"), 0)
 	_stat(grid, "LEVEL", str(sim.level), beat.has("level"), 1)
@@ -35,6 +43,7 @@ func build() -> void:
 	var cc := CenterContainer.new()
 	cc.add_child(grid)
 	body.add_child(cc)
+	_score_box()
 	_evolutions()
 	_missions()
 	var flux_box := PanelContainer.new()
@@ -68,6 +77,58 @@ func build() -> void:
 	h.pressed.connect(func(): home.emit())
 	row.add_child(h)
 	body.add_child(row)
+
+
+## The score, counting up, with the Daily Run's standing under it.
+func _score_box() -> void:
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 0)
+	var head := "SCORE"
+	if sim.score_mult() > 1.001:
+		head += "  ·  x%.2f" % sim.score_mult()
+	v.add_child(UiKit.label(head, 26, UiKit.DIM, UiKit.display_light()))
+	_score_label = UiKit.glow_label("0", 78, Color.WHITE)
+	v.add_child(_score_label)
+	_score_target = sim.score()
+	var daily := sim.loadout.has("daily")
+	var tag := ""
+	if beat.has("score"):
+		tag = "NEW BEST SCORE"
+	elif daily and (beat.has("daily_best") or beat.has("bounty")):
+		tag = "TODAY'S BEST"
+	elif beat.has("ship_score"):
+		tag = "BEST WITH " + String(Defs.ship(sim.ship_id).name).to_upper()
+	if tag != "":
+		var r := UiKit.label(tag, 26, UiKit.GOLD, UiKit.display())
+		v.add_child(r)
+		var tw := r.create_tween().set_loops()
+		tw.tween_property(r, "modulate:a", 0.4, 0.5)
+		tw.tween_property(r, "modulate:a", 1.0, 0.5)
+	body.add_child(v)
+	UiKit.pop_in(v, 0.55, 20)
+	if not daily:
+		return
+	var day := int(sim.loadout.daily)
+	var e: Dictionary = Save.daily_entry(day)
+	var p := PanelContainer.new()
+	var sb := UiKit.box(UiKit.MAGENTA, Color(0.1, 0.02, 0.09, 0.6), 22, 2, 10)
+	sb.content_margin_left = 22
+	sb.content_margin_right = 22
+	sb.content_margin_top = 12
+	sb.content_margin_bottom = 12
+	p.add_theme_stylebox_override("panel", sb)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	p.add_child(col)
+	col.add_child(UiKit.label("DAILY RUN  ·  %s  ·  TRY %d" % [Daily.label(day), int(e.get("tries", 1))], 26,
+			UiKit.MAGENTA.lerp(Color.WHITE, 0.3), UiKit.display()))
+	col.add_child(UiKit.label("TODAY'S BEST  %s   ·   STREAK %d" % [UiKit.fmt_int(int(e.get("score", 0))),
+			int(Save.data.daily_streak)], 26, UiKit.DIM, UiKit.display_light()))
+	if beat.has("bounty"):
+		col.add_child(UiKit.label("DAILY BOUNTY  +◆ %s" % UiKit.fmt_int(int(beat.bounty)), 30, UiKit.GOLD,
+				UiKit.display()))
+	body.add_child(p)
+	UiKit.pop_in(p, 0.7, 20)
 
 
 ## Evolved weapons this run; first-time discoveries are marked NEW.
@@ -119,7 +180,11 @@ func _missions() -> void:
 	body.add_child(box)
 	for k in mini(shown, 3):
 		get_tree().create_timer(0.8 + 0.25 * k).timeout.connect(func(): Sfx.play("mission", 1.0 + 0.06 * k))
-	for sid in beat.get("ships", []):
+	var new_ships: Array = beat.get("ships", [])
+	if new_ships.size() > 1:
+		_ship_row(new_ships)
+		return
+	for sid in new_ships:
 		var sd := Defs.ship(String(sid))
 		var p := PanelContainer.new()
 		var sb := UiKit.box(sd.color, Color(sd.color, 0.12), 24, 3, 18)
@@ -146,15 +211,36 @@ func _missions() -> void:
 		tw.tween_property(p, "modulate", Color.WHITE, 0.7)
 
 
+## Several ships at once: one panel with a row of silhouettes.
+func _ship_row(ids: Array) -> void:
+	var p := PanelContainer.new()
+	var sb := UiKit.box(UiKit.CYAN, Color(UiKit.CYAN, 0.1), 24, 3, 18)
+	sb.content_margin_top = 12
+	sb.content_margin_bottom = 12
+	p.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	p.add_child(v)
+	v.add_child(UiKit.glow_label("%d NEW SHIPS UNLOCKED" % ids.size(), 34, UiKit.CYAN))
+	var h := HBoxContainer.new()
+	h.alignment = BoxContainer.ALIGNMENT_CENTER
+	h.add_theme_constant_override("separation", 22)
+	v.add_child(h)
+	for sid in ids:
+		h.add_child(UiKit.icon_rect("ship_" + String(sid), 86))
+	body.add_child(p)
+	UiKit.pop_in(p, 1.4, 0)
+
+
 func _stat(grid: GridContainer, name: String, value: String, record: bool, k: int) -> void:
 	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(360, 0)
+	box.custom_minimum_size = Vector2(180, 0)
 	box.add_theme_constant_override("separation", 0)
-	box.add_child(UiKit.label(name, 26, UiKit.DIM, UiKit.display_light()))
-	var v := UiKit.glow_label(value, 58, Color.WHITE)
+	box.add_child(UiKit.label(name, 22, UiKit.DIM, UiKit.display_light()))
+	var v := UiKit.glow_label(value, 46, Color.WHITE)
 	box.add_child(v)
 	if record:
-		var r := UiKit.label("NEW BEST", 24, UiKit.GOLD, UiKit.display())
+		var r := UiKit.label("NEW BEST", 20, UiKit.GOLD, UiKit.display())
 		box.add_child(r)
 		var tw := r.create_tween().set_loops()
 		tw.tween_property(r, "modulate:a", 0.4, 0.5)
@@ -164,6 +250,9 @@ func _stat(grid: GridContainer, name: String, value: String, record: bool, k: in
 
 
 func _process(delta: float) -> void:
+	if _score_label != null and _score_shown < float(_score_target):
+		_score_shown = minf(float(_score_target), _score_shown + maxf(50.0, float(_score_target) * 0.8) * delta)
+		_score_label.text = UiKit.fmt_int(int(_score_shown))
 	if _flux_label == null:
 		return
 	if _flux_shown < float(_flux_target):
