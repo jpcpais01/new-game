@@ -27,6 +27,12 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = int(data.get("total_kills", 0))
 		"warden":
 			v = 1 if run != null and run.warden_down else 0
+		"seraph":
+			v = 1 if run != null and run.seraph_down else 0
+		"chain":
+			v = int(data.get("best_chain", 0))
+			if run != null:
+				v = maxi(v, run.chain_best)
 		"win":
 			v = int(data.get("wins", 0))
 			if run != null and run.dawn:

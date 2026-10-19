@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 4
+const RULES_VERSION := 5
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -22,6 +22,11 @@ const WELL_TICKS := 80
 const CELL := 100.0
 const GRID_N := 32
 const GRID_HALF := 1600.0
+const SENTINEL_LEN := 950.0
+const SENTINEL_W := 12.0
+const SERAPH_ARM := 780.0
+const SERAPH_LANCE := 1300.0
+const BASTION_R := 230.0
 
 enum { RUNNING, CHOOSING, DEAD, WON }
 
@@ -55,6 +60,10 @@ const EV_OVERDRIVE := 26  # ship id, x, y
 const EV_OD_READY := 27
 const EV_AEGIS := 28      # x, y, r (shield pulse)
 const EV_NIGHT := 29      # night number (a run pushes on into the Afterdark)
+const EV_LASER := 30      # x, y, angle, length, half width, phase (0 charging, 1 firing), type
+const EV_BLINK := 31      # x0, y0, x1, y1, type, phase (0 marked, 1 arrived)
+const EV_CHAIN := 32      # chain, tier name (a Chain milestone)
+const EV_CHAIN_LOST := 33 # chain, broken by a hit
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -62,11 +71,12 @@ const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was press
 const SCHEDULE := [
 	[70, "ring", Defs.DRIFTER, 14],
 	[120, "elite", Defs.BRUTE, 1],
+	[150, "ring", Defs.PHANTOM, 8],
 	[175, "squad", Defs.DART, 10],
+	[205, "grid", Defs.SENTINEL, 5],
 	[240, "boss", Defs.WARDEN, 1],
 	[315, "ring", Defs.WEAVER, 18],
-	[360, "elite", Defs.SPLITTER, 1],
-	[362, "elite", Defs.SPITTER, 1],
+	[360, "boss", Defs.SERAPH, 1],
 	[420, "surge", 0, 0],
 	[425, "ring", Defs.BOMBER, 12],
 	[480, "boss", Defs.ECLIPSE, 1],
@@ -149,6 +159,14 @@ var boss_mult := 1.0         # HP multiplier for bosses (grows each night)
 var _arc_cd := 0
 var _in_arc := false
 
+# --- the Chain ---------------------------------------------------------------------
+var chain := 0               # kills in a row (taking damage breaks it)
+var chain_t := 0             # ticks before the Chain fades
+var chain_best := 0
+var chain_score := 0         # score earned on top by the Chain multiplier
+var seraph_down := false
+var _shielded := false       # any enemy currently under a Bastion's aegis
+
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
 var sched_i := 0
@@ -180,6 +198,9 @@ var e_spawn := PackedInt32Array()
 var e_hitcd := PackedInt32Array()
 var e_elite := PackedInt32Array()
 var e_uid := PackedInt32Array()
+var e_ax := PackedFloat64Array()   # a point an enemy is heading for (blinks)
+var e_ay := PackedFloat64Array()
+var e_shd := PackedInt32Array()    # 1 while inside a Bastion's aegis
 
 # --- player projectiles ---------------------------------------------------------
 var bn := 0
@@ -263,7 +284,7 @@ func _alloc() -> void:
 	e_vx.resize(MAX_E); e_vy.resize(MAX_E); e_hp.resize(MAX_E); e_maxhp.resize(MAX_E); e_r.resize(MAX_E)
 	e_speed.resize(MAX_E); e_dmg.resize(MAX_E); e_kb.resize(MAX_E); e_t.resize(MAX_E); e_state.resize(MAX_E)
 	e_k.resize(MAX_E); e_ang.resize(MAX_E); e_flash.resize(MAX_E); e_spawn.resize(MAX_E); e_hitcd.resize(MAX_E)
-	e_elite.resize(MAX_E); e_uid.resize(MAX_E)
+	e_elite.resize(MAX_E); e_uid.resize(MAX_E); e_ax.resize(MAX_E); e_ay.resize(MAX_E); e_shd.resize(MAX_E)
 	b_x.resize(MAX_B); b_y.resize(MAX_B); b_ox.resize(MAX_B); b_oy.resize(MAX_B); b_vx.resize(MAX_B)
 	b_vy.resize(MAX_B); b_dmg.resize(MAX_B); b_r.resize(MAX_B); b_tx.resize(MAX_B); b_ty.resize(MAX_B)
 	b_blast.resize(MAX_B); b_life.resize(MAX_B); b_pierce.resize(MAX_B); b_kind.resize(MAX_B); b_last.resize(MAX_B)
@@ -304,6 +325,8 @@ func step(ix: int, iy: int, burst := false) -> void:
 	_update_enemies()
 	_grid_build()
 	_separate()
+	_aegis_aura()
+	_update_chain()
 	if burst and od_ready():
 		_overdrive()
 	_update_overdrive()
@@ -424,7 +447,7 @@ func flux_earned() -> int:
 
 ## The run's score: what the Daily Run ranks by. Banes multiply it.
 func score() -> int:
-	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50
+	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50 + chain_score
 	if dawn:
 		base += 10000
 	return int(float(base) * score_mult())
@@ -576,15 +599,18 @@ func _director() -> void:
 		rate *= 0.55
 	if tick < surge_until:
 		rate *= 1.8
+	if endless:
+		rate *= 1.0 + Defs.NIGHT_SWARM * float(night)
 	if tick >= elite_next:
 		elite_next = tick + ((35 + rng.range_i(15)) if mods.has("gilded") else (55 + rng.range_i(25))) * TPS
 		if boss_index() < 0:
-			var kinds := [Defs.DRIFTER, Defs.DART, Defs.WEAVER, Defs.SPLITTER, Defs.SPITTER, Defs.BRUTE]
+			var kinds := [Defs.DRIFTER, Defs.DART, Defs.WEAVER, Defs.SPLITTER, Defs.SPITTER, Defs.BRUTE,
+					Defs.SENTINEL, Defs.BASTION]
 			var type: int = kinds[rng.range_i(mini(kinds.size(), 2 + int(tm)))]
 			var a := rng.range_i(Trig.STEPS)
 			_spawn_at_safe(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0, true, 70)
 			events.append([EV_ELITE, type])
-	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0) + (60 if mods.has("horde") else 0))
+	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0) + (60 if mods.has("horde") else 0) + 25 * night)
 	if en < cap:
 		spawn_acc += rate * DT
 	while spawn_acc >= 1.0:
@@ -598,7 +624,7 @@ func _night_boss() -> void:
 	night += 1
 	night_next = tick + Defs.NIGHT_BOSS_EVERY * TPS
 	boss_mult = 1.0 + Defs.NIGHT_BOSS_GROWTH * float(night)
-	var type := Defs.WARDEN if (night & 1) == 1 else Defs.ECLIPSE
+	var type: int = Defs.NIGHT_BOSSES[(night - 1) % Defs.NIGHT_BOSSES.size()]
 	var a := rng.range_i(Trig.STEPS)
 	_spawn_at_safe(type, px + Trig.cos_i(a) * 620.0, py + Trig.sin_i(a) * 620.0, false, 150)
 	events.append([EV_NIGHT, night])
@@ -608,7 +634,7 @@ func _night_boss() -> void:
 
 
 func _spawn_random(tm: float) -> void:
-	var w := [10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+	var w := [10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 	if tm >= 0.6:
 		w[Defs.DART] = 3.5 + tm * 0.4
 	if tm >= 1.4:
@@ -621,6 +647,12 @@ func _spawn_random(tm: float) -> void:
 		w[Defs.BOMBER] = 2.4
 	if tm >= 4.5:
 		w[Defs.BRUTE] = 1.2 + (tm - 4.5) * 0.5
+	if tm >= 2.6:
+		w[Defs.PHANTOM] = 2.0
+	if tm >= 3.4:
+		w[Defs.SENTINEL] = 0.6 + minf(0.6, (tm - 3.4) * 0.2)
+	if tm >= 4.2:
+		w[Defs.BASTION] = 0.8 + minf(0.6, (tm - 4.2) * 0.2)
 	var total := 0.0
 	for v in w:
 		total += v
@@ -656,6 +688,15 @@ func _scheduled(ev: Array) -> void:
 				var off := (float(k) - float(count - 1) * 0.5) * 52.0
 				_spawn_at_safe(type, cx + Trig.cos_i(perp) * off, cy + Trig.sin_i(perp) * off, false, 40)
 			events.append([EV_WAVE, "DART SQUADRON"])
+		"grid":
+			# Sentinels in a ring around you, firing one after another like a clock.
+			var base := rng.range_i(Trig.STEPS)
+			for k in count:
+				var a := base + k * Trig.STEPS / count
+				var e := _spawn_at_safe(type, px + Trig.cos_i(a) * 520.0, py + Trig.sin_i(a) * 520.0, false, 60)
+				if e >= 0:
+					e_t[e] = 50 + k * 22
+			events.append([EV_WAVE, "LASER GRID"])
 		"elite":
 			var a := rng.range_i(Trig.STEPS)
 			_spawn_at_safe(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0, true, 70)
@@ -697,6 +738,8 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 			hpm *= 2.0
 		if mods.has("frenzy"):
 			spm *= 1.2
+		if endless:
+			hpm *= 1.0 + Defs.NIGHT_TOUGH * float(night)
 	var i := en
 	en += 1
 	e_type[i] = type
@@ -731,6 +774,9 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	e_spawn[i] = warm
 	e_hitcd[i] = 0
 	e_elite[i] = 1 if elite else 0
+	e_ax[i] = x
+	e_ay[i] = y
+	e_shd[i] = 0
 	e_uid[i] = uid_next
 	uid_next += 1
 	return i
@@ -743,7 +789,8 @@ func _e_remove(i: int) -> void:
 		e_vx[i] = e_vx[l]; e_vy[i] = e_vy[l]; e_hp[i] = e_hp[l]; e_maxhp[i] = e_maxhp[l]; e_r[i] = e_r[l]
 		e_speed[i] = e_speed[l]; e_dmg[i] = e_dmg[l]; e_kb[i] = e_kb[l]; e_t[i] = e_t[l]; e_state[i] = e_state[l]
 		e_k[i] = e_k[l]; e_ang[i] = e_ang[l]; e_flash[i] = e_flash[l]; e_spawn[i] = e_spawn[l]
-		e_hitcd[i] = e_hitcd[l]; e_elite[i] = e_elite[l]; e_uid[i] = e_uid[l]
+		e_hitcd[i] = e_hitcd[l]; e_elite[i] = e_elite[l]; e_uid[i] = e_uid[l]; e_ax[i] = e_ax[l]
+		e_ay[i] = e_ay[l]; e_shd[i] = e_shd[l]
 	en = l
 
 
@@ -833,6 +880,27 @@ func _update_enemies() -> void:
 						events.append([EV_BLAST, e_x[i], e_y[i], 125.0, true])
 						if d < 125.0 + PLAYER_R:
 							_hurt(e_dmg[i] * 2.5)
+			Defs.PHANTOM:
+				var v3 := _phantom(i, d)
+				vx *= v3
+				vy *= v3
+			Defs.SENTINEL:
+				var v4 := _sentinel(i, dx, dy, d)
+				vx *= v4
+				vy *= v4
+			Defs.BASTION:
+				# Hangs back behind the swarm so its aegis covers the front line.
+				if d < 300.0:
+					vx = -ux * sp * 0.6
+					vy = -uy * sp * 0.6
+				elif d < 400.0:
+					var side2 := 1.0 if (e_uid[i] & 1) == 0 else -1.0
+					vx = -uy * sp * 0.4 * side2
+					vy = ux * sp * 0.4 * side2
+			Defs.SERAPH:
+				var v5 := _seraph(i, dx, dy, d)
+				vx = ux * sp * v5
+				vy = uy * sp * v5
 			Defs.WARDEN:
 				var v := _warden(i, dx, dy, d)
 				vx = ux * sp * v
@@ -859,6 +927,241 @@ func _update_enemies() -> void:
 			e_x[i] = e_x[i] / rd * lim
 			e_y[i] = e_y[i] / rd * lim
 		i += 1
+
+
+## Phantom: fades out, marks a spot beside you, then blinks there.
+## Returns a speed factor.
+func _phantom(i: int, d: float) -> float:
+	if e_state[i] == 0:
+		e_t[i] -= 1
+		if e_t[i] <= 0 and d > 240.0 and d < 900.0:
+			var a := rng.range_i(Trig.STEPS)
+			var tx := px + Trig.cos_i(a) * 200.0
+			var ty := py + Trig.sin_i(a) * 200.0
+			var td := sqrt(tx * tx + ty * ty)
+			var lim := ARENA_R - 60.0
+			if td > lim:
+				tx = tx / td * lim
+				ty = ty / td * lim
+			e_ax[i] = tx
+			e_ay[i] = ty
+			e_state[i] = 1
+			e_t[i] = 48
+			events.append([EV_BLINK, e_x[i], e_y[i], tx, ty, Defs.PHANTOM, 0])
+		return 1.0
+	e_t[i] -= 1
+	if e_t[i] <= 0:
+		events.append([EV_BLINK, e_x[i], e_y[i], e_ax[i], e_ay[i], Defs.PHANTOM, 1])
+		e_x[i] = e_ax[i]
+		e_y[i] = e_ay[i]
+		e_ox[i] = e_x[i]
+		e_oy[i] = e_y[i]
+		e_state[i] = 0
+		e_t[i] = 210 + rng.range_i(150)
+		return 0.0
+	return 0.0
+
+
+## Sentinel: anchors in range, tracks you with a warning line, locks on and
+## fires a long beam. Returns a speed factor.
+func _sentinel(i: int, dx: float, dy: float, d: float) -> float:
+	match e_state[i]:
+		0:
+			if e_t[i] > 0:
+				e_t[i] -= 1
+			elif d < 560.0:
+				e_state[i] = 1
+				e_t[i] = 80
+				e_ang[i] = Trig.angle_of(dx, dy)
+				events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SENTINEL_LEN, SENTINEL_W, 0, Defs.SENTINEL])
+			return 1.0
+		1:
+			e_t[i] -= 1
+			if e_t[i] > 30:
+				e_ang[i] = Trig.angle_of(dx, dy)
+			if e_t[i] <= 0:
+				e_state[i] = 2
+				e_t[i] = 16
+				events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SENTINEL_LEN, SENTINEL_W, 1, Defs.SENTINEL])
+			return 0.0
+		2:
+			e_t[i] -= 1
+			if _beam_hit(e_x[i], e_y[i], e_ang[i], SENTINEL_LEN, SENTINEL_W):
+				_hurt(e_dmg[i])
+			if e_t[i] <= 0:
+				e_state[i] = 3
+				e_t[i] = 160 + rng.range_i(100)
+			return 0.0
+	e_t[i] -= 1
+	if e_t[i] <= 0:
+		e_state[i] = 0
+	return 0.5
+
+
+## True if the player is inside a beam from (x, y) at angle a.
+func _beam_hit(x: float, y: float, a: int, length: float, half_w: float) -> bool:
+	var ux := Trig.cos_i(a)
+	var uy := Trig.sin_i(a)
+	var rx := px - x
+	var ry := py - y
+	var along := rx * ux + ry * uy
+	if along < 0.0 or along > length:
+		return false
+	return absf(rx * uy - ry * ux) < half_w + PLAYER_R * 0.6
+
+
+## Seraph: a wheel of turning lasers, then three aimed lances, then it
+## vanishes and reappears beside you in a ring of light. Returns a speed factor.
+func _seraph(i: int, dx: float, dy: float, d: float) -> float:
+	e_t[i] += 1
+	var t := e_t[i]
+	var overload := t > OVERLOAD_TICKS
+	var enraged := e_hp[i] < e_maxhp[i] * 0.5 or overload
+	if t == OVERLOAD_TICKS:
+		events.append([EV_WAVE, "OVERLOAD"])
+	if t % 1200 == 420:
+		for k in 6:
+			var a := k * Trig.STEPS / 6
+			_spawn_at_safe(Defs.PHANTOM, px + Trig.cos_i(a) * 460.0, py + Trig.sin_i(a) * 460.0, false, 40)
+	var c := t % 600
+	if c < 330:
+		# The wheel: the first second is a warning, then the arms burn.
+		e_state[i] = 1 if c < 60 else 2
+		e_k[i] += 3 if overload else 2
+		if c == 0:
+			events.append([EV_LASER, e_x[i], e_y[i], e_k[i], SERAPH_ARM, 16.0, 0, Defs.SERAPH])
+		elif c == 60:
+			events.append([EV_LASER, e_x[i], e_y[i], e_k[i], SERAPH_ARM, 16.0, 1, Defs.SERAPH])
+		if e_state[i] == 2:
+			var arms := seraph_arms(i)
+			for k in arms:
+				if _beam_hit(e_x[i], e_y[i], e_k[i] + k * Trig.STEPS / arms, SERAPH_ARM, 16.0):
+					_hurt(e_dmg[i])
+					break
+		return 0.45
+	if c < 480:
+		# Judgement: three lances aimed where you are going.
+		var sub := (c - 330) % 50
+		if sub == 0:
+			e_state[i] = 3
+			e_ang[i] = Trig.angle_of(dx + mvx * st_speed * 0.4, dy + mvy * st_speed * 0.4)
+			events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SERAPH_LANCE, 26.0, 0, Defs.SERAPH])
+		elif sub == 30:
+			e_state[i] = 4
+			events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SERAPH_LANCE, 26.0, 1, Defs.SERAPH])
+		elif sub == 42:
+			e_state[i] = 0
+		if e_state[i] == 4:
+			for k in seraph_lances(i):
+				if _beam_hit(e_x[i], e_y[i], e_ang[i] + k, SERAPH_LANCE, 26.0):
+					_hurt(e_dmg[i] * 1.2)
+					break
+		return 0.0 if e_state[i] >= 3 else 0.3
+	if c == 480:
+		var a := rng.range_i(Trig.STEPS)
+		var tx := px + Trig.cos_i(a) * 380.0
+		var ty := py + Trig.sin_i(a) * 380.0
+		var td := sqrt(tx * tx + ty * ty)
+		var lim := ARENA_R - e_r[i] - 20.0
+		if td > lim:
+			tx = tx / td * lim
+			ty = ty / td * lim
+		e_ax[i] = tx
+		e_ay[i] = ty
+		e_state[i] = 5
+		events.append([EV_BLINK, e_x[i], e_y[i], tx, ty, Defs.SERAPH, 0])
+	if c < 540:
+		return 0.0
+	if c == 540:
+		events.append([EV_BLINK, e_x[i], e_y[i], e_ax[i], e_ay[i], Defs.SERAPH, 1])
+		e_x[i] = e_ax[i]
+		e_y[i] = e_ay[i]
+		e_ox[i] = e_x[i]
+		e_oy[i] = e_y[i]
+		e_state[i] = 0
+		var n := 30 if enraged else 22
+		for k in n:
+			_fire_orb(e_x[i], e_y[i], k * Trig.STEPS / n + (t & 31), 165.0, 15.0)
+	elif c == 575 and enraged:
+		for k in 22:
+			_fire_orb(e_x[i], e_y[i], k * Trig.STEPS / 22 + Trig.STEPS / 44, 130.0, 15.0)
+	return 0.9 if d > 200.0 else 0.3
+
+
+## The Seraph's wheel has three arms, four once it is wounded.
+func seraph_arms(i: int) -> int:
+	return 4 if e_hp[i] < e_maxhp[i] * 0.5 or e_t[i] > OVERLOAD_TICKS else 3
+
+
+## Angle offsets of the Seraph's aimed lances (side lances once wounded).
+func seraph_lances(i: int) -> Array:
+	if e_hp[i] < e_maxhp[i] * 0.5 or e_t[i] > OVERLOAD_TICKS:
+		return [0, Trig.STEPS / 10, -Trig.STEPS / 10]
+	return [0]
+
+
+## Every laser on the field for the views and the autopilot:
+## [x, y, angle, length, half width, live, type, charge 0..1].
+func lasers() -> Array:
+	var out: Array = []
+	for i in en:
+		var type := e_type[i]
+		if e_spawn[i] > 0:
+			continue
+		var st := e_state[i]
+		if type == Defs.SENTINEL and (st == 1 or st == 2):
+			var kc := 1.0 if st == 2 else 1.0 - float(e_t[i]) / 80.0
+			out.append([e_x[i], e_y[i], e_ang[i], SENTINEL_LEN, SENTINEL_W, st == 2, type, kc])
+		elif type == Defs.SERAPH:
+			var c := e_t[i] % 600
+			if st == 1 or st == 2:
+				var arms := seraph_arms(i)
+				var ka := 1.0 if st == 2 else float(c) / 60.0
+				for k in arms:
+					out.append([e_x[i], e_y[i], e_k[i] + k * Trig.STEPS / arms, SERAPH_ARM, 16.0, st == 2, type, ka])
+			elif st == 3 or st == 4:
+				var kl := 1.0 if st == 4 else float((c - 330) % 50) / 30.0
+				for off in seraph_lances(i):
+					out.append([e_x[i], e_y[i], e_ang[i] + int(off), SERAPH_LANCE, 26.0, st == 4, type, kl])
+	return out
+
+
+## Bastions shield every enemy near them: shielded enemies take half damage.
+func _aegis_aura() -> void:
+	if tick % 6 != 0:
+		return
+	var bastions := PackedInt32Array()
+	for i in en:
+		if e_type[i] == Defs.BASTION and e_spawn[i] <= 0 and e_hp[i] > 0.0:
+			bastions.append(i)
+	if _shielded:
+		for i in en:
+			e_shd[i] = 0
+		_shielded = false
+	var rad := BASTION_R
+	for b in bastions:
+		var bx := e_x[b]
+		var by := e_y[b]
+		var br := rad * (1.3 if e_elite[b] == 1 else 1.0)
+		_query(bx, by, br)
+		for q in _qn:
+			var j := _qbuf[q]
+			if j == b or e_type[j] >= Defs.WARDEN or e_type[j] == Defs.BASTION:
+				continue
+			var dx := e_x[j] - bx
+			var dy := e_y[j] - by
+			if dx * dx + dy * dy < br * br:
+				e_shd[j] = 1
+				_shielded = true
+
+
+## The Chain fades if you stop killing.
+func _update_chain() -> void:
+	if chain <= 0:
+		return
+	chain_t -= 1
+	if chain_t <= 0:
+		chain = 0
 
 
 ## Warden: radial bursts and summons. Returns a speed factor.
@@ -1615,6 +1918,8 @@ func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 		dd *= 3.0 if ship_id == "aurora" else 2.0
 	if freeze > 0:
 		dd *= 1.5
+	if e_shd[i] == 1:
+		dd *= 0.5
 	e_hp[i] -= dd
 	damage_dealt += dd
 	e_flash[i] = 5
@@ -1658,6 +1963,9 @@ func _hurt(dmg: float) -> void:
 	if first_hurt < 0:
 		first_hurt = tick
 	events.append([EV_HURT, d])
+	if chain >= 10:
+		events.append([EV_CHAIN_LOST, chain])
+	chain = 0
 	# Repulse: give the player room to breathe.
 	_shove(px, py, 170.0, 420.0)
 	# Vesper's bulwark answers every hit with a shockwave.
@@ -1732,6 +2040,14 @@ func _on_death(i: int) -> void:
 	if elite:
 		elite_kills += 1
 	events.append([EV_KILL, x, y, type, elite, e_r[i]])
+	chain += 1
+	chain_t = Defs.CHAIN_TICKS
+	chain_best = maxi(chain_best, chain)
+	var worth := 10.0 + (250.0 if elite else 0.0) + (2500.0 if type >= Defs.WARDEN else 0.0)
+	chain_score += int(worth * (Defs.chain_mult(chain) - 1.0) + 0.5)
+	for tier in Defs.CHAIN_TIERS:
+		if chain == int(tier[0]):
+			events.append([EV_CHAIN, chain, tier[1]])
 	if mods.has("bloodlight"):
 		hp = minf(max_hp, hp + 0.25)
 	if mods.has("volatile") and type < Defs.WARDEN and rng.unit() < 0.25:
@@ -1768,6 +2084,16 @@ func _on_death(i: int) -> void:
 			for k in 12:
 				var a2 := k * Trig.STEPS / 12
 				_drop_gem(x + Trig.cos_i(a2) * 90.0, y + Trig.sin_i(a2) * 90.0, 10.0)
+		Defs.SERAPH:
+			bosses_killed += 1
+			seraph_down = true
+			events.append([EV_BOSS_DOWN, type, x, y])
+			_drop_pickup("bigchest", x, y)
+			_drop_pickup("core", x + 70.0, y)
+			_drop_pickup("heart", x - 70.0, y)
+			for k in 14:
+				var a4 := k * Trig.STEPS / 14
+				_drop_gem(x + Trig.cos_i(a4) * 100.0, y + Trig.sin_i(a4) * 100.0, 12.0)
 		Defs.ECLIPSE:
 			bosses_killed += 1
 			events.append([EV_BOSS_DOWN, type, x, y])

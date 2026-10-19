@@ -468,8 +468,60 @@ def sfx_overdrive():
     write_wav("mission", x, 0.8)
 
 
+def sfx_threats():
+    """Lasers, blinks and the Chain (own RNG so older sounds stay identical)."""
+    global rng
+    rng = np.random.default_rng(97)
+    # Laser charge: a rising whine with a fizzing edge.
+    n = int(1.2 * SR)
+    x = saw_from_phase(sweep_phase(220, 1400, n, 1.6), 6) * env(n, 0.05, 0.0, 1.0, 0.08, 1.05) * 0.4
+    x = lowpass(x, 5000)
+    x += highpass(noise(n), 5000) * np.linspace(0.05, 0.4, n) * env(n, 0.05, 0.0, 1.0, 0.08, 1.05)
+    x *= 0.6 + 0.4 * np.sin(2 * np.pi * np.linspace(6, 26, n).cumsum() / SR)
+    write_wav("charge", x, 0.7)
+    # Laser fire: a searing zap over a sub thump.
+    n = int(0.7 * SR)
+    x = square_from_phase(sweep_phase(1800, 140, n, 0.4), 7) * expdecay(n, 6.0) * 0.45
+    x = lowpass(x, 7000)
+    x += np.sin(sweep_phase(120, 40, n, 0.5)) * expdecay(n, 7.0) * 0.9
+    x += highpass(noise(n), 3500) * expdecay(n, 9.0) * 0.5
+    write_wav("laser", x, 0.9)
+    # Blink: a reversed shimmer that snaps.
+    n = int(0.45 * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(2 * np.pi * (900 + 1600 * tt / tt[-1]) * tt) * env(n, 0.38, 0.06) * 0.5
+    x += highpass(noise(n), 4500) * env(n, 0.4, 0.05) * 0.4
+    write_wav("blink", x, 0.65)
+    # Chain milestone: a bright rising triad stab.
+    n = int(0.9 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([76, 83, 88, 95]):
+        st = int(k * 0.045 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += saw_from_phase(2 * np.pi * mtof(m) * t2, 6) * expdecay(seg, 5.0) * 0.22
+    x = lowpass(x, 7000)
+    x += highpass(noise(n), 6000) * expdecay(n, 14) * 0.3
+    write_wav("chain", x, 0.8)
+    # Chain broken: glass shattering downwards.
+    n = int(0.8 * SR)
+    x = np.zeros(n)
+    for k in range(14):
+        st = int(rng.uniform(0, 0.25) * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        f = rng.uniform(2500, 6500)
+        x[st:] += np.sin(2 * np.pi * f * t2 * (1 - 0.3 * t2)) * expdecay(seg, rng.uniform(12, 30)) * 0.2
+    x += np.sin(sweep_phase(700, 120, n, 0.6)) * expdecay(n, 6) * 0.4
+    write_wav("chain_lost", x, 0.7)
+
+
 if __name__ == "__main__":
     import sys
+    if "--threats" in sys.argv:
+        sfx_threats()
+        print("threat audio ok")
+        sys.exit(0)
     if "--evo" in sys.argv:
         sfx_evolution()
         print("evolution audio ok")
@@ -482,4 +534,5 @@ if __name__ == "__main__":
     music()
     sfx_evolution()
     sfx_overdrive()
+    sfx_threats()
     print("audio ok")

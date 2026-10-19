@@ -66,10 +66,16 @@ func _draw_enemies() -> void:
 				rot = t * 2.2 + uid
 			Defs.BOMBER:
 				rot = t * (9.0 if s.e_state[i] == 1 else 2.5) + uid
+			Defs.PHANTOM, Defs.SENTINEL:
+				rot = Trig.to_rad(s.e_ang[i])
+			Defs.BASTION:
+				rot = t * 0.3 + uid
 			Defs.WARDEN:
 				rot = t * 0.35
 			Defs.ECLIPSE:
 				rot = -t * 0.3
+			Defs.SERAPH:
+				rot = t * (1.6 if s.e_state[i] == 2 else 0.5)
 		var sc := r / Art.SPRITE_R * (1.0 + 0.05 * sin(t * 5.0 + uid))
 		var mod := Color(1.25, 1.25, 1.25, 1.0)
 		if s.e_spawn[i] > 0:
@@ -89,6 +95,22 @@ func _draw_enemies() -> void:
 			mod = Color(1.8, 1.4, 1.9)
 		elif type == Defs.ECLIPSE and s.e_state[i] == 1:
 			mod = Color(2.0, 1.2, 1.8)
+		elif type == Defs.PHANTOM:
+			# Flickers like a bad signal, and fades out before a blink.
+			var fade := clampf(float(s.e_t[i]) / 48.0, 0.0, 1.0) if s.e_state[i] == 1 else 1.0
+			mod = Color(1.3, 1.5, 1.7, mod.a * (0.55 + 0.35 * fade + 0.1 * sin(t * 23.0 + uid)))
+			if s.e_state[i] == 1:
+				x += randf_range(-4.0, 4.0) * (1.0 - fade)
+				sc *= 0.7 + 0.3 * fade
+		elif type == Defs.SENTINEL and s.e_state[i] == 1:
+			var kc := 1.0 - float(s.e_t[i]) / 80.0
+			mod = Color(1.3 + kc, 1.2 + 0.4 * kc, 1.2, 1.0)
+			sc *= 1.0 + 0.1 * kc
+		elif type == Defs.SERAPH and s.e_state[i] == 5:
+			var c := s.e_t[i] % 600
+			var fade2 := clampf(1.0 - float(c - 480) / 60.0, 0.0, 1.0)
+			mod = Color(1.5, 2.0, 1.9, 0.25 + 0.75 * fade2)
+			sc *= 0.6 + 0.4 * fade2
 		if s.freeze > 0:
 			# Stopped time: everything turns to cold glass.
 			mod = Color(0.55, 0.65, 1.7, mod.a)
@@ -143,6 +165,7 @@ func _draw_glow() -> void:
 		var col: Color = Defs.ENEMY_COLOR[s.e_type[i]]
 		draw_set_transform(Vector2(s.e_x[i], s.e_y[i]), t * 3.0 + float(i), Vector2(sc, sc))
 		draw_texture(portal, Vector2(-64, -64), Color(col * 1.6, (1.0 - k) * 0.9 + 0.1))
+	_draw_threats(s, t)
 	# Gems.
 	var gem := Art.tex("gem")
 	for i in s.gn:
@@ -279,3 +302,76 @@ func _draw_glow() -> void:
 			var k := 0.5 + 0.5 * sin(t * 6.0)
 			draw_set_transform(Vector2(x, y), t * 1.5, Vector2(0.55, 0.55) * (1.0 + 0.08 * k))
 			draw_texture(ring, Vector2(-128, -128), Color(sc * 1.5, 0.35 + 0.35 * k))
+
+
+## Bastion aegis, blink markers and lasers (warning lines, then beams).
+func _draw_threats(s: Sim, t: float) -> void:
+	var ring := Art.tex("ring")
+	var portal := Art.tex("portal")
+	var glow := Art.tex("glow")
+	var frozen := s.freeze > 0
+	var blue: Color = Defs.ENEMY_COLOR[Defs.BASTION]
+	for i in s.en:
+		var type := s.e_type[i]
+		if s.e_spawn[i] > 0:
+			continue
+		if s.e_shd[i] == 1:
+			var rs := s.e_r[i] * 1.45 / 52.0
+			draw_set_transform(Vector2(s.e_x[i], s.e_y[i]), t * 0.8, Vector2(rs, rs))
+			draw_texture(portal, Vector2(-64, -64), Color(blue * 1.5, 0.45))
+		if type == Defs.BASTION:
+			var br := Sim.BASTION_R * (1.3 if s.e_elite[i] == 1 else 1.0)
+			var pulse := 1.0 + 0.03 * sin(t * 4.0 + float(i))
+			draw_set_transform(Vector2(s.e_x[i], s.e_y[i]), -t * 0.4, Vector2.ONE * br / 110.0 * pulse)
+			draw_texture(ring, Vector2(-128, -128), Color(blue * 1.3, 0.35))
+			draw_set_transform(Vector2(s.e_x[i], s.e_y[i]), 0.0, Vector2.ONE * br / 64.0)
+			draw_texture(glow, Vector2(-64, -64), Color(blue, 0.08))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			for j in s.en:
+				if s.e_shd[j] != 1:
+					continue
+				var dx := s.e_x[j] - s.e_x[i]
+				var dy := s.e_y[j] - s.e_y[i]
+				if dx * dx + dy * dy < br * br:
+					draw_line(Vector2(s.e_x[i], s.e_y[i]), Vector2(s.e_x[j], s.e_y[j]), Color(blue * 1.4, 0.18), 2.0)
+		elif (type == Defs.PHANTOM and s.e_state[i] == 1) or (type == Defs.SERAPH and s.e_state[i] == 5):
+			# Where it will appear: a shrinking ring of light.
+			var big := type == Defs.SERAPH
+			var col: Color = Defs.ENEMY_COLOR[type]
+			var k := 0.0
+			if big:
+				k = clampf(float(s.e_t[i] % 600 - 480) / 60.0, 0.0, 1.0)
+			else:
+				k = 1.0 - clampf(float(s.e_t[i]) / 48.0, 0.0, 1.0)
+			var rr := (s.e_r[i] * (1.2 + 2.0 * (1.0 - k))) / 110.0
+			draw_set_transform(Vector2(s.e_ax[i], s.e_ay[i]), t * 3.0, Vector2(rr, rr))
+			draw_texture(ring, Vector2(-128, -128), Color(col * 1.6, 0.25 + 0.6 * k))
+			draw_set_transform(Vector2(s.e_ax[i], s.e_ay[i]), -t * 2.0, Vector2(rr, rr) * 1.7)
+			draw_texture(portal, Vector2(-64, -64), Color(col * 1.3, 0.2 + 0.5 * k))
+	var beam := Art.tex("beam")
+	for l in s.lasers():
+		var p0 := Vector2(l[0], l[1])
+		var ang := Trig.to_rad(l[2])
+		var length: float = l[3]
+		var hw: float = l[4]
+		var live: bool = l[5]
+		var kc: float = l[7]
+		var col: Color = Defs.ENEMY_COLOR[l[6]]
+		if frozen:
+			col = Color(0.5, 0.65, 1.6)
+		draw_set_transform(p0, ang, Vector2.ONE)
+		if live:
+			var flick := 0.85 + 0.15 * sin(t * 60.0)
+			var w := hw * 2.0 * flick
+			draw_texture_rect(beam, Rect2(0, -w * 1.8, length, w * 3.6), false, Color(col * 1.5, 0.75))
+			draw_texture_rect(beam, Rect2(0, -w * 0.5, length, w), false, Color(1.8, 1.8, 1.8, 1.0))
+			draw_set_transform(p0, 0.0, Vector2.ONE * (hw * 3.0 / 64.0))
+			draw_texture(glow, Vector2(-64, -64), Color(col * 1.6, 0.8))
+		else:
+			# Warning: a thin flickering line that thickens as the charge fills.
+			var blink := 0.55 + 0.45 * absf(sin(t * (10.0 + 20.0 * kc)))
+			draw_rect(Rect2(0, -hw * kc, length, hw * 2.0 * kc), Color(col, 0.08 + 0.1 * kc))
+			draw_line(Vector2.ZERO, Vector2(length, 0), Color(col * 1.4, (0.25 + 0.55 * kc) * blink), 2.0 + 2.0 * kc)
+			draw_set_transform(p0, 0.0, Vector2.ONE * (0.3 + 0.5 * kc))
+			draw_texture(glow, Vector2(-64, -64), Color(col * 1.5, 0.3 + 0.5 * kc))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

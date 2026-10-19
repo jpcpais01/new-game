@@ -126,10 +126,17 @@ ENEMIES = {
     "brute": ([regular(6, 1.0), regular(6, 0.55)], (1.0, 0.55, 0.18), {"line": 4.2}),
     "spitter": ([star(4, 1.0, 0.42)], (0.88, 0.35, 1.0), {}),
     "bomber": ([star(9, 1.0, 0.7)], (1.0, 0.24, 0.24), {}),
+    "phantom": ([[(1.0, 0.0), (0.1, 0.58), (-0.95, 0.4), (-0.5, 0.0), (-0.95, -0.4), (0.1, -0.58)],
+                 regular(16, 0.2)], (0.55, 0.95, 1.0), {"fill": 0.12}),
+    "sentinel": ([regular(24, 1.0), regular(3, 0.62), regular(12, 0.16)], (1.0, 0.42, 0.2), {"line": 3.8}),
+    "bastion": ([regular(6, 1.0, math.pi / 6), regular(6, 0.64, math.pi / 6), regular(4, 0.26, math.pi / 4)],
+                (0.35, 0.6, 1.0), {"line": 4.0, "fill": 0.3}),
     "warden": ([regular(8, 1.0, math.pi / 8), regular(4, 0.5, math.pi / 4), regular(8, 0.78, math.pi / 8)],
                (1.0, 0.8, 0.35), {"line": 4.4, "glow": 12.0}),
     "eclipse": ([regular(40, 1.0), regular(40, 0.62), star(12, 0.5, 0.3)], (1.0, 0.3, 0.88),
                 {"line": 4.6, "glow": 13.0, "fill": 0.42}),
+    "seraph": ([star(6, 1.0, 0.3), regular(36, 0.46), regular(6, 0.22, math.pi / 6)], (0.4, 1.0, 0.85),
+               {"line": 4.4, "glow": 13.0, "fill": 0.3}),
 }
 
 
@@ -464,6 +471,10 @@ def app_icon():
 
 if __name__ == "__main__":
     import sys
+    if "--threats" in sys.argv:
+        enemy_sprites()
+        print("enemy sprites ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")

@@ -33,13 +33,15 @@ func build() -> void:
 				UiKit.fmt_time(float(sim.afterdark_seconds())), sim.night, "" if sim.night == 1 else "s"]
 	body.add_child(UiKit.label(sub, 34, UiKit.DIM))
 	var grid := GridContainer.new()
-	grid.columns = 4
-	grid.add_theme_constant_override("h_separation", 12)
-	grid.add_theme_constant_override("v_separation", 22)
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 24)
+	grid.add_theme_constant_override("v_separation", 18)
 	_stat(grid, "SURVIVED", UiKit.fmt_time(sim.seconds()), beat.has("time"), 0)
 	_stat(grid, "LEVEL", str(sim.level), beat.has("level"), 1)
 	_stat(grid, "KILLS", UiKit.fmt_int(sim.kills), beat.has("kills"), 2)
 	_stat(grid, "BOSSES", str(sim.bosses_killed), false, 3)
+	_stat(grid, "ELITES", str(sim.elite_kills), false, 4)
+	_stat(grid, "BEST CHAIN", UiKit.fmt_int(sim.chain_best), beat.has("chain"), 5)
 	var cc := CenterContainer.new()
 	cc.add_child(grid)
 	body.add_child(cc)
@@ -234,7 +236,7 @@ func _ship_row(ids: Array) -> void:
 
 func _stat(grid: GridContainer, name: String, value: String, record: bool, k: int) -> void:
 	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(180, 0)
+	box.custom_minimum_size = Vector2(200, 0)
 	box.add_theme_constant_override("separation", 0)
 	box.add_child(UiKit.label(name, 22, UiKit.DIM, UiKit.display_light()))
 	var v := UiKit.glow_label(value, 46, Color.WHITE)

@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 19, 2026 · 18:00 UTC
+
+- **The Seraph.** A third boss now descends at 6:00. It spins a wheel of burning lasers you must ride the gaps of, fires lances aimed where you are going, then vanishes and reappears beside you in a ring of fire. Wounded, it grows a fourth arm and fires three lances at once. Defeat it for a boss cache, a core and a heart.
+- **Three new enemies.** Phantoms fade out and blink into a ring of light beside you. Sentinels anchor, track you with a warning line and fire a long beam: step out of the line. Bastions hang back behind the swarm and halve the damage taken by everything inside their blue aegis, so break them first. Watch for the new Phantom ring at 2:30 and the Laser Grid at 3:25.
+- **The Chain.** Every kill in a row builds your Chain, and every 25 kills raise its score multiplier, up to x4. Stop killing for a few seconds and it fades; take a hit and it shatters. Milestones from On Fire to Afterglow light up the screen, and your best Chain is recorded.
+- **A deeper Afterdark.** Night bosses now rotate through the Warden, the Seraph and the Eclipse, and the swarm grows denser and tougher with every night you survive.
+- **New missions.** Seraphfall, Unbroken (a 300 Chain) and Radiant (a 1,000 Chain). Nightmare now asks for five bosses in one run. The results screen shows your elites and best Chain, and the Codex lists every new foe.
+
 ## Oct 19, 2026 · 12:00 UTC
 
 - **The Daily Run.** One hand-picked run per day, the same for every pilot: a fixed ship (even one you have not unlocked yet), one boon and two banes, and no Forge upgrades. Your first flight each day pays a Daily Bounty, keeping a streak raises it, and a log tracks your best score for every day.
