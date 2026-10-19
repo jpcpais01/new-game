@@ -1,0 +1,184 @@
+class_name GameScreen
+extends Control
+## A run: joystick input -> Arena/Sim, HUD, level-up cards, pause, results.
+
+var main
+var arena: Arena
+var sim: Sim
+
+var _stick: Joystick
+var _hud: Hud
+var _cards: LevelUpPanel
+var _pause: Modal
+var _hint: Control
+var _card_delay := -1.0
+var _over := false
+
+
+func _ready() -> void:
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	arena = main.arena
+	_stick = Joystick.new()
+	_stick.moved_first.connect(_hide_hint)
+	add_child(_stick)
+	_hud = Hud.new()
+	_hud.top = main.safe_top()
+	_hud.pause_pressed.connect(open_pause)
+	add_child(_hud)
+	_cards = LevelUpPanel.new()
+	_cards.visible = false
+	_cards.picked.connect(_on_pick)
+	_cards.reroll_pressed.connect(_on_reroll)
+	add_child(_cards)
+
+
+func begin(seed_value: int) -> void:
+	sim = Sim.new(seed_value, Save.loadout())
+	arena.start(sim, false)
+	arena.leveled_up.connect(_on_level)
+	arena.ended.connect(_on_end)
+	arena.hurt.connect(func(): _stick.modulate = Color(1.4, 0.6, 0.6))
+	_hud.bind(arena)
+	Sfx.music("run")
+	if not bool(Save.data.tutorial_done):
+		_show_hint()
+
+
+func _process(delta: float) -> void:
+	if arena == null or sim == null:
+		return
+	_stick.modulate = _stick.modulate.lerp(Color.WHITE, clampf(delta * 4.0, 0.0, 1.0))
+	arena.input_vec = _stick.get_vector()
+	if _card_delay > 0.0:
+		_card_delay -= delta
+		if _card_delay <= 0.0:
+			_open_cards()
+	elif sim.state == Sim.CHOOSING and not _cards.visible and _pause == null and not _over:
+		_card_delay = 0.01
+
+
+func _on_level() -> void:
+	arena.slowmo(0.1, 0.3)
+	_card_delay = 0.38
+
+
+func _open_cards() -> void:
+	if sim.state != Sim.CHOOSING or _over:
+		return
+	arena.paused = true
+	_stick.release()
+	Sfx.duck(true)
+	_cards.open(sim)
+
+
+func _on_pick(index: int) -> void:
+	sim.choose(index)
+	arena.handle_events()
+	if sim.state == Sim.CHOOSING:
+		_cards.open(sim)
+		Sfx.play("levelup", 1.12)
+	else:
+		_cards.close()
+		arena.paused = false
+		Sfx.duck(false)
+		# A burst of light as play resumes.
+		arena.fx.ring(sim.px, sim.py, 10.0, 260.0, 0.45, UiKit.CYAN, 1.2)
+		arena.add_wave(sim.px, sim.py, 1.0)
+
+
+func _on_reroll() -> void:
+	sim.reroll()
+	arena.handle_events()
+	Sfx.play("card", 0.8)
+	_cards.open(sim)
+
+
+func _on_end(won: bool) -> void:
+	if _over:
+		return
+	_over = true
+	_stick.release()
+	_stick.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var beat: Dictionary = Save.record_run(sim)
+	Save.data.tutorial_done = true
+	Save.save_data()
+	var r := ResultsPanel.new()
+	r.sim = sim
+	r.won = won
+	r.beat = beat
+	r.retry.connect(func(): main.start_run())
+	r.forge.connect(func(): main.go_forge())
+	r.home.connect(func(): main.go_title())
+	add_child(r)
+	Sfx.music("menu")
+
+
+func open_pause() -> void:
+	if _pause != null or _over or _cards.visible:
+		return
+	arena.paused = true
+	_stick.release()
+	Sfx.duck(true)
+	var p := PausePanel.new()
+	p.sim = sim
+	p.resume.connect(_resume)
+	p.quit.connect(func():
+		_pause = null
+		sim.state = Sim.DEAD
+		_on_end(false))
+	_pause = p
+	add_child(p)
+
+
+func _resume() -> void:
+	_pause = null
+	if not _cards.visible:
+		arena.paused = false
+	Sfx.duck(false)
+
+
+func _show_hint() -> void:
+	_hint = Control.new()
+	_hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_hint)
+	var l := UiKit.glow_label("DRAG ANYWHERE TO MOVE", 44, UiKit.CYAN)
+	l.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	l.offset_top = -520
+	l.offset_bottom = -440
+	_hint.add_child(l)
+	var l2 := UiKit.label("Your weapons fire on their own. Collect the light.", 34, Color(0.9, 0.9, 1.0, 0.8))
+	l2.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	l2.offset_top = -430
+	l2.offset_bottom = -380
+	_hint.add_child(l2)
+	var tw := _hint.create_tween().set_loops()
+	tw.tween_property(l, "modulate:a", 0.45, 0.7)
+	tw.tween_property(l, "modulate:a", 1.0, 0.7)
+
+
+func _hide_hint() -> void:
+	if _hint == null:
+		return
+	var h := _hint
+	_hint = null
+	var tw := h.create_tween()
+	tw.tween_interval(1.2)
+	tw.tween_property(h, "modulate:a", 0.0, 0.6)
+	tw.tween_callback(h.queue_free)
+
+
+func on_back() -> void:
+	if _over:
+		main.go_title()
+	elif _pause != null:
+		_pause.close()
+		_resume()
+	else:
+		open_pause()
+
+
+func on_background() -> void:
+	if not _over and _pause == null and not _cards.visible:
+		open_pause()
