@@ -459,6 +459,17 @@ def arsenal_sprites():
               fill=0.5, lines=CUBE_LINES), "p_relicchest")
 
 
+# Round 7: Radiance (a corona around a sun) and Banish (a card struck through).
+CARD = [(-0.55, -0.85), (0.55, -0.85), (0.55, 0.85), (-0.55, 0.85)]
+
+
+def radiance_icons():
+    save(neon([regular(28, 0.34), star(16, 0.62, 0.44)], (1.0, 0.62, 0.28), size=96, radius=34, line=3.8, glow=9.0,
+              fill=0.45, lines=rays(8, 0.74, 0.98, math.pi / 8), core_white=0.8), "i_radiance")
+    save(neon([CARD], (1.0, 0.3, 0.38), size=96, radius=34, line=3.8, glow=8.0, fill=0.25,
+              lines=[[(-0.85, 0.75), (0.85, -0.75)], [(-0.2, -0.45), (0.2, -0.45)]], core_white=0.7), "i_banish")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -533,6 +544,10 @@ if __name__ == "__main__":
         arsenal_sprites()
         print("arsenal art ok")
         sys.exit(0)
+    if "--radiance" in sys.argv:
+        radiance_icons()
+        print("radiance art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -544,5 +559,6 @@ if __name__ == "__main__":
     ship_sprites()
     mod_icons()
     arsenal_sprites()
+    radiance_icons()
     app_icon()
     print("art ok")

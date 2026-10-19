@@ -31,6 +31,10 @@ func _ready() -> void:
 		await _arsenal_shots()
 		get_tree().quit()
 		return
+	if args.has("radiance"):
+		await _radiance_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -303,6 +307,61 @@ func _arsenal_shots() -> void:
 		sc[0].scroll_vertical = 1500
 	await _wait(0.5)
 	await _shot("a5_codex")
+
+
+func _radiance_shots() -> void:
+	Save.data.tutorial_done = true
+	Save.data.radiance_cleared = 2
+	Save.data.radiance = 3
+	Save.data.tips = []
+	Save.data.ship_best = {"strix": {"time": 540.0, "score": 182000, "dawn": true, "radiance": 2}}
+	main.go_hangar()
+	await _wait(1.2)
+	await _shot("r0_hangar")
+	main.start_run()
+	await _wait(1.4)
+	await _shot("r1_intro")
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	while s.seconds() < 70.0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y)
+		s.events.clear()
+	s.xp = s.xp_need
+	main.arena.demo = false
+	await _wait(1.4)
+	await _shot("r2_cards")
+	gs._cards._toggle_banish()
+	await _wait(0.3)
+	await _shot("r3_banish_mode")
+	gs._cards._on_card(gs._cards._cards[0])
+	await _wait(0.8)
+	await _shot("r4_banished")
+	gs._cards._pick(1)
+	await _wait(1.0)
+	s.iframes = 0
+	s._hurt(12.0)
+	main.arena.handle_events()
+	await _wait(0.06)
+	await _shot("r5_hurt")
+	gs._on_coach("elite")
+	await _wait(0.8)
+	await _shot("r6_tip")
+	s.od = s.od_need
+	await _wait(0.3)
+	gs._od.trigger()
+	await _wait(0.12)
+	await _shot("r7_overdrive")
+	s.dawn = true
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(1.6)
+	await _shot("r8_results")
 
 
 func _wait(t: float) -> void:

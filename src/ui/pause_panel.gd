@@ -8,12 +8,26 @@ signal quit
 var sim: Sim
 
 
+## Every Radiance rule in force, as short names.
+static func _rules(r: int) -> Array:
+	var out: Array = []
+	for k in r:
+		out.append(String(Defs.RADIANCE[k].name))
+	return out
+
+
 func build() -> void:
 	heading("PAUSED", UiKit.CYAN, 70)
 	var info := UiKit.label("%s   ·   LV %d   ·   %s KILLS" % [UiKit.fmt_time(sim.seconds()), sim.level,
 			UiKit.fmt_int(sim.kills)], 32, UiKit.DIM, UiKit.display_light())
 	body.add_child(info)
 	body.add_child(UiKit.label("SCORE  %s" % UiKit.fmt_int(sim.score()), 30, Color.WHITE, UiKit.display()))
+	if sim.radiance > 0:
+		var rl := UiKit.label("RADIANCE %d  ·  %s" % [sim.radiance, ". ".join(_rules(sim.radiance))], 24,
+				Defs.radiance_color(sim.radiance), UiKit.body())
+		rl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		rl.custom_minimum_size = Vector2(760, 0)
+		body.add_child(rl)
 	for id in sim.loadout.get("mods", []):
 		var m: Dictionary = Defs.MUTATORS[id]
 		var ml := UiKit.label("%s %s  ·  %s" % ["+" if m.boon else "-", String(m.name).to_upper(), m.text], 24,

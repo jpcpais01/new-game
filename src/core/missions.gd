@@ -37,6 +37,11 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = int(data.get("wins", 0))
 			if run != null and run.dawn:
 				v = maxi(v, 1)
+		"radiance":
+			# Highest Radiance level the dawn was reached at (-1 for none yet).
+			v = int(data.get("radiance_cleared", -1))
+			if run != null and run.dawn:
+				v = maxi(v, run.radiance)
 		"win_nyx":
 			v = 1 if run != null and run.dawn and run.ship_id == "nyx" else 0
 		"evolutions":

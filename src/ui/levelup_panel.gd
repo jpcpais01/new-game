@@ -2,19 +2,27 @@ class_name LevelUpPanel
 extends Control
 ## The level-up moment: the world freezes behind frosted glass and three
 ## upgrade cards fly in. Tap one to take it. Relic offers use the same panel
-## in violet.
+## in violet. BANISH arms a one-tap banish: the next card tapped is struck
+## from the run and a new one takes its place.
 
 signal picked(index: int)
 signal reroll_pressed
+signal banish_pressed(index: int)
 
 var sim: Sim
 var _cards: Array = []
 var _title: Label
 var _reroll: Button
+var _banish: Button
+var _banish_mode := false
 var _locked := false
 var _backdrop: ColorRect
+var _card_size := Vector2.ZERO
+var _hint: Label
+var _teach := false
 
 const RELIC_COL := Color(0.78, 0.55, 1.0)
+const BANISH_COL := Color(1.0, 0.3, 0.38)
 
 
 func _ready() -> void:
@@ -32,6 +40,7 @@ func _ready() -> void:
 func open(s: Sim) -> void:
 	sim = s
 	_locked = false
+	_banish_mode = false
 	for c in get_children():
 		if c != _backdrop:
 			c.queue_free()
@@ -59,10 +68,11 @@ func open(s: Sim) -> void:
 	add_child(sub)
 	var card_w := minf(w - 80.0, 940.0)
 	var card_h := 300.0
+	_card_size = Vector2(card_w, card_h)
 	var gap := 34.0
 	var y0 := h * 0.11 + 190.0
 	for k in s.choices.size():
-		var card := _make_card(s.choices[k], k, Vector2(card_w, card_h))
+		var card := _make_card(s.choices[k], Vector2(card_w, card_h))
 		card.position = Vector2((w - card_w) * 0.5, y0 + k * (card_h + gap))
 		add_child(card)
 		_cards.append(card)
@@ -72,17 +82,33 @@ func open(s: Sim) -> void:
 		tw.tween_interval(0.12 + k * 0.09)
 		tw.tween_callback(func(): Sfx.play("card", 1.0 + k * 0.08))
 		tw.tween_property(card, "position", target, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	var row_y := y0 + 3 * (card_h + gap) + 10
+	var can_banish := s.banishes > 0 and not relic
+	var both := s.rerolls > 0 and can_banish
+	var bw := 400.0
 	_reroll = UiKit.button("REROLL  ×%d" % s.rerolls, UiKit.MAGENTA, 36)
-	_reroll.position = Vector2((w - 420) * 0.5, y0 + 3 * (card_h + gap) + 10)
-	_reroll.custom_minimum_size = Vector2(420, 0)
+	_reroll.position = Vector2(w * 0.5 - bw - 20.0 if both else (w - bw) * 0.5, row_y)
+	_reroll.custom_minimum_size = Vector2(bw, 0)
 	_reroll.visible = s.rerolls > 0
 	_reroll.pressed.connect(func():
 		if not _locked:
 			reroll_pressed.emit())
 	add_child(_reroll)
+	_banish = UiKit.button("", BANISH_COL, 36)
+	_banish.position = Vector2(w * 0.5 + 20.0 if both else (w - bw) * 0.5, row_y)
+	_banish.custom_minimum_size = Vector2(bw, 0)
+	_banish.visible = can_banish
+	_banish.pressed.connect(_toggle_banish)
+	add_child(_banish)
+	_hint = UiKit.label("", 28, BANISH_COL, UiKit.display_light())
+	_hint.position = Vector2(0, row_y + 120)
+	_hint.size = Vector2(w, 40)
+	add_child(_hint)
+	_teach = can_banish and s.level >= 3 and Save.tip_once("banish")
+	_sync_banish()
 
 
-func _make_card(id: String, index: int, sz: Vector2) -> Control:
+func _make_card(id: String, sz: Vector2) -> Control:
 	var info := Defs.card_info(id)
 	var col: Color = info.get("color", Color.WHITE)
 	var lvl := sim.card_level(id)
@@ -163,8 +189,69 @@ func _make_card(id: String, index: int, sz: Vector2) -> Control:
 				tw.tween_property(pip, "modulate:a", 1.0, 0.4)
 			pips.add_child(pip)
 		card.add_child(pips)
-	card.pressed.connect(func(): _pick(index))
+	card.pressed.connect(func(): _on_card(card))
 	return card
+
+
+func _on_card(card: Control) -> void:
+	var index := _cards.find(card)
+	if index < 0:
+		return
+	if _banish_mode:
+		if _locked or not Sim.can_banish(sim.choices[index]):
+			Sfx.play("click", 0.7)
+			return
+		_locked = true
+		banish_pressed.emit(index)
+	else:
+		_pick(index)
+
+
+func _toggle_banish() -> void:
+	if _locked or sim == null or sim.banishes <= 0:
+		return
+	_banish_mode = not _banish_mode
+	_teach = false
+	Sfx.play("click", 0.8 if _banish_mode else 1.1)
+	_sync_banish()
+
+
+## BANISH is armed: cards that can go glow red and shiver.
+func _sync_banish() -> void:
+	if _banish == null:
+		return
+	_banish.text = ("CANCEL" if _banish_mode else "BANISH  ×%d" % sim.banishes)
+	_banish.visible = sim.banishes > 0 and not sim.relic_choice
+	_hint.text = "TAP A CARD TO BANISH IT" if _banish_mode else \
+			("BANISH A CARD FOR THE WHOLE RUN" if _teach else "")
+	_hint.add_theme_color_override("font_color", BANISH_COL if _banish_mode else UiKit.DIM)
+	for k in _cards.size():
+		var c: Control = _cards[k]
+		var ok := _banish_mode and Sim.can_banish(sim.choices[k])
+		c.modulate = Color(1.25, 0.55, 0.6) if ok else (Color(0.6, 0.6, 0.65) if _banish_mode else Color.WHITE)
+
+
+## The sim already banished card `index` and dealt a new one: the old card
+## burns away and the new one slides into its slot.
+func replace_card(index: int) -> void:
+	_banish_mode = false
+	var old: Control = _cards[index]
+	var pos := old.position
+	var tw := old.create_tween().set_parallel()
+	tw.tween_property(old, "modulate", Color(2.4, 0.5, 0.5, 0.0), 0.3)
+	tw.tween_property(old, "scale", Vector2(0.86, 0.86), 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.tween_property(old, "rotation", 0.06, 0.3)
+	tw.chain().tween_callback(old.queue_free)
+	var card := _make_card(sim.choices[index], _card_size)
+	card.position = pos + Vector2(size.x, 0.0)
+	add_child(card)
+	_cards[index] = card
+	var t2 := card.create_tween()
+	t2.tween_interval(0.22)
+	t2.tween_callback(func(): Sfx.play("card", 1.2))
+	t2.tween_property(card, "position", pos, 0.4).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t2.tween_callback(func(): _locked = false)
+	_sync_banish()
 
 
 func _pick(index: int) -> void:

@@ -48,6 +48,20 @@ func _ready() -> void:
 	arena.bg_mat = mat
 	add_child(arena)
 
+	# Impact pass over the arena (hit fringes, Overdrive blur), under the UI.
+	var post_layer := CanvasLayer.new()
+	post_layer.layer = 5
+	add_child(post_layer)
+	var post := ColorRect.new()
+	post.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	post.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var post_mat := ShaderMaterial.new()
+	post_mat.shader = load("res://src/view/post.gdshader")
+	post.material = post_mat
+	post.visible = false
+	post_layer.add_child(post)
+	arena.post_rect = post
+
 	ui = CanvasLayer.new()
 	ui.layer = 10
 	add_child(ui)
@@ -149,7 +163,7 @@ func _switch(make: Callable) -> void:
 
 func _disconnect_arena() -> void:
 	for sig in ["leveled_up", "ended", "banner", "boss_started", "boss_ended", "card_taken", "hurt",
-			"chest_opened", "overdrive_ready"]:
+			"chest_opened", "overdrive_ready", "coach"]:
 		for c in arena.get_signal_connection_list(sig):
 			arena.disconnect(sig, c.callable)
 

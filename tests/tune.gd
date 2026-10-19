@@ -20,7 +20,11 @@ func _init() -> void:
 		var line := ""
 		while s.tick < 10 * 60 * Sim.TPS and (s.state == Sim.RUNNING or s.state == Sim.CHOOSING):
 			if s.state == Sim.CHOOSING:
-				s.choose(Autopilot.pick(s))
+				var bk := Autopilot.banish_pick(s)
+				if bk >= 0:
+					s.banish(bk)
+				else:
+					s.choose(Autopilot.pick(s))
 				continue
 			var m := Autopilot.move(s)
 			s.step(m.x, m.y, Autopilot.burst(s))

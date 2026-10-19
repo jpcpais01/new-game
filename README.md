@@ -13,7 +13,10 @@ ships and pay Flux, and every run earns Flux for permanent upgrades in the
 Forge. The Daily Run gives every pilot the same seeded run each day (fixed ship,
 one boon and two bane mutators, no Forge) with a bounty and a streak, and after
 the dawn you can fly on into the Afterdark, where the bosses return stronger
-every night and everything counts towards your score. Built with
+every night and everything counts towards your score. Reach the dawn and
+Radiance unlocks: ten ascension levels, each adding a rule and raising the
+score, and every ship remembers the highest Radiance it has cleared. Any
+level-up card can be banished from the run. Built with
 Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from

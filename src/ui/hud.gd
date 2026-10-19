@@ -217,7 +217,7 @@ func _process(delta: float) -> void:
 	_kills.text = UiKit.fmt_int(s.kills)
 	var sc := float(s.score())
 	_score_shown = sc if sc < _score_shown else lerpf(_score_shown, sc, clampf(delta * 6.0, 0.0, 1.0))
-	_score.text = "SCORE " + UiKit.fmt_int(int(ceil(_score_shown)))
+	_score.text = ("R%d  ·  " % s.radiance if s.radiance > 0 else "") + "SCORE " + UiKit.fmt_int(int(ceil(_score_shown)))
 	if s.endless:
 		_timer.add_theme_color_override("font_color", Color(1.0, 0.55, 0.85))
 		_timer.add_theme_color_override("font_shadow_color", Color(1.0, 0.2, 0.6, 0.6))

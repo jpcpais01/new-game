@@ -557,6 +557,33 @@ def sfx_arsenal():
     write_wav("halo", x, 0.8)
 
 
+def sfx_radiance():
+    """Banish and the Radiance unlock (own RNG)."""
+    global rng
+    rng = np.random.default_rng(171)
+    # Banish: a card torn away: a downward glitch sweep, crackle and a low thud.
+    n = int(0.42 * SR)
+    ph = sweep_phase(900, 140, n, 0.5)
+    x = square_from_phase(ph, 7) * env(n, 0.004, 0.32) * 0.35
+    crush = np.repeat(noise(n // 64 + 1), 64)[:n]
+    x += lowpass(crush, 3200) * env(n, 0.002, 0.18) * 0.45
+    x += np.sin(sweep_phase(120, 45, n, 0.6)) * expdecay(n, 9) * 0.7
+    write_wav("banish", lowpass(x, 7000), 0.8)
+    # Ascend: a rising shimmer that opens into a bright fifth.
+    n = int(2.0 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    x += np.sin(sweep_phase(220, 880, n, 1.6)) * env(n, 0.3, 0.6, 0.3, 0.6, 0.5) * 0.22
+    for k, m in enumerate([69, 76, 81, 88]):
+        st = int((0.5 + 0.09 * k) * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2) + 0.3 * np.sin(6 * np.pi * mtof(m) * t2)) * \
+            env(seg, 0.02, 0.6, 0.35, 0.7, 0.2) * 0.16
+    x += highpass(noise(n), 6000) * env(n, 0.8, 0.9) * 0.1
+    write_wav("ascend", x, 0.85)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -571,6 +598,10 @@ if __name__ == "__main__":
         sfx_arsenal()
         print("arsenal audio ok")
         sys.exit(0)
+    if "--radiance" in sys.argv:
+        sfx_radiance()
+        print("radiance audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -581,4 +612,5 @@ if __name__ == "__main__":
     sfx_overdrive()
     sfx_threats()
     sfx_arsenal()
+    sfx_radiance()
     print("audio ok")

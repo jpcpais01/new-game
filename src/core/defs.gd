@@ -222,7 +222,48 @@ const FORGE := [
 	{"id": "greed", "name": "Greed", "text": "+12% Flux earned", "max": 5, "cost": [50, 110, 200, 330, 500]},
 	{"id": "reroll", "name": "Reroll", "text": "+1 card reroll per run", "max": 3, "cost": [60, 150, 300]},
 	{"id": "revive", "name": "Second Light", "text": "Revive once per run", "max": 1, "cost": [400]},
+	{"id": "banish", "name": "Banish", "text": "+1 card banish per run", "max": 2, "cost": [90, 220]},
 ]
+
+## Every run can banish one level-up card (more from the Forge): it is gone
+## from the pool for the rest of the run and a new card takes its place.
+const BASE_BANISHES := 1
+
+## Radiance: ten ascension levels unlocked one by one by reaching the dawn.
+## Each level keeps every rule below it and raises the score and Flux paid.
+const RADIANCE := [
+	{"name": "Kindled", "text": "The swarm has +15% HP."},
+	{"name": "Restless", "text": "The swarm gathers 15% faster."},
+	{"name": "Hunted", "text": "Elites hunt you from 2:30, every 40 to 60 seconds."},
+	{"name": "Sharp", "text": "Enemies hit 20% harder."},
+	{"name": "Titans", "text": "Bosses have +30% HP."},
+	{"name": "Scarcity", "text": "All healing is 35% weaker."},
+	{"name": "Swift", "text": "The swarm moves 10% faster."},
+	{"name": "Legion", "text": "Forty more enemies at once, each with +15% HP."},
+	{"name": "Impatient", "text": "Bosses overload after 75 seconds instead of 120."},
+	{"name": "Eventide", "text": "The night runs 10% faster: every boss arrives sooner."},
+]
+const MAX_RADIANCE := 10
+const RADIANCE_SCORE := 0.15
+const RADIANCE_FLUX := 0.1
+const RADIANCE_COLOR := Color(1.0, 0.62, 0.28)
+
+
+static func radiance_score(r: int) -> float:
+	return 1.0 + RADIANCE_SCORE * float(r)
+
+
+static func radiance_flux(r: int) -> float:
+	return 1.0 + RADIANCE_FLUX * float(r)
+
+
+## A colour per Radiance level: warm gold rising to white-hot violet.
+static func radiance_color(r: int) -> Color:
+	if r <= 0:
+		return Color(0.62, 0.6, 0.8)
+	var t := float(r - 1) / float(MAX_RADIANCE - 1)
+	return Color(1.0, 0.82, 0.35).lerp(Color(1.0, 0.36, 0.3), minf(1.0, t * 1.6)).lerp(Color(0.9, 0.5, 1.0),
+			maxf(0.0, t * 2.0 - 1.0))
 
 
 static func forge_def(id: String) -> Dictionary:
@@ -360,6 +401,12 @@ const MISSIONS := [
 		"flux": 250},
 	{"id": "grand_codex", "name": "Grand Codex", "text": "Discover all 8 evolutions.", "kind": "codex", "goal": 8,
 		"flux": 700},
+	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
+		"flux": 300},
+	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,
+		"flux": 700},
+	{"id": "eventide", "name": "Eventide", "text": "Reach the dawn at Radiance 10.", "kind": "radiance", "goal": 10,
+		"flux": 1500},
 ]
 
 

@@ -13,6 +13,9 @@ var _info: VBoxContainer
 var _launch: Button
 var _dots: HBoxContainer
 var _swipe_from := -1.0
+var _rad_name: Label
+var _rad_text: Label
+var _rad_icon: TextureRect
 
 
 func _ready() -> void:
@@ -57,6 +60,7 @@ func _ready() -> void:
 	col.add_child(_name)
 	_title = UiKit.label("", 34, UiKit.DIM, UiKit.display_light())
 	col.add_child(_title)
+	col.add_child(_radiance_row())
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -147,7 +151,10 @@ func _show(i: int, dir: int) -> void:
 		var rec: Dictionary = (Save.data.ship_best as Dictionary).get(sd.id, {})
 		if not rec.is_empty():
 			var line := "BEST  %s   ·   SCORE  %s" % [UiKit.fmt_time(float(rec.time)), UiKit.fmt_int(int(rec.score))]
-			if bool(rec.get("dawn", false)):
+			var mastery := Save.ship_radiance(sd.id)
+			if mastery > 0:
+				line += "   ·   MASTERY R%d" % mastery
+			elif bool(rec.get("dawn", false)):
 				line += "   ·   DAWN ✓"
 			_info.add_child(UiKit.label(line, 28, UiKit.GOLD if bool(rec.get("dawn", false)) else UiKit.DIM,
 					UiKit.display_light()))
@@ -167,6 +174,86 @@ func _show(i: int, dir: int) -> void:
 		_launch.disabled = true
 		_launch.text = "LOCKED"
 	UiKit.pop_in(_info, 0.0, 16)
+
+
+## Radiance: pick how bright the night burns. Locked until the first dawn.
+func _radiance_row() -> Control:
+	var p := PanelContainer.new()
+	var sb := UiKit.box(Color(Defs.RADIANCE_COLOR, 0.5), Color(0.06, 0.03, 0.06, 0.85), 24, 2, 8)
+	sb.content_margin_left = 8
+	sb.content_margin_right = 8
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 10
+	p.add_theme_stylebox_override("panel", sb)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	p.add_child(h)
+	if Save.radiance_max() <= 0:
+		h.alignment = BoxContainer.ALIGNMENT_CENTER
+		var ic := UiKit.icon_rect("radiance", 64)
+		ic.modulate = Color(0.5, 0.5, 0.6)
+		h.add_child(ic)
+		h.add_child(UiKit.label("RADIANCE  ·  REACH THE DAWN TO UNLOCK", 28, UiKit.DIM, UiKit.display_light()))
+		return p
+	var minus := _arrow("‹")
+	minus.custom_minimum_size = Vector2(90, 0)
+	minus.add_theme_font_size_override("font_size", 80)
+	minus.pressed.connect(func(): _step_radiance(-1))
+	h.add_child(minus)
+	_rad_icon = UiKit.icon_rect("radiance", 84)
+	_rad_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(_rad_icon)
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 0)
+	_rad_name = UiKit.glow_label("", 38, UiKit.GOLD, UiKit.display())
+	v.add_child(_rad_name)
+	_rad_text = UiKit.label("", 28, Color(0.9, 0.9, 1.0, 0.85), UiKit.body())
+	_rad_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_rad_text.custom_minimum_size = Vector2(560, 0)
+	v.add_child(_rad_text)
+	h.add_child(v)
+	var plus := _arrow("›")
+	plus.custom_minimum_size = Vector2(90, 0)
+	plus.add_theme_font_size_override("font_size", 80)
+	plus.pressed.connect(func(): _step_radiance(1))
+	h.add_child(plus)
+	_sync_radiance()
+	return p
+
+
+func _step_radiance(d: int) -> void:
+	var r := Save.current_radiance()
+	var nr := clampi(r + d, 0, Save.radiance_max())
+	if nr == r:
+		Sfx.play("click", 0.7)
+		return
+	Save.set_radiance(nr)
+	Sfx.play("select", 1.0 + 0.05 * nr)
+	Sfx.buzz(20)
+	_sync_radiance()
+	_rad_name.pivot_offset = _rad_name.size * 0.5
+	_rad_name.scale = Vector2(1.25, 1.25)
+	create_tween().tween_property(_rad_name, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK) \
+			.set_ease(Tween.EASE_OUT)
+
+
+func _sync_radiance() -> void:
+	if _rad_name == null:
+		return
+	var r := Save.current_radiance()
+	var col := Defs.radiance_color(r)
+	_rad_icon.modulate = Color(1, 1, 1) * (1.0 + 0.06 * r) if r > 0 else Color(0.55, 0.55, 0.65)
+	if r == 0:
+		_rad_name.text = "RADIANCE OFF"
+		_rad_text.text = "The night as it was. Raise it for new rules and a bigger score (up to R%d)." % \
+				Save.radiance_max()
+	else:
+		_rad_name.text = "RADIANCE %d  ·  %s" % [r, String(Defs.RADIANCE[r - 1].name).to_upper()]
+		_rad_text.text = "%s  Score x%.2f, Flux x%.2f.%s" % [String(Defs.RADIANCE[r - 1].text),
+				Defs.radiance_score(r), Defs.radiance_flux(r), "" if r == 1 else " Keeps every rule below."]
+	_rad_name.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.2))
+	_rad_name.add_theme_color_override("font_shadow_color", Color(col, 0.55))
 
 
 func _section(head: String, icon: String, name: String, text: String, col: Color) -> Control:

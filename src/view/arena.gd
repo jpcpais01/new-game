@@ -17,6 +17,8 @@ signal overdrive_ready
 signal chain_milestone(count: int, title: String)
 signal chain_lost(count: int)
 signal relic_taken(id: String)
+## A moment worth a one-time coach tip: elite, boss, laser, chain, low_hp.
+signal coach(key: String)
 
 const TICK := 1.0 / 60.0
 
@@ -33,6 +35,7 @@ var ship_angle := -PI * 0.5
 var ship_bank := 0.0
 var hp_ghost := 1.0
 var bg_mat: ShaderMaterial
+var post_rect: ColorRect
 
 var camera: Camera2D
 var fx: Fx
@@ -57,6 +60,8 @@ var _night := 0.0
 var _slash_spin := 1.0
 ## 1 -> 0 over the opening second of a run: the ship warps in on a pillar of light.
 var warp := 0.0
+var _aberr := 0.0
+var _zoom := 0.0
 
 
 func _ready() -> void:
@@ -250,6 +255,9 @@ func _update_view(delta: float) -> void:
 	_hurt = maxf(0.0, _hurt - delta * 1.8)
 	warp = maxf(0.0, warp - delta * 1.6)
 	_flash = maxf(0.0, _flash - delta * 2.5)
+	_aberr = maxf(0.0, _aberr - delta * 2.2)
+	_zoom = maxf(0.0, _zoom - delta * 2.4)
+	_update_post(p)
 	if _gem_t > 0.0:
 		_gem_t -= delta
 	else:
@@ -264,6 +272,29 @@ func _update_view(delta: float) -> void:
 		Sfx.set_intensity(clampf(float(sim.en) / 160.0 + (0.6 if sim.boss_index() >= 0 else 0.0), 0.0, 1.0))
 	fx.update_fx(delta * (_slow if _hitstop <= 0.0 else 0.15))
 	_update_bg(delta, p)
+
+
+## The impact pass costs a full-screen read, so it only runs while a hit or an
+## Overdrive is still ringing (and never behind menus or the title demo).
+func _update_post(p: Vector2) -> void:
+	if post_rect == null:
+		return
+	var low := 0.0
+	if not demo and sim.state == Sim.RUNNING and sim.hp < sim.max_hp * 0.25:
+		low = 0.12 + 0.1 * sin(vtime * 6.0)
+	var a := minf(1.0, _aberr + low)
+	var on := not demo and not paused and Save.setting("shake") and (a > 0.01 or _zoom > 0.01)
+	post_rect.visible = on
+	if not on:
+		return
+	var vs := get_viewport_rect().size
+	var sp := get_viewport().get_canvas_transform() * p
+	var mat := post_rect.material as ShaderMaterial
+	mat.set_shader_parameter("aberr", a)
+	mat.set_shader_parameter("zoom", _zoom)
+	mat.set_shader_parameter("center", Vector2(sp.x / vs.x, sp.y / vs.y))
+	mat.set_shader_parameter("tint", Vector3(ship_color.r, ship_color.g, ship_color.b))
+	mat.set_shader_parameter("t", vtime)
 
 
 func _update_bg(delta: float, p: Vector2) -> void:
@@ -320,6 +351,9 @@ func handle_events() -> void:
 				fx.flash(e[1], e[2], 40.0, 0.18, Color(0.5, 1.0, 1.0))
 			Sim.EV_HURT:
 				_hurt = 1.0
+				_aberr = 1.0
+				if loud and sim.hp < sim.max_hp * 0.35 and not sim.mods.has("bloodlight"):
+					coach.emit("low_hp")
 				shake(0.55)
 				add_wave(sim.px, sim.py, 1.0, 1100.0)
 				fx.ring(sim.px, sim.py, 20.0, 170.0, 0.35, Color(1.0, 0.3, 0.35), 1.2)
@@ -398,6 +432,8 @@ func handle_events() -> void:
 				if loud:
 					Sfx.play("boom", randf_range(0.85, 1.15))
 			Sim.EV_BOSS:
+				if loud:
+					coach.emit("boss")
 				banner.emit("NIGHT %d" % sim.night if sim.endless else "WARNING", UiKit.RED)
 				boss_started.emit(e[1])
 				shake(0.4)
@@ -409,6 +445,7 @@ func handle_events() -> void:
 				for k in 3:
 					fx.ring(e[2], e[3], 40.0, 500.0 + k * 220.0, 0.8 + k * 0.25, col, 1.6)
 				fx.flash(e[2], e[3], 520.0, 0.9, col)
+				_zoom = 0.8
 				fx.burst(e[2], e[3], col * 1.8, 90, 1100.0, 1.8, 1.2)
 				fx.burst(e[2], e[3], Color(2, 2, 2), 40, 700.0, 1.2, 0.9)
 				add_wave(e[2], e[3], 2.5, 900.0)
@@ -478,6 +515,7 @@ func handle_events() -> void:
 					Sfx.play("wave")
 			Sim.EV_ELITE:
 				if loud:
+					coach.emit("elite")
 					banner.emit("ELITE " + String(Defs.ENEMY[e[1]].name).to_upper(), UiKit.GOLD)
 					Sfx.play("wave", 0.8)
 			Sim.EV_TELEGRAPH:
@@ -538,6 +576,7 @@ func handle_events() -> void:
 			Sim.EV_CHAIN:
 				fx.ring(sim.px, sim.py, 20.0, 300.0 + 0.2 * float(e[1]), 0.5, UiKit.GOLD, 1.4)
 				if loud:
+					coach.emit("chain")
 					Sfx.play("chain", 1.0 + 0.04 * float(Defs.CHAIN_TIERS.find_custom(func(x): return x[0] == e[1])))
 					Sfx.buzz(20)
 					chain_milestone.emit(e[1], e[2])
@@ -617,6 +656,7 @@ func _on_laser(e: Array, loud: bool) -> void:
 	if e[6] == 0:
 		fx.flash(e[1], e[2], 70.0 if not boss else 200.0, 0.4, col)
 		if loud:
+			coach.emit("laser")
 			Sfx.play("charge", randf_range(0.95, 1.05) * (0.75 if boss else 1.0))
 		return
 	var ang := Trig.to_rad(e[3])
@@ -635,6 +675,8 @@ func _on_laser(e: Array, loud: bool) -> void:
 func _on_overdrive(id: String, x: float, y: float, loud: bool) -> void:
 	var col: Color = Defs.ship(id).color
 	_flash = 0.8
+	_zoom = 1.0
+	_aberr = maxf(_aberr, 0.45)
 	for k in 3:
 		fx.ring(x, y, 20.0, 420.0 + 260.0 * k, 0.5 + 0.18 * k, col, 1.8)
 	fx.burst(x, y, col * 2.0, 70, 1200.0, 1.5, 0.8)

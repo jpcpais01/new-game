@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 19, 2026 · 22:00 UTC
+
+- **Radiance.** Reach the dawn once and Radiance unlocks: ten levels of a brighter, harder night, chosen in the Hangar. Each level adds a rule on top of the last (Kindled, Restless, Hunted, Sharp, Titans, Scarcity, Swift, Legion, Impatient and Eventide) and raises your score by 15% and your Flux by 10%. Reach the dawn at your highest level to unlock the next one.
+- **Ship mastery.** Every ship remembers the highest Radiance it has carried to the dawn, shown in the Hangar. Three new missions: Kindled (Radiance 1), Zenith (Radiance 5) and Eventide (Radiance 10), worth up to 1,500 Flux.
+- **Banish.** Not the card you need? Tap BANISH on the level-up screen, then a card: it is gone for the rest of the run and a fresh card slides into its place. Every run gets one banish, and a new Forge upgrade adds two more.
+- **Hits you can feel.** Taking damage now splits the screen into red and blue fringes with a jolt, Overdrives and boss kills punch a burst of radial blur out of your ship, and the edges shimmer when your hull runs low. Turning off Screen Shake turns these off too.
+- **Coach tips.** The first time you meet an elite, a boss, a laser, the Chain, low hull, a charged Overdrive or a weapon ready to evolve, a short tip explains it, once.
+
 ## Oct 19, 2026 · 19:00 UTC
 
 - **Relics.** The first elite you defeat and every boss now guard a relic: choose one of three, and it bends the rules for the rest of the run. Eight to find: Guardian Halo blocks a hit every 15 seconds (and saves your Chain), Ion Wake leaves a trail of burning light behind you, Starbreaker, Supercritical, Overcharge, Phoenix Plume, Midas Core and Wrath of Dawn.
