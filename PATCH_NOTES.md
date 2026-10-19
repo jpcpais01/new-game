@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 19, 2026 · 09:00 UTC
+
+- **The Hangar: seven ships.** Lumen is joined by Vesper the bulwark, Kestrel the hunter, Strix the glass cannon, Halcyon the harvester, Aurora the prism and Nyx the eclipse-born. Each one starts with its own weapon, plays by its own rules and has its own neon silhouette.
+- **Overdrive.** Kills charge a ring in the corner of the screen. When it blazes, tap it to unleash your ship's signature power: Flare, Aegis, Barrage, Tempest, Black Sun, Prism Storm or Eclipse, which stops time itself. Space or E also work on a keyboard.
+- **Missions.** Sixteen goals to chase, from surviving two minutes to reaching the dawn with three different ships. Every mission pays Flux, and six of them unlock new ships. Records from your earlier runs already count.
+- **Nyx, the hard mode.** Fly Nyx and the swarm gets 40% tougher, but you earn 50% more experience and Flux. Reaching the dawn with Nyx pays the biggest bounty in the game.
+- **A richer results screen.** Completed missions and newly unlocked ships now appear when a run ends, with a shortcut straight to the Hangar.
+
 ## Oct 19, 2026 · 06:00 UTC
 
 - **Weapon Evolutions.** Max out a weapon, carry its catalyst system, then open a Prism Cache to evolve it into Supernova Cannon, Event Horizon, Storm Crown, Singularity, Hydra Swarm or Spectrum. Level-up cards show what evolves with what, and a ready weapon pulses gold in your loadout.

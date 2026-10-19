@@ -89,6 +89,9 @@ func _draw_enemies() -> void:
 			mod = Color(1.8, 1.4, 1.9)
 		elif type == Defs.ECLIPSE and s.e_state[i] == 1:
 			mod = Color(2.0, 1.2, 1.8)
+		if s.freeze > 0:
+			# Stopped time: everything turns to cold glass.
+			mod = Color(0.55, 0.65, 1.7, mod.a)
 		draw_set_transform(Vector2(x, y), rot, Vector2(sc, sc))
 		draw_texture(Art.enemy[type], Vector2(-64, -64), mod)
 		var fl := s.e_flash[i]
@@ -111,7 +114,7 @@ func _draw_player() -> void:
 	var rot := arena.ship_angle
 	var tilt := 1.0 - 0.18 * absf(sin(arena.ship_bank))
 	draw_set_transform(Vector2(x, y), rot, Vector2(0.62, 0.62 * tilt))
-	draw_texture(Art.tex("ship"), Vector2(-64, -64), Color(1.5, 1.5, 1.5, 0.35 if blink else 1.0))
+	draw_texture(Art.tex("ship_" + s.ship_id), Vector2(-64, -64), Color(1.5, 1.5, 1.5, 0.35 if blink else 1.0))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# Health bar under the ship.
 	var frac := clampf(s.hp / s.max_hp, 0.0, 1.0)
@@ -160,7 +163,7 @@ func _draw_glow() -> void:
 	var glow := Art.tex("glow")
 	for w in s.wells:
 		var wr: float = w.r
-		var life := clampf(float(w.t) / float(Sim.WELL_TICKS), 0.0, 1.0)
+		var life := clampf(float(w.t) / float(w.get("max", Sim.WELL_TICKS)), 0.0, 1.0)
 		var grow := clampf((1.0 - life) * 6.0, 0.0, 1.0)
 		for k in 4:
 			var ph := fmod(t * 1.8 + k * 0.25, 1.0)
@@ -256,9 +259,23 @@ func _draw_glow() -> void:
 				draw_arc(Vector2.ZERO, rr, a0, a0 + PI * 1.2, 40, Color(0.7, 0.4, 1.0, 0.16), 6.0 - k)
 		else:
 			draw_arc(Vector2.ZERO, rad, 0.0, TAU, 64, Color(0.4, 1.0, 1.0, 0.08), 3.0)
-	# Ship core glow.
+	# Ship core glow, the Aegis shield and the Overdrive-ready halo.
 	if s.state != Sim.DEAD:
 		var x := lerpf(s.ppx, s.px, a)
 		var y := lerpf(s.ppy, s.py, a)
+		var sc := arena.ship_color
 		draw_set_transform(Vector2(x, y), 0.0, Vector2(1.3, 1.3))
-		draw_texture(Art.tex("glow"), Vector2(-64, -64), Color(0.3, 0.8, 1.0, 0.35))
+		draw_texture(Art.tex("glow"), Vector2(-64, -64), Color(sc.r * 0.85, sc.g * 0.85, sc.b * 0.85, 0.35))
+		if s.shield > 0:
+			var fade := clampf(float(s.shield) / 30.0, 0.0, 1.0)
+			var rs := 210.0 * s.st_area / 110.0 * (1.0 + 0.04 * sin(t * 18.0))
+			draw_set_transform(Vector2(x, y), t * 2.0, Vector2(rs, rs))
+			draw_texture(ring, Vector2(-128, -128), Color(sc * 1.6, 0.85 * fade))
+			draw_set_transform(Vector2(x, y), -t * 3.0, Vector2(rs, rs) * 1.95)
+			draw_texture(Art.tex("portal"), Vector2(-64, -64), Color(sc * 1.4, 0.5 * fade))
+			draw_set_transform(Vector2(x, y), 0.0, Vector2(rs, rs) * 1.7)
+			draw_texture(glow, Vector2(-64, -64), Color(sc, 0.18 * fade))
+		elif s.od_ready():
+			var k := 0.5 + 0.5 * sin(t * 6.0)
+			draw_set_transform(Vector2(x, y), t * 1.5, Vector2(0.55, 0.55) * (1.0 + 0.08 * k))
+			draw_texture(ring, Vector2(-128, -128), Color(sc * 1.5, 0.35 + 0.35 * k))

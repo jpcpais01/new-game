@@ -432,13 +432,54 @@ def sfx_evolution():
     write_wav("implode", x, 0.9)
 
 
+def sfx_overdrive():
+    """Overdrive and mission sounds (own RNG so older sounds stay identical)."""
+    global rng
+    rng = np.random.default_rng(53)
+    # Overdrive: a sub thump, a rising saw stack and a bright crash.
+    n = int(1.8 * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(sweep_phase(160, 34, n, 0.3)) * expdecay(n, 3.0) * 1.1
+    for m in [38, 45, 50, 57, 62]:
+        x += saw_from_phase(sweep_phase(mtof(m) * 0.5, mtof(m), n, 0.15), 8) * env(n, 0.02, 0.4, 0.4, 1.0, 0.3) * 0.16
+    x = lowpass(x, 5200)
+    x += highpass(noise(n), 2500) * expdecay(n, 4.5) * 0.55
+    x += highpass(noise(n), 6000) * env(n, 0.002, 0.05, 0.0, 0.0) * 0.6
+    write_wav("overdrive", x, 0.95)
+    # Overdrive ready: a two-note glassy chime.
+    n = int(0.7 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([81, 88]):
+        st = int(k * 0.09 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        tone = np.sin(2 * np.pi * mtof(m) * t2) + 0.35 * np.sin(2 * np.pi * mtof(m) * 2.01 * t2)
+        x[st:] += tone * expdecay(seg, 7) * 0.6
+    write_wav("od_ready", x, 0.7)
+    # Mission complete: a short triumphant arpeggio.
+    n = int(1.3 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([72, 76, 79, 84]):
+        st = int(k * 0.08 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += square_from_phase(2 * np.pi * mtof(m) * t2, 5) * expdecay(seg, 4.0 - 0.6 * k) * 0.25
+    x = lowpass(x, 6000)
+    write_wav("mission", x, 0.8)
+
+
 if __name__ == "__main__":
     import sys
     if "--evo" in sys.argv:
         sfx_evolution()
         print("evolution audio ok")
         sys.exit(0)
+    if "--od" in sys.argv:
+        sfx_overdrive()
+        print("overdrive audio ok")
+        sys.exit(0)
     sfx()
     music()
     sfx_evolution()
+    sfx_overdrive()
     print("audio ok")

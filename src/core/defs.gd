@@ -189,3 +189,95 @@ static func evolves(passive: String) -> String:
 		if EVOLUTIONS[w].needs == passive:
 			return w
 	return ""
+
+
+## Ships: each starts with its own weapon, tweaks the base stats, has a quirk
+## and a signature Overdrive (charged by kills, fired from the HUD button).
+## Stat keys are multipliers or additions on top of the base ship.
+const SHIPS := [
+	{"id": "lumen", "name": "Lumen", "color": Color(0.35, 0.95, 1.0), "weapon": "pulse",
+		"title": "The first light", "quirk": "Balanced. +1 card reroll every run.",
+		"od": "Flare", "od_text": "A blinding nova that scorches everything on screen and erases enemy fire.",
+		"stats": {"reroll": 1}},
+	{"id": "vesper", "name": "Vesper", "color": Color(0.45, 1.0, 0.75), "weapon": "orbit",
+		"title": "The bulwark",
+		"quirk": "Starts with three blades. +40 max HP, 3 armour, 6% slower. Taking a hit releases a shockwave.",
+		"od": "Aegis", "od_text": "Six seconds of invulnerability inside a searing shield that burns all it touches.",
+		"stats": {"hp": 40.0, "armor": 3.0, "speed": 0.94, "wlvl": 2}},
+	{"id": "kestrel", "name": "Kestrel", "color": Color(1.0, 0.68, 0.3), "weapon": "seeker",
+		"title": "The hunter", "quirk": "15% faster, -15 max HP. Weapons recharge 20% faster while you move.",
+		"od": "Barrage", "od_text": "Unloads a storm of thirty homing missiles.",
+		"stats": {"hp": -15.0, "speed": 1.15}},
+	{"id": "strix", "name": "Strix", "color": Color(0.78, 0.62, 1.0), "weapon": "arc",
+		"title": "The glass cannon", "quirk": "+25% damage, -25 max HP. Critical hits arc to a nearby enemy.",
+		"od": "Tempest", "od_text": "Five seconds of chain lightning raining on the swarm.",
+		"stats": {"hp": -25.0, "might": 0.25}},
+	{"id": "halcyon", "name": "Halcyon", "color": Color(1.0, 0.5, 0.88), "weapon": "nova",
+		"title": "The harvester", "quirk": "+40% pickup range, +15% experience. Light you collect heals you.",
+		"od": "Black Sun", "od_text": "Opens a colossal singularity that swallows the swarm, and pulls in every gem.",
+		"stats": {"magnet": 0.4, "xp": 0.15}},
+	{"id": "aurora", "name": "Aurora", "color": Color(1.0, 0.92, 0.55), "weapon": "lance",
+		"title": "The prism", "quirk": "+10% critical chance. Critical hits deal triple damage.",
+		"od": "Prism Storm", "od_text": "Eight rainbow lances wheel around you for four seconds.",
+		"stats": {"crit": 0.1}},
+	{"id": "nyx", "name": "Nyx", "color": Color(1.0, 0.3, 0.5), "weapon": "pulse",
+		"title": "The eclipse-born", "quirk": "The swarm has +40% HP. You gain +50% experience and +50% Flux.",
+		"od": "Eclipse", "od_text": "Stops time for five seconds. Frozen enemies are harmless and take +50% damage.",
+		"stats": {"xp": 0.5}},
+]
+
+## Overdrive: kills charge the meter; each use makes the next one costlier.
+const OD_BASE := 140.0
+const OD_GROWTH := 0.3
+
+
+static func ship(id: String) -> Dictionary:
+	for s in SHIPS:
+		if s.id == id:
+			return s
+	return SHIPS[0]
+
+
+## Missions: long-term goals. Some unlock ships; all pay Flux once.
+## kind: what is measured (see Missions.progress), goal: the target.
+const MISSIONS := [
+	{"id": "first_flight", "name": "First Flight", "text": "Survive 2:00 in one run.", "kind": "time", "goal": 120,
+		"flux": 40},
+	{"id": "warden", "name": "Wardenfall", "text": "Defeat the Warden.", "kind": "warden", "goal": 1,
+		"flux": 120, "ship": "vesper"},
+	{"id": "long_haul", "name": "Long Haul", "text": "Survive 5:00 in one run.", "kind": "time", "goal": 300,
+		"flux": 100, "ship": "kestrel"},
+	{"id": "exterminator", "name": "Exterminator", "text": "Destroy 2,000 enemies in total.", "kind": "total_kills",
+		"goal": 2000, "flux": 100, "ship": "strix"},
+	{"id": "alchemist", "name": "Alchemist", "text": "Evolve a weapon.", "kind": "evolutions", "goal": 1,
+		"flux": 100, "ship": "aurora"},
+	{"id": "ascendant", "name": "Ascendant", "text": "Reach level 30 in one run.", "kind": "level", "goal": 30,
+		"flux": 150, "ship": "halcyon"},
+	{"id": "dawn", "name": "Dawnbringer", "text": "Reach the dawn.", "kind": "win", "goal": 1, "flux": 300,
+		"ship": "nyx"},
+	{"id": "overdrive", "name": "Redline", "text": "Use Overdrive 5 times in one run.", "kind": "overdrives",
+		"goal": 5, "flux": 100},
+	{"id": "swarm_breaker", "name": "Swarm Breaker", "text": "Destroy 1,500 enemies in one run.", "kind": "kills",
+		"goal": 1500, "flux": 120},
+	{"id": "hoarder", "name": "Hoarder", "text": "Open 6 Prism Caches in one run.", "kind": "caches", "goal": 6,
+		"flux": 120},
+	{"id": "untouchable", "name": "Untouchable", "text": "Survive 2:30 without taking damage.",
+		"kind": "untouched", "goal": 150, "flux": 150},
+	{"id": "twin_evo", "name": "Twin Stars", "text": "Evolve 2 weapons in one run.", "kind": "evolutions",
+		"goal": 2, "flux": 200},
+	{"id": "codex", "name": "Codex", "text": "Discover all 6 evolutions.", "kind": "codex", "goal": 6, "flux": 500},
+	{"id": "veteran", "name": "Veteran", "text": "Destroy 25,000 enemies in total.", "kind": "total_kills",
+		"goal": 25000, "flux": 400},
+	{"id": "fleet", "name": "Fleet Admiral", "text": "Reach the dawn with 3 different ships.", "kind": "fleet",
+		"goal": 3, "flux": 500},
+	{"id": "nightfall", "name": "Nightfall", "text": "Reach the dawn flying Nyx.", "kind": "win_nyx", "goal": 1,
+		"flux": 800},
+]
+
+
+## The mission that unlocks a ship, or {} for ships you start with.
+static func ship_mission(ship_id: String) -> Dictionary:
+	for m in MISSIONS:
+		if m.get("ship", "") == ship_id:
+			return m
+	return {}

@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 2
+const RULES_VERSION := 3
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -51,6 +51,11 @@ const EV_CHEST := 22      # rewards [[card id, new level], ...], big, x, y
 const EV_EVOLVE := 23     # weapon id
 const EV_WELL := 24       # x, y, r (a singularity opens)
 const EV_IMPLODE := 25    # x, y, r (a singularity detonates)
+const EV_OVERDRIVE := 26  # ship id, x, y
+const EV_OD_READY := 27
+const EV_AEGIS := 28      # x, y, r (shield pulse)
+
+const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
 ## Director schedule: [second, kind, type, count]
 const SCHEDULE := [
@@ -114,6 +119,23 @@ var novas: Array = []        # {x, y, r, max, step, dmg, hit: {uid: true}}
 var wells: Array = []        # {x, y, r, t, dmg} singularities
 var pickups: Array = []      # {k, x, y, mag, spd}
 var evolutions := 0
+
+# --- ship and Overdrive ------------------------------------------------------------
+var ship_id := "lumen"
+var ship_stats := {}
+var od := 0.0                # charge, full at od_need
+var od_need := Defs.OD_BASE
+var od_uses := 0
+var od_t := 0                # ticks left of an active Overdrive
+var od_k := 0                # pulses fired by the active Overdrive
+var shield := 0              # Aegis: ticks of invulnerability
+var freeze := 0              # Eclipse: ticks of stopped time
+var curse := 1.0             # enemy HP multiplier (Nyx)
+var caches_opened := 0
+var warden_down := false
+var first_hurt := -1         # tick of the first damage taken, -1 if none
+var _arc_cd := 0
+var _in_arc := false
 
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
@@ -204,9 +226,14 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 	loadout = loadout_in.duplicate()
 	rng = GlowRng.new(seed_value)
 	_alloc()
+	var sd := Defs.ship(String(loadout.get("ship", "lumen")))
+	ship_id = sd.id
+	ship_stats = sd.stats
+	if ship_id == "nyx":
+		curse = 1.4
 	revives = int(loadout.get("revive", 0))
-	rerolls = int(loadout.get("reroll", 0))
-	weapons.append({"id": "pulse", "lvl": 1, "t": 20, "k": 0, "a": 0})
+	rerolls = int(loadout.get("reroll", 0)) + int(ship_stats.get("reroll", 0))
+	weapons.append({"id": sd.weapon, "lvl": int(ship_stats.get("wlvl", 1)), "t": 20, "k": 0, "a": 0})
 	_recompute()
 	hp = max_hp
 	xp_need = need_for(level)
@@ -242,13 +269,14 @@ func seconds() -> float:
 # Public API
 # =============================================================================
 
-## Advance one tick with a move input in [-100, 100] per axis.
-func step(ix: int, iy: int) -> void:
+## Advance one tick with a move input in [-100, 100] per axis. `burst` fires
+## the Overdrive if it is charged.
+func step(ix: int, iy: int, burst := false) -> void:
 	if state != RUNNING:
 		return
 	ix = clampi(ix, -100, 100)
 	iy = clampi(iy, -100, 100)
-	_log_move(ix, iy)
+	_log_move(ix, iy, burst)
 	events.clear()
 	tick += 1
 	_snapshot()
@@ -257,6 +285,9 @@ func step(ix: int, iy: int) -> void:
 	_update_enemies()
 	_grid_build()
 	_separate()
+	if burst and od_ready():
+		_overdrive()
+	_update_overdrive()
 	_weapons()
 	_update_novas()
 	_update_wells()
@@ -322,6 +353,18 @@ func evolution_ready(id: String) -> bool:
 	return passives.has(Defs.EVOLUTIONS[id].needs)
 
 
+## True when the Overdrive meter is full and nothing is already running.
+func od_ready() -> bool:
+	return od >= od_need and od_t <= 0
+
+
+## Meter fill 0..1 (1 while an Overdrive is running, draining with it).
+func od_frac() -> float:
+	if od_t > 0:
+		return 1.0
+	return clampf(od / od_need, 0.0, 1.0)
+
+
 func card_level(id: String) -> int:
 	if Defs.is_weapon(id):
 		return weapon_level(id)
@@ -340,7 +383,10 @@ func flux_earned() -> int:
 	var base := kills / 6 + tick / (TPS * 3) + (level - 1) * 4 + bosses_killed * 80 + flux_bonus
 	if state == WON:
 		base += 300
-	return int(float(base) * (1.0 + 0.12 * float(loadout.get("greed", 0))))
+	var mult := 1.0 + 0.12 * float(loadout.get("greed", 0))
+	if ship_id == "nyx":
+		mult *= 1.5
+	return int(float(base) * mult)
 
 
 func checksum() -> int:
@@ -395,7 +441,7 @@ static func from_replay(data: Dictionary, upto_tick: int = -1) -> Sim:
 			left = int(moves[mi + 1])
 			mi += 2
 		left -= 1
-		s.step(((code >> 8) & 0xFF) - 128, (code & 0xFF) - 128)
+		s.step(((code >> 8) & 0xFF) - 128, (code & 0xFF) - 128, (code & BURST_BIT) != 0)
 	return s
 
 
@@ -403,8 +449,10 @@ static func from_replay(data: Dictionary, upto_tick: int = -1) -> Sim:
 # Tick internals
 # =============================================================================
 
-func _log_move(ix: int, iy: int) -> void:
+func _log_move(ix: int, iy: int, burst: bool) -> void:
 	var code := ((ix + 128) << 8) | (iy + 128)
+	if burst:
+		code |= BURST_BIT
 	var n := log_moves.size()
 	if n >= 2 and log_moves[n - 2] == code:
 		log_moves[n - 1] += 1
@@ -576,7 +624,7 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	e_oy[i] = y
 	e_vx[i] = 0.0
 	e_vy[i] = 0.0
-	var hpv: float = def.hp * hpm
+	var hpv: float = def.hp * hpm * curse
 	var r: float = def.r
 	var dmg: float = def.dmg * dmm
 	var kb: float = def.kb
@@ -628,6 +676,14 @@ func _update_enemies() -> void:
 			e_flash[i] -= 1
 		if e_hitcd[i] > 0:
 			e_hitcd[i] -= 1
+		if freeze > 0:
+			# Stopped time: only knockback moves them.
+			e_x[i] += e_vx[i] * DT
+			e_y[i] += e_vy[i] * DT
+			e_vx[i] *= 0.86
+			e_vy[i] *= 0.86
+			i += 1
+			continue
 		var type := e_type[i]
 		var dx := px - e_x[i]
 		var dy := py - e_y[i]
@@ -920,7 +976,11 @@ func _weapons() -> void:
 			"lance":
 				fired = _fire_lance(spec, w)
 		if fired:
-			w.t = maxi(6, int(float(spec.cd) * st_haste))
+			var haste := st_haste
+			# Kestrel's slipstream: faster recharge while moving.
+			if ship_id == "kestrel" and mvx * mvx + mvy * mvy > 0.25:
+				haste *= 0.8
+			w.t = maxi(6, int(float(spec.cd) * haste))
 			# Spectrum sweeps: quick follow-up pulses before the real cooldown.
 			if spec.has("sweeps"):
 				w.k += 1
@@ -1095,7 +1155,7 @@ func _fire_nova(spec: Dictionary) -> bool:
 			wx = e_x[t]
 			wy = e_y[t]
 		var wr: float = spec.well * st_area
-		wells.append({"x": wx, "y": wy, "r": wr, "t": WELL_TICKS, "dmg": spec.well_dmg})
+		wells.append({"x": wx, "y": wy, "r": wr, "t": WELL_TICKS, "max": WELL_TICKS, "dmg": spec.well_dmg})
 		events.append([EV_WELL, wx, wy, wr])
 	return true
 
@@ -1124,7 +1184,7 @@ func _update_wells() -> void:
 				e_vx[i] += dx / d * pull
 				e_vy[i] += dy / d * pull
 				if grind and d < wr * 0.55:
-					_damage(i, 6.0, 0.0, 0.0)
+					_damage(i, w.get("grind", 6.0), 0.0, 0.0)
 		if w.t <= 0:
 			wells.remove_at(k)
 			events.append([EV_IMPLODE, wx, wy, wr * 0.65])
@@ -1220,6 +1280,143 @@ func _fire_lance(spec: Dictionary, w: Dictionary) -> bool:
 	return true
 
 
+# --- Overdrive --------------------------------------------------------------------
+
+## Overdrive damage grows with the swarm's toughness so it never goes stale.
+func _od_scale() -> float:
+	var tm := seconds() / 60.0
+	return 1.0 + 0.35 * tm + 0.08 * tm * tm
+
+
+func _overdrive() -> void:
+	od -= od_need
+	od_uses += 1
+	od_need = Defs.OD_BASE * (1.0 + Defs.OD_GROWTH * float(od_uses))
+	od_k = 0
+	iframes = maxi(iframes, 30)
+	var sc := _od_scale()
+	events.append([EV_OVERDRIVE, ship_id, px, py])
+	match ship_id:
+		"vesper":
+			od_t = 360
+			shield = 360
+		"kestrel":
+			od_t = 90
+		"strix":
+			od_t = 300
+		"halcyon":
+			od_t = 150
+			var r := 650.0 * st_area
+			wells.append({"x": px, "y": py, "r": r, "t": 150, "max": 150, "dmg": 160.0 * sc, "grind": 10.0 * sc})
+			events.append([EV_WELL, px, py, r])
+			for g in gn:
+				g_mag[g] = 1
+			for p in pickups:
+				p.mag = true
+		"aurora":
+			od_t = 240
+		"nyx":
+			od_t = 300
+			freeze = 300
+		_:
+			# Flare: scorch everything nearby and erase enemy fire.
+			od_t = 30
+			qn = 0
+			var fr := 1000.0
+			for i in en:
+				if e_spawn[i] > 0 or e_hp[i] <= 0.0:
+					continue
+				var dx := e_x[i] - px
+				var dy := e_y[i] - py
+				var d2 := dx * dx + dy * dy
+				if d2 < fr * fr:
+					var d := sqrt(d2) + 0.001
+					_damage(i, 55.0 * sc, dx / d * 700.0, dy / d * 700.0)
+
+
+func _update_overdrive() -> void:
+	if _arc_cd > 0:
+		_arc_cd -= 1
+	if shield > 0:
+		shield -= 1
+	if freeze > 0:
+		freeze -= 1
+	if od_t <= 0:
+		return
+	od_t -= 1
+	var sc := _od_scale()
+	match ship_id:
+		"vesper":
+			# Aegis: the shield burns and repels whatever it touches.
+			if od_t % 10 == 0:
+				var r := 210.0 * st_area
+				events.append([EV_AEGIS, px, py, r])
+				_query(px, py, r)
+				for q in _qn:
+					var i := _qbuf[q]
+					if e_hp[i] <= 0.0:
+						continue
+					var dx := e_x[i] - px
+					var dy := e_y[i] - py
+					var rr := r + e_r[i]
+					var d2 := dx * dx + dy * dy
+					if d2 < rr * rr:
+						var d := sqrt(d2) + 0.001
+						_damage(i, 12.0 * sc, dx / d * 320.0, dy / d * 320.0)
+		"kestrel":
+			# Barrage: a missile every third tick, fanning around the ship.
+			if od_t % 3 == 0:
+				od_k += 1
+				var t := _nearest(px, py, 900.0)
+				var a := od_k * 97
+				var i := _add_bullet(1, px, py, a, 520.0, 24.0 * sc, 12.0, 0, 150, 92.0 * st_area)
+				if i >= 0 and t >= 0:
+					b_tx[i] = e_x[t]
+					b_ty[i] = e_y[t]
+				if od_k % 3 == 1:
+					events.append([EV_SHOT, "seeker", px, py, a])
+		"strix":
+			# Tempest: lightning falls on random enemies around you.
+			if od_t % 5 == 0:
+				var a := rng.range_i(Trig.STEPS)
+				var dist := rng.range_f(80.0, 520.0)
+				var cur := _nearest(px + Trig.cos_i(a) * dist, py + Trig.sin_i(a) * dist, 360.0)
+				if cur >= 0:
+					var hit := {}
+					var pts := PackedVector2Array([Vector2(e_x[cur], e_y[cur] - 900.0)])
+					for c in 4:
+						hit[e_uid[cur]] = true
+						pts.append(Vector2(e_x[cur], e_y[cur]))
+						_damage(cur, 30.0 * sc, 0.0, 0.0)
+						var nxt := _nearest(e_x[cur], e_y[cur], 260.0, hit)
+						if nxt < 0:
+							break
+						cur = nxt
+					events.append([EV_ARC, pts, true])
+		"aurora":
+			# Prism Storm: eight beams turning like a lighthouse.
+			if od_t % 12 == 0:
+				od_k += 1
+				var base := od_k * Trig.STEPS / 40
+				var wd := 54.0 * st_area
+				for k in 8:
+					var da := base + k * Trig.STEPS / 8
+					var ux := Trig.cos_i(da)
+					var uy := Trig.sin_i(da)
+					var length := 1100.0
+					for i in en:
+						if e_spawn[i] > 0 or e_hp[i] <= 0.0:
+							continue
+						var rx := e_x[i] - px
+						var ry := e_y[i] - py
+						var along := rx * ux + ry * uy
+						if along < -e_r[i] or along > length + e_r[i]:
+							continue
+						if absf(rx * uy - ry * ux) < wd * 0.5 + e_r[i]:
+							_damage(i, 30.0 * sc, ux * 160.0, uy * 160.0)
+					events.append([EV_LANCE, px, py, px + ux * length, py + uy * length, wd, float(k) / 8.0])
+
+
 # --- projectiles ------------------------------------------------------------------
 
 func _update_bullets() -> void:
@@ -1295,6 +1492,8 @@ func _explode(x: float, y: float, r: float, dmg: float) -> void:
 
 
 func _update_orbs() -> void:
+	if freeze > 0:
+		return
 	var i := qn - 1
 	var hr := 9.0 + PLAYER_R * 0.75
 	while i >= 0:
@@ -1329,17 +1528,29 @@ func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 	var crit := rng.unit() < st_crit
 	var dd := dmg * st_might
 	if crit:
-		dd *= 2.0
+		dd *= 3.0 if ship_id == "aurora" else 2.0
+	if freeze > 0:
+		dd *= 1.5
 	e_hp[i] -= dd
 	damage_dealt += dd
 	e_flash[i] = 5
 	e_vx[i] += kx * e_kb[i]
 	e_vy[i] += ky * e_kb[i]
 	events.append([EV_HIT, e_x[i], e_y[i], dd, crit, e_type[i]])
+	# Strix: critical hits leap to a nearby enemy (never recursively).
+	if crit and ship_id == "strix" and not _in_arc and _arc_cd <= 0:
+		var skip := {e_uid[i]: true}
+		var j := _nearest(e_x[i], e_y[i], 240.0, skip)
+		if j >= 0:
+			_arc_cd = 4
+			_in_arc = true
+			events.append([EV_ARC, PackedVector2Array([Vector2(e_x[i], e_y[i]), Vector2(e_x[j], e_y[j])]), false])
+			_damage(j, dmg * 0.6, 0.0, 0.0)
+			_in_arc = false
 
 
 func _contact() -> void:
-	if iframes > 0 or state != RUNNING:
+	if iframes > 0 or shield > 0 or freeze > 0 or state != RUNNING:
 		return
 	_query(px, py, PLAYER_R)
 	for q in _qn:
@@ -1355,14 +1566,22 @@ func _contact() -> void:
 
 
 func _hurt(dmg: float) -> void:
-	if iframes > 0 or state != RUNNING:
+	if iframes > 0 or shield > 0 or state != RUNNING:
 		return
 	var d := maxf(1.0, dmg - st_armor)
 	hp -= d
 	iframes = 42
+	if first_hurt < 0:
+		first_hurt = tick
 	events.append([EV_HURT, d])
 	# Repulse: give the player room to breathe.
 	_shove(px, py, 170.0, 420.0)
+	# Vesper's bulwark answers every hit with a shockwave.
+	if ship_id == "vesper":
+		var vr := 260.0 * st_area
+		novas.append({"x": px, "y": py, "r": 0.0, "max": vr, "step": vr / 14.0, "dmg": 18.0 * _od_scale() * 0.5,
+				"hit": {}})
+		events.append([EV_NOVA, px, py, vr])
 	if hp <= 0.0:
 		if revives > 0:
 			revives -= 1
@@ -1427,6 +1646,11 @@ func _on_death(i: int) -> void:
 		return
 	kills += 1
 	events.append([EV_KILL, x, y, type, elite, e_r[i]])
+	if od_t <= 0:
+		var was_ready := od >= od_need
+		od = minf(od_need, od + (40.0 if type >= Defs.WARDEN else (12.0 if elite else 1.0)))
+		if not was_ready and od >= od_need:
+			events.append([EV_OD_READY])
 	var xpv: int = Defs.ENEMY[type].xp
 	if elite:
 		xpv = xpv * 8 + 10
@@ -1441,6 +1665,7 @@ func _on_death(i: int) -> void:
 			_blasts.append([x, y, 110.0, 30.0])
 		Defs.WARDEN:
 			bosses_killed += 1
+			warden_down = true
 			events.append([EV_BOSS_DOWN, type, x, y])
 			_drop_pickup("bigchest", x, y)
 			_drop_pickup("core", x + 70.0, y)
@@ -1508,6 +1733,8 @@ func _update_gems() -> void:
 		if take:
 			var v := g_val[i]
 			xp += v * st_xp
+			if ship_id == "halcyon":
+				hp = minf(max_hp, hp + v * 0.08)
 			events.append([EV_GEM, g_x[i], g_y[i], v])
 			var l := gn - 1
 			if i != l:
@@ -1568,6 +1795,7 @@ func _update_pickups() -> void:
 ## Prism Cache: evolves the first ready weapon, otherwise upgrades what you
 ## own (one item, or three from a boss). Always some Flux on top.
 func _open_chest(big: bool, x: float, y: float) -> void:
+	caches_opened += 1
 	var rewards: Array = []
 	for w in weapons:
 		if evolution_ready(w.id):
@@ -1679,16 +1907,18 @@ func _apply_card(id: String) -> void:
 func _recompute() -> void:
 	var lv := func(p: String) -> float: return float(passives.get(p, 0))
 	var fl := func(f: String) -> float: return float(loadout.get(f, 0))
-	var new_max: float = 100.0 + 20.0 * lv.call("vitality") + 12.0 * fl.call("hull")
+	var sh := func(k: String, d: float) -> float: return float(ship_stats.get(k, d))
+	var new_max: float = 100.0 + sh.call("hp", 0.0) + 20.0 * lv.call("vitality") + 12.0 * fl.call("hull")
 	if new_max > max_hp:
 		hp += new_max - max_hp
 	max_hp = new_max
-	st_speed = 300.0 * (1.0 + 0.08 * lv.call("thrusters") + 0.04 * fl.call("engine"))
-	st_magnet = 125.0 * (1.0 + 0.35 * lv.call("magnet") + 0.12 * fl.call("magnet"))
+	hp = minf(hp, max_hp)
+	st_speed = 300.0 * sh.call("speed", 1.0) * (1.0 + 0.08 * lv.call("thrusters") + 0.04 * fl.call("engine"))
+	st_magnet = 125.0 * (1.0 + sh.call("magnet", 0.0) + 0.35 * lv.call("magnet") + 0.12 * fl.call("magnet"))
 	st_haste = 1.0 - 0.08 * lv.call("overclock")
-	st_might = 1.0 + 0.12 * lv.call("amplifier") + 0.06 * fl.call("power")
+	st_might = 1.0 + sh.call("might", 0.0) + 0.12 * lv.call("amplifier") + 0.06 * fl.call("power")
 	st_area = 1.0 + 0.12 * lv.call("lens")
-	st_armor = 2.0 * lv.call("plating")
-	st_crit = 0.05 + 0.07 * lv.call("fortune")
-	st_xp = 1.0 + 0.12 * lv.call("scholar")
+	st_armor = sh.call("armor", 0.0) + 2.0 * lv.call("plating")
+	st_crit = 0.05 + sh.call("crit", 0.0) + 0.07 * lv.call("fortune")
+	st_xp = 1.0 + sh.call("xp", 0.0) + 0.12 * lv.call("scholar")
 	st_regen = 0.4 * lv.call("renewal")

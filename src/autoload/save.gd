@@ -14,6 +14,10 @@ const DEFAULTS := {
 	"total_flux": 0,
 	"tutorial_done": false,
 	"evolved": [],
+	"ship": "lumen",
+	"missions": [],
+	"ships_won": [],
+	"seen_ships": ["lumen"],
 	"settings": {"sound": true, "music": true, "haptics": true, "shake": true, "numbers": true},
 }
 
@@ -22,6 +26,39 @@ var data: Dictionary = {}
 
 func _ready() -> void:
 	load_data()
+	sync_missions()
+
+
+## Completes missions earlier runs already earned (records kept before
+## missions existed count too). Returns the ids it completed.
+func sync_missions() -> Array:
+	var done: Array = data.missions
+	var fresh: Array = []
+	for m in Defs.MISSIONS:
+		if not done.has(m.id) and Missions.done(m, null, data):
+			done.append(m.id)
+			fresh.append(m.id)
+			data.flux = int(data.flux) + int(m.flux)
+			data.total_flux = int(data.total_flux) + int(m.flux)
+	if not fresh.is_empty():
+		save_data()
+	return fresh
+
+
+## Unlocked ships the player has not looked at in the hangar yet.
+func unseen_ships() -> Array:
+	var out: Array = []
+	for s in Defs.SHIPS:
+		if ship_unlocked(s.id) and not (data.seen_ships as Array).has(s.id):
+			out.append(s.id)
+	return out
+
+
+func mark_ships_seen() -> void:
+	var seen: Array = data.seen_ships
+	for id in unseen_ships():
+		seen.append(id)
+	save_data()
 
 
 func load_data() -> void:
@@ -60,14 +97,30 @@ func forge_level(id: String) -> int:
 	return int(data.forge.get(id, 0))
 
 
-## The loadout a new run starts with: Forge levels as plain ints.
+## The loadout a new run starts with: Forge levels as plain ints plus the ship.
 func loadout() -> Dictionary:
-	var out := {}
+	var out := {"ship": current_ship()}
 	for f in Defs.FORGE:
 		var l := forge_level(f.id)
 		if l > 0:
 			out[f.id] = l
 	return out
+
+
+## The selected ship, falling back to Lumen if it is somehow locked.
+func current_ship() -> String:
+	var id := String(data.get("ship", "lumen"))
+	return id if ship_unlocked(id) else "lumen"
+
+
+func ship_unlocked(id: String) -> bool:
+	return Missions.ship_unlocked(id, data.missions)
+
+
+func select_ship(id: String) -> void:
+	if ship_unlocked(id):
+		data.ship = id
+		save_data()
 
 
 func forge_cost(id: String) -> int:
@@ -98,6 +151,9 @@ func record_run(sim: Sim) -> Dictionary:
 	data.total_kills = int(data.total_kills) + sim.kills
 	if sim.state == Sim.WON:
 		data.wins = int(data.wins) + 1
+		var won: Array = data.ships_won
+		if not won.has(sim.ship_id):
+			won.append(sim.ship_id)
 	if sim.seconds() > float(data.best_time):
 		beat.time = true
 		data.best_time = sim.seconds()
@@ -112,5 +168,20 @@ func record_run(sim: Sim) -> Dictionary:
 		if sim.is_evolved(w.id) and not known.has(w.id):
 			known.append(w.id)
 			beat[w.id] = true
+	# Missions: pay out once, unlock ships.
+	var done: Array = data.missions
+	var fresh: Array = []
+	var ships: Array = []
+	for m in Defs.MISSIONS:
+		if done.has(m.id) or not Missions.done(m, sim, data):
+			continue
+		done.append(m.id)
+		fresh.append(m.id)
+		data.flux = int(data.flux) + int(m.flux)
+		data.total_flux = int(data.total_flux) + int(m.flux)
+		if m.has("ship"):
+			ships.append(m.ship)
+	beat.missions = fresh
+	beat.ships = ships
 	save_data()
 	return beat

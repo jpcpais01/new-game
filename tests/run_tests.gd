@@ -13,6 +13,9 @@ func _init() -> void:
 	_test_evolutions()
 	_test_chests()
 	_test_overload()
+	_test_ships()
+	_test_overdrive_replay()
+	_test_missions()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -155,6 +158,128 @@ func _test_overload() -> void:
 	s.e_t[i] = Sim.OVERLOAD_TICKS
 	s.step(0, 0)
 	check(s.e_state[s.boss_index()] == 5, "a Warden left alive overloads")
+
+
+func _surround(s: Sim, type: int, n: int) -> void:
+	for k in n:
+		var a := k * Trig.STEPS / n
+		s._spawn(type, s.px + Trig.cos_i(a) * (150.0 + 9.0 * k), s.py + Trig.sin_i(a) * (150.0 + 9.0 * k), false, 0)
+
+
+func _test_ships() -> void:
+	for sd in Defs.SHIPS:
+		var id: String = sd.id
+		var s := Sim.new(11, {"ship": id})
+		check(s.ship_id == id, "%s: ship chosen from the loadout" % id)
+		check(s.weapons.size() == 1 and s.weapons[0].id == sd.weapon, "%s starts with %s" % [id, sd.weapon])
+		check(is_equal_approx(s.max_hp, 100.0 + float(sd.stats.get("hp", 0.0))), "%s max HP" % id)
+		check(s.hp == s.max_hp, "%s starts at full HP" % id)
+		# Overdrive does nothing until charged.
+		s.step(0, 0, true)
+		check(s.od_uses == 0 and not _has_event(s, Sim.EV_OVERDRIVE), "%s: burst ignored while charging" % id)
+		_surround(s, Defs.DRIFTER, 30)
+		s.od = s.od_need
+		check(s.od_ready(), "%s: full meter is ready" % id)
+		var kills0 := s.kills
+		s.step(0, 0, true)
+		check(_has_event(s, Sim.EV_OVERDRIVE), "%s: Overdrive fires" % id)
+		check(s.od_uses == 1 and s.od < 1.0, "%s: Overdrive spends the meter" % id)
+		check(s.od_need > Defs.OD_BASE, "%s: next Overdrive costs more" % id)
+		check(not s.od_ready(), "%s: not ready right after firing" % id)
+		for t in 300:
+			if s.state == Sim.CHOOSING:
+				s.choose(0)
+			s.step(0, 0)
+		if id != "nyx":
+			check(s.kills > kills0 + 10, "%s: Overdrive clears the crowd (%d)" % [id, s.kills - kills0])
+	# Specific powers.
+	var v := Sim.new(12, {"ship": "vesper"})
+	v.od = v.od_need
+	v.step(0, 0, true)
+	check(v.shield > 0, "Aegis raises a shield")
+	v.iframes = 0
+	v._hurt(50.0)
+	check(v.hp == v.max_hp, "Aegis blocks damage")
+	var n := Sim.new(13, {"ship": "nyx"})
+	var e := n._spawn(Defs.DRIFTER, n.px + 400.0, n.py, false, 0)
+	n.od = n.od_need
+	n.step(0, 0, true)
+	var ex := n.e_x[e]
+	for t in 30:
+		n.step(0, 0)
+	check(n.freeze > 0 and absf(n.e_x[e] - ex) < 0.5, "Eclipse stops enemies in time")
+	check(n.e_maxhp[e] > Defs.ENEMY[Defs.DRIFTER].hp * 1.3, "Nyx's swarm is tougher")
+	var l := Sim.new(14)
+	l._fire_orb(l.px + 300.0, l.py, 0, 100.0, 10.0)
+	l.od = l.od_need
+	l.step(0, 0, true)
+	check(l.qn == 0, "Flare erases enemy fire")
+	var k := Sim.new(15, {"ship": "kestrel"})
+	check(k.st_speed > 300.0 * 1.1, "Kestrel is fast")
+	var a := Sim.new(16, {"ship": "aurora"})
+	check(is_equal_approx(a.st_crit, 0.15), "Aurora crit chance")
+	var h := Sim.new(17, {"ship": "halcyon"})
+	h.hp = 50.0
+	h._drop_gem(h.px, h.py, 50.0)
+	h.step(0, 0)
+	check(h.hp > 50.0, "Halcyon heals from light")
+
+
+## Overdrive presses are part of the input log, so replays reproduce them.
+func _test_overdrive_replay() -> void:
+	for id in ["strix", "lumen", "nyx"]:
+		var s := Sim.new(21, {"ship": id})
+		var fired_at := -1
+		while s.tick < 12000 and (s.state == Sim.RUNNING or s.state == Sim.CHOOSING):
+			if s.state == Sim.CHOOSING:
+				s.choose(Autopilot.pick(s))
+				continue
+			if fired_at < 0 and s.od_uses > 0:
+				fired_at = s.tick
+			if fired_at >= 0 and s.tick > fired_at + 400:
+				break
+			var m := Autopilot.move(s)
+			# Mash the button: presses while charging must be harmless too.
+			s.step(m.x, m.y, s.od_ready() or s.tick % 7 == 0)
+		check(s.od_uses >= 1, "%s: Overdrive fired in a natural run (%d)" % [id, s.od_uses])
+		var r := Sim.from_replay(s.to_replay())
+		check(r.od_uses == s.od_uses, "%s: replay reproduces Overdrives" % id)
+		check(r.checksum() == s.checksum(), "%s: Overdrive replay checksum" % id)
+
+
+func _find_mission(id: String) -> Dictionary:
+	for m in Defs.MISSIONS:
+		if m.id == id:
+			return m
+	return {}
+
+
+func _test_missions() -> void:
+	var data := {"best_time": 0.0, "best_level": 0, "best_kills": 0, "total_kills": 0, "wins": 0,
+			"evolved": [], "ships_won": [], "missions": []}
+	var s := Sim.new(31)
+	s.tick = 130 * Sim.TPS
+	check(Missions.done(_find_mission("first_flight"), s, data), "surviving 2:00 completes First Flight")
+	check(not Missions.done(_find_mission("long_haul"), s, data), "2:10 is not Long Haul")
+	check(not Missions.done(_find_mission("untouchable"), s, data), "2:10 untouched is short of Untouchable")
+	s.tick = 200 * Sim.TPS
+	check(Missions.done(_find_mission("untouchable"), s, data), "3:20 untouched completes Untouchable")
+	s.first_hurt = 60 * Sim.TPS
+	s.tick = 130 * Sim.TPS
+	check(not Missions.done(_find_mission("untouchable"), s, data), "hurt at 1:00 fails Untouchable")
+	s.warden_down = true
+	check(Missions.done(_find_mission("warden"), s, data), "Wardenfall")
+	data.total_kills = 2500
+	check(Missions.done(_find_mission("exterminator"), null, data), "total kills count from the save")
+	data.evolved = ["pulse"]
+	check(Missions.done(_find_mission("alchemist"), null, data), "a past evolution completes Alchemist")
+	check(not Missions.done(_find_mission("twin_evo"), null, data), "Twin Stars needs one run")
+	check(Missions.ship_unlocked("lumen", []), "Lumen is always flyable")
+	check(not Missions.ship_unlocked("vesper", []), "Vesper starts locked")
+	check(Missions.ship_unlocked("vesper", ["warden"]), "Wardenfall unlocks Vesper")
+	for sd in Defs.SHIPS:
+		if sd.id != "lumen":
+			check(not Defs.ship_mission(sd.id).is_empty(), "%s has an unlock mission" % sd.id)
 
 
 func _test_runs() -> void:

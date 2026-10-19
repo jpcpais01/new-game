@@ -10,13 +10,15 @@ const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "amplifier", 
 static func move(s: Sim) -> Vector2i:
 	var fx := 0.0
 	var fy := 0.0
+	# Blade pilots let enemies come close enough to be cut.
+	var hunt := s.weapon_level("orbit") > 0 and s.weapons.size() <= 2
 	for i in s.en:
 		if s.e_spawn[i] > 0:
 			continue
 		var dx := s.px - s.e_x[i]
 		var dy := s.py - s.e_y[i]
 		var d2 := dx * dx + dy * dy
-		var reach := 260.0 + s.e_r[i] * 2.0
+		var reach := (110.0 + s.e_r[i] * 1.5) if hunt else (260.0 + s.e_r[i] * 2.0)
 		if d2 < reach * reach:
 			var d := sqrt(d2) + 1.0
 			var w := (reach - d) / reach
@@ -60,6 +62,14 @@ static func move(s: Sim) -> Vector2i:
 			var d := sqrt(dx * dx + dy * dy) + 1.0
 			fx += dx / d * 0.6
 			fy += dy / d * 0.6
+		elif hunt:
+			var t := s._nearest(s.px, s.py, 700.0)
+			if t >= 0:
+				var dx := s.e_x[t] - s.px
+				var dy := s.e_y[t] - s.py
+				var d := sqrt(dx * dx + dy * dy) + 1.0
+				fx += dx / d * 0.5
+				fy += dy / d * 0.5
 	var r := sqrt(s.px * s.px + s.py * s.py)
 	if r > 900.0:
 		var k := (r - 900.0) / 600.0 * 2.5
@@ -69,6 +79,28 @@ static func move(s: Sim) -> Vector2i:
 	if l < 0.05:
 		return Vector2i(0, 0)
 	return Vector2i(int(fx / l * 100.0), int(fy / l * 100.0))
+
+
+## Fires the Overdrive when it is charged and the moment is right: a crowd
+## close by, a boss in range, or low health.
+static func burst(s: Sim) -> bool:
+	if not s.od_ready():
+		return false
+	if s.hp < s.max_hp * 0.4:
+		return true
+	var b := s.boss_index()
+	if b >= 0 and s.e_spawn[b] <= 0:
+		var bx := s.e_x[b] - s.px
+		var by := s.e_y[b] - s.py
+		if bx * bx + by * by < 600.0 * 600.0:
+			return true
+	var near := 0
+	for i in s.en:
+		var dx := s.e_x[i] - s.px
+		var dy := s.e_y[i] - s.py
+		if dx * dx + dy * dy < 420.0 * 420.0:
+			near += 1
+	return near >= 24
 
 
 static func pick(s: Sim) -> int:
@@ -88,6 +120,6 @@ static func play(s: Sim, max_ticks: int) -> void:
 			s.choose(pick(s))
 		elif s.state == Sim.RUNNING:
 			var m := move(s)
-			s.step(m.x, m.y)
+			s.step(m.x, m.y, burst(s))
 		else:
 			break

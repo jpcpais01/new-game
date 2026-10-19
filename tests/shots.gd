@@ -13,6 +13,8 @@ func _ready() -> void:
 	if args.size() > 0:
 		out = args[0]
 	DirAccess.make_dir_recursive_absolute(out)
+	Save.data.missions = ["alchemist", "exterminator", "first_flight"]
+	Save.data.ship = "strix"
 	main = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await _wait(2.5)
@@ -34,6 +36,13 @@ func _ready() -> void:
 	await _wait(1.6)
 	main.arena.demo = false
 	await _shot("2_run")
+	# Overdrive: charged, then unleashed.
+	s.od = s.od_need
+	await _wait(0.6)
+	await _shot("2a_od_ready")
+	gs._od.trigger()
+	await _wait(0.45)
+	await _shot("2d_overdrive")
 	# Evolved arsenal in action.
 	s.weapons = [
 		{"id": "pulse", "lvl": Defs.EVO_LEVEL, "t": 5, "k": 0, "a": 0},
@@ -69,6 +78,7 @@ func _ready() -> void:
 	gs._resume()
 	await _wait(0.3)
 	s.state = Sim.DEAD
+	s.warden_down = true
 	gs._on_end(false)
 	await _wait(1.6)
 	await _shot("5_results")
@@ -76,6 +86,18 @@ func _ready() -> void:
 	main.go_forge()
 	await _wait(1.2)
 	await _shot("6_forge")
+	main.go_hangar()
+	await _wait(1.2)
+	await _shot("7_hangar")
+	main.screen._show(1, 1)
+	await _wait(0.8)
+	await _shot("7b_hangar_vesper")
+	main.screen._show(6, 1)
+	await _wait(0.8)
+	await _shot("7c_hangar_locked")
+	main.go_missions()
+	await _wait(1.4)
+	await _shot("8_missions")
 	get_tree().quit()
 
 

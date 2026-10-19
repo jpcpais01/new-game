@@ -58,8 +58,20 @@ func _ready() -> void:
 		col.add_child(evo)
 		UiKit.pop_in(evo, 0.55)
 	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, 40)
+	gap.custom_minimum_size = Vector2(0, 30)
 	col.add_child(gap)
+	var sd := Defs.ship(Save.current_ship())
+	var chip := HBoxContainer.new()
+	chip.alignment = BoxContainer.ALIGNMENT_CENTER
+	chip.add_theme_constant_override("separation", 14)
+	chip.add_child(UiKit.icon_rect("ship_" + String(sd.id), 64))
+	chip.add_child(UiKit.label("%s  ·  %s" % [String(sd.name).to_upper(), String(sd.od).to_upper()], 30,
+			Color(sd.color).lerp(Color.WHITE, 0.25), UiKit.display()))
+	col.add_child(chip)
+	UiKit.pop_in(chip, 0.4)
+	var gap1 := Control.new()
+	gap1.custom_minimum_size = Vector2(0, 14)
+	col.add_child(gap1)
 
 	var play := UiKit.button("PLAY", UiKit.CYAN, 64, true)
 	play.custom_minimum_size = Vector2(620, 150)
@@ -74,6 +86,28 @@ func _ready() -> void:
 	var gap2 := Control.new()
 	gap2.custom_minimum_size = Vector2(0, 34)
 	col.add_child(gap2)
+	var row0 := HBoxContainer.new()
+	row0.alignment = BoxContainer.ALIGNMENT_CENTER
+	row0.add_theme_constant_override("separation", 28)
+	col.add_child(row0)
+	var fresh := not Save.unseen_ships().is_empty()
+	var hangar := UiKit.button("HANGAR" + ("  •NEW" if fresh else ""), UiKit.CYAN, 38)
+	hangar.custom_minimum_size = Vector2(430, 110)
+	hangar.pressed.connect(func(): main.go_hangar())
+	row0.add_child(hangar)
+	if fresh:
+		var hp := hangar.create_tween().set_loops()
+		hp.tween_property(hangar, "modulate", Color(1.4, 1.4, 1.4), 0.6).set_trans(Tween.TRANS_SINE)
+		hp.tween_property(hangar, "modulate", Color(1, 1, 1), 0.6).set_trans(Tween.TRANS_SINE)
+	var done: int = (Save.data.missions as Array).size()
+	var missions := UiKit.button("MISSIONS %d/%d" % [done, Defs.MISSIONS.size()], UiKit.GREEN, 34)
+	missions.custom_minimum_size = Vector2(430, 110)
+	missions.pressed.connect(func(): main.go_missions())
+	row0.add_child(missions)
+	UiKit.pop_in(row0, 0.55)
+	var gap3 := Control.new()
+	gap3.custom_minimum_size = Vector2(0, 24)
+	col.add_child(gap3)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 28)
@@ -90,7 +124,7 @@ func _ready() -> void:
 	UiKit.pop_in(row, 0.6)
 
 	var bottom := Control.new()
-	bottom.custom_minimum_size = Vector2(0, 120)
+	bottom.custom_minimum_size = Vector2(0, 100)
 	col.add_child(bottom)
 	var ver := UiKit.label("v" + str(ProjectSettings.get_setting("application/config/version")), 24,
 			Color(1, 1, 1, 0.3), UiKit.display_light())
@@ -116,7 +150,7 @@ func _gradient() -> GradientTexture2D:
 
 
 func _restart_demo() -> void:
-	main.arena.start(Sim.new(main.fresh_seed(), {"hull": 5, "power": 3}), true)
+	main.arena.start(Sim.new(main.fresh_seed(), main.demo_loadout()), true)
 
 
 func _open_settings() -> void:

@@ -310,6 +310,67 @@ CUBE_LINES = [[(0.0, 0.0), (math.cos(math.pi / 6 + k * 2 * math.pi / 3), math.si
               for k in range(3)]
 
 
+def crescent(r_out=0.95, r_in=0.66, shift=0.42, steps=28):
+    """A crescent whose horns point +x."""
+    a0 = math.acos(0.42)
+    outer = [(r_out * math.cos(a), r_out * math.sin(a)) for a in np.linspace(a0, 2 * math.pi - a0, steps)]
+    ex, ey = outer[-1]
+    # Inner arc around (shift, 0) from the last horn back to the first.
+    b0 = math.atan2(ey, ex - shift)
+    b1 = math.atan2(outer[0][1], outer[0][0] - shift)
+    if b1 < b0:
+        b1 += 2 * math.pi
+    inner = [(shift + r_in * math.cos(b), r_in * math.sin(b)) for b in np.linspace(b0, b1, steps)][::-1]
+    inner = [(shift + r_in * math.cos(b), r_in * math.sin(b)) for b in np.linspace(b1 - 2 * math.pi, b0, steps)][::-1]
+    return outer + inner
+
+
+# Hangar ships (pointing +x): shapes, open lines, colour.
+SHIPS = {
+    "lumen": ([SHIP], [], (0.35, 0.95, 1.0)),
+    "vesper": ([[(1.0, 0.0), (0.35, 0.55), (-0.6, 0.85), (-0.85, 0.4), (-0.55, 0.0), (-0.85, -0.4), (-0.6, -0.85),
+                 (0.35, -0.55)]], [[(0.55, 0.0), (-0.05, 0.38), (-0.25, 0.0), (-0.05, -0.38), (0.55, 0.0)]],
+               (0.45, 1.0, 0.75)),
+    "kestrel": ([[(1.0, 0.0), (-0.2, 0.25), (-0.9, 0.9), (-0.55, 0.15), (-0.75, 0.0), (-0.55, -0.15), (-0.9, -0.9),
+                  (-0.2, -0.25)]], [], (1.0, 0.68, 0.3)),
+    "strix": ([[(1.0, 0.32), (0.2, 0.2), (0.05, 0.0), (0.2, -0.2), (1.0, -0.32), (-0.1, -0.7), (-0.8, -0.45),
+                (-0.5, 0.0), (-0.8, 0.45), (-0.1, 0.7)]], [[(-0.35, 0.0), (0.0, 0.0)]], (0.78, 0.62, 1.0)),
+    "halcyon": ([regular(28, 0.72), [(0.5, 0.0), (-0.32, 0.36), (-0.15, 0.0), (-0.32, -0.36)]],
+                [[(0.72, 0.0), (1.0, 0.0)], [(-0.72, 0.0), (-0.95, 0.0)]], (1.0, 0.5, 0.88)),
+    "aurora": ([[(1.0, 0.0), (0.1, 0.12), (-0.35, 0.95), (-0.5, 0.95), (-0.3, 0.1), (-0.85, 0.08), (-0.85, -0.08),
+                 (-0.3, -0.1), (-0.5, -0.95), (-0.35, -0.95), (0.1, -0.12)]], [], (1.0, 0.92, 0.55)),
+    "nyx": ([crescent(), [(0.32, 0.0), (0.12, 0.16), (-0.08, 0.0), (0.12, -0.16)]], [], (1.0, 0.3, 0.5)),
+}
+
+# Overdrive icons, one per ship.
+OD_ICONS = {
+    "lumen": ([star(12, 0.95, 0.42)], [], (0.35, 0.95, 1.0)),
+    "vesper": ([regular(6, 0.92, math.pi / 6), regular(6, 0.55, math.pi / 6)], [], (0.45, 1.0, 0.75)),
+    "kestrel": ([[(0.9, -0.55), (0.3, -0.75), (0.5, -0.35)], [(0.95, 0.1), (0.4, -0.05), (0.55, 0.3)],
+                 [(0.7, 0.75), (0.15, 0.5), (0.3, 0.85)]],
+                [[(-0.9, -0.3), (0.5, -0.6)], [(-0.9, 0.2), (0.6, 0.1)], [(-0.8, 0.75), (0.4, 0.7)]],
+                (1.0, 0.68, 0.3)),
+    "strix": ([[(0.15, -0.95), (-0.5, 0.1), (-0.02, 0.1), (-0.2, 0.95), (0.55, -0.15), (0.05, -0.15),
+                (0.35, -0.95)]], [], (0.78, 0.62, 1.0)),
+    "halcyon": ([regular(32, 0.36)], spiral(4, 0.48, 0.98, 0.3), (1.0, 0.5, 0.88)),
+    "aurora": ([regular(8, 0.26, math.pi / 8)], rays(8, 0.4, 0.98), (1.0, 0.92, 0.55)),
+    "nyx": ([crescent(0.95, 0.7, 0.36)], [[(-0.05, 0.0), (-0.05, -0.42)], [(-0.05, 0.0), (0.22, 0.2)]],
+            (1.0, 0.3, 0.5)),
+}
+
+
+def ship_sprites():
+    for name, (shapes, lines, col) in SHIPS.items():
+        save(neon(shapes, col, radius=40, line=4.0, glow=10, fill=0.35, core_white=0.75, lines=lines),
+             "ship_" + name)
+        save(neon(shapes, col, size=320, radius=110, line=8.0, glow=24, fill=0.32, core_white=0.75, lines=lines),
+             "ship_big_" + name)
+        save(neon(shapes, col, size=96, radius=34, line=3.6, glow=6.5, fill=0.3, lines=lines), "i_ship_" + name)
+    for name, (shapes, lines, col) in OD_ICONS.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
+             "i_od_" + name)
+
+
 def icons():
     for name, (shapes, lines, col) in ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.6, glow=6.5, fill=0.3, lines=lines), "i_" + name)
@@ -359,5 +420,6 @@ if __name__ == "__main__":
     fx_sprites()
     player_sprites()
     icons()
+    ship_sprites()
     app_icon()
     print("art ok")
