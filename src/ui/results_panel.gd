@@ -34,6 +34,7 @@ func build() -> void:
 	var cc := CenterContainer.new()
 	cc.add_child(grid)
 	body.add_child(cc)
+	_evolutions()
 	var flux_box := PanelContainer.new()
 	var fsb := UiKit.box(UiKit.GOLD, Color(0.1, 0.07, 0.02, 0.6), 24, 2, 12)
 	fsb.content_margin_top = 16
@@ -60,6 +61,27 @@ func build() -> void:
 	h.pressed.connect(func(): home.emit())
 	row.add_child(h)
 	body.add_child(row)
+
+
+## Evolved weapons this run; first-time discoveries are marked NEW.
+func _evolutions() -> void:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 26)
+	for w in sim.weapons:
+		if not sim.is_evolved(w.id):
+			continue
+		var cell := VBoxContainer.new()
+		cell.add_theme_constant_override("separation", 0)
+		cell.add_child(UiKit.icon_rect(w.id + "_evo", 110))
+		var fresh: bool = beat.has(w.id)
+		cell.add_child(UiKit.label("NEW" if fresh else "EVOLVED", 20, UiKit.GOLD if fresh else UiKit.DIM, UiKit.display()))
+		row.add_child(cell)
+	if row.get_child_count() == 0:
+		row.free()
+		return
+	body.add_child(row)
+	UiKit.pop_in(row, 0.6, 20)
 
 
 func _stat(grid: GridContainer, name: String, value: String, record: bool, k: int) -> void:

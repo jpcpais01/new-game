@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 1
+const RULES_VERSION := 2
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -17,6 +17,8 @@ const MAX_B := 400
 const MAX_Q := 320
 const MAX_G := 360
 const BOSS_R := 50.0
+const OVERLOAD_TICKS := 120 * 60
+const WELL_TICKS := 80
 const CELL := 100.0
 const GRID_N := 32
 const GRID_HALF := 1600.0
@@ -45,6 +47,10 @@ const EV_DEAD := 18
 const EV_ELITE := 19      # type
 const EV_TELEGRAPH := 20  # x, y, angle, length (dash warning)
 const EV_PICK := 21       # card id, new level
+const EV_CHEST := 22      # rewards [[card id, new level], ...], big, x, y
+const EV_EVOLVE := 23     # weapon id
+const EV_WELL := 24       # x, y, r (a singularity opens)
+const EV_IMPLODE := 25    # x, y, r (a singularity detonates)
 
 ## Director schedule: [second, kind, type, count]
 const SCHEDULE := [
@@ -105,12 +111,15 @@ var st_regen := 0.0
 
 var orbit_ang := 0
 var novas: Array = []        # {x, y, r, max, step, dmg, hit: {uid: true}}
+var wells: Array = []        # {x, y, r, t, dmg} singularities
 var pickups: Array = []      # {k, x, y, mag, spd}
+var evolutions := 0
 
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
 var sched_i := 0
 var surge_until := 0
+var elite_next := 200 * TPS
 var uid_next := 1
 
 # --- enemies (struct of arrays) -----------------------------------------------
@@ -197,7 +206,7 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 	_alloc()
 	revives = int(loadout.get("revive", 0))
 	rerolls = int(loadout.get("reroll", 0))
-	weapons.append({"id": "pulse", "lvl": 1, "t": 20})
+	weapons.append({"id": "pulse", "lvl": 1, "t": 20, "k": 0, "a": 0})
 	_recompute()
 	hp = max_hp
 	xp_need = need_for(level)
@@ -250,6 +259,7 @@ func step(ix: int, iy: int) -> void:
 	_separate()
 	_weapons()
 	_update_novas()
+	_update_wells()
 	_update_bullets()
 	_update_orbs()
 	_contact()
@@ -293,6 +303,23 @@ func weapon_level(id: String) -> int:
 		if w.id == id:
 			return w.lvl
 	return 0
+
+
+## True once a weapon has evolved.
+func is_evolved(id: String) -> bool:
+	return weapon_level(id) >= Defs.EVO_LEVEL
+
+
+## Icon/name id for a slot: evolved weapons show as "<id>_evo".
+func display_id(id: String) -> String:
+	return id + "_evo" if is_evolved(id) else id
+
+
+## A Lv5 weapon whose catalyst is owned: the next Prism Cache evolves it.
+func evolution_ready(id: String) -> bool:
+	if not Defs.EVOLUTIONS.has(id) or weapon_level(id) != Defs.MAX_LEVEL:
+		return false
+	return passives.has(Defs.EVOLUTIONS[id].needs)
 
 
 func card_level(id: String) -> int:
@@ -436,11 +463,19 @@ func _director() -> void:
 	while sched_i < SCHEDULE.size() and tick >= int(SCHEDULE[sched_i][0]) * TPS:
 		_scheduled(SCHEDULE[sched_i])
 		sched_i += 1
-	var rate := 1.7 + 1.25 * tm + 0.12 * tm * tm
+	var rate := 1.7 + 1.3 * tm + 0.16 * tm * tm
 	if boss_index() >= 0:
 		rate *= 0.55
 	if tick < surge_until:
 		rate *= 1.8
+	if tick >= elite_next:
+		elite_next = tick + (55 + rng.range_i(25)) * TPS
+		if boss_index() < 0:
+			var kinds := [Defs.DRIFTER, Defs.DART, Defs.WEAVER, Defs.SPLITTER, Defs.SPITTER, Defs.BRUTE]
+			var type: int = kinds[rng.range_i(mini(kinds.size(), 2 + int(tm)))]
+			var a := rng.range_i(Trig.STEPS)
+			_spawn_at_safe(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0, true, 70)
+			events.append([EV_ELITE, type])
 	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0))
 	if en < cap:
 		spawn_acc += rate * DT
@@ -525,9 +560,9 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 		return -1
 	var def: Dictionary = Defs.ENEMY[type]
 	var tm := seconds() / 60.0
-	var hpm := 1.0 + 0.3 * tm + 0.05 * tm * tm
+	var hpm := 1.0 + 0.35 * tm + 0.08 * tm * tm
 	var spm := 1.0 + minf(0.3, 0.04 * tm)
-	var dmm := 1.0 + 0.1 * tm
+	var dmm := 1.0 + 0.14 * tm
 	if type >= Defs.WARDEN:
 		hpm = 1.0
 		spm = 1.0
@@ -691,7 +726,14 @@ func _warden(i: int, dx: float, dy: float, d: float) -> float:
 	e_t[i] += 1
 	var t := e_t[i]
 	var enraged := e_hp[i] < e_maxhp[i] * 0.5
-	var every := 140 if enraged else 200
+	# Overload: a Warden left alive too long fights twice as hard.
+	if e_state[i] == 0 and t > OVERLOAD_TICKS:
+		e_state[i] = 5
+		events.append([EV_WAVE, "OVERLOAD"])
+	var overload := e_state[i] == 5
+	if overload:
+		enraged = true
+	var every := (90 if overload else 140) if enraged else 200
 	if t % every == 0:
 		e_k[i] += 1
 		var n := 18
@@ -705,6 +747,8 @@ func _warden(i: int, dx: float, dy: float, d: float) -> float:
 		for k in 6:
 			var a := k * Trig.STEPS / 6
 			_spawn(Defs.DRIFTER, e_x[i] + Trig.cos_i(a) * 110.0, e_y[i] + Trig.sin_i(a) * 110.0, false, 24)
+	if overload:
+		return 1.7 if d > 160.0 else 0.6
 	return 1.0 if d > 160.0 else 0.4
 
 
@@ -713,11 +757,13 @@ func _eclipse(i: int, dx: float, dy: float, d: float) -> float:
 	e_t[i] += 1
 	var t := e_t[i]
 	var c := t % 760
-	var enraged := e_hp[i] < e_maxhp[i] * 0.4
+	var enraged := e_hp[i] < e_maxhp[i] * 0.4 or t > OVERLOAD_TICKS
+	if t == OVERLOAD_TICKS:
+		events.append([EV_WAVE, "OVERLOAD"])
 	if c < 220:
 		e_state[i] = 0
 		if t % 6 == 0:
-			var arms := 3 if enraged else 2
+			var arms := (4 if t > OVERLOAD_TICKS * 2 else 3) if enraged else 2
 			e_k[i] += 29
 			for k in arms:
 				_fire_orb(e_x[i], e_y[i], e_k[i] + k * Trig.STEPS / arms, 170.0, 15.0)
@@ -864,7 +910,7 @@ func _weapons() -> void:
 		var fired := false
 		match w.id:
 			"pulse":
-				fired = _fire_pulse(spec)
+				fired = _fire_pulse(spec, w)
 			"arc":
 				fired = _fire_arc(spec)
 			"nova":
@@ -872,9 +918,16 @@ func _weapons() -> void:
 			"seeker":
 				fired = _fire_seeker(spec)
 			"lance":
-				fired = _fire_lance(spec)
+				fired = _fire_lance(spec, w)
 		if fired:
 			w.t = maxi(6, int(float(spec.cd) * st_haste))
+			# Spectrum sweeps: quick follow-up pulses before the real cooldown.
+			if spec.has("sweeps"):
+				w.k += 1
+				if w.k < int(spec.sweeps):
+					w.t = 8
+				else:
+					w.k = 0
 		else:
 			w.t = 6
 
@@ -896,16 +949,27 @@ func _nearest(x: float, y: float, maxd: float, skip: Dictionary = {}) -> int:
 	return best
 
 
-func _fire_pulse(spec: Dictionary) -> bool:
+func _fire_pulse(spec: Dictionary, w: Dictionary) -> bool:
 	var t := _nearest(px, py, 680.0)
 	if t < 0:
 		return false
 	var a := Trig.angle_of(e_x[t] - px, e_y[t] - py)
 	var n: int = spec.n
+	var evo: bool = spec.get("evo", false)
+	var kind := 3 if evo else 0
+	var r := (14.0 if evo else 9.0) * sqrt(st_area)
 	for k in n:
-		var off := int((float(k) - float(n - 1) * 0.5) * 20.0)
-		_add_bullet(0, px, py, a + off, 980.0, spec.dmg, 9.0 * sqrt(st_area), spec.pierce, 52, 0.0)
-	events.append([EV_SHOT, "pulse", px, py, a])
+		var off := int((float(k) - float(n - 1) * 0.5) * (16.0 if evo else 20.0))
+		_add_bullet(kind, px, py, a + off, 980.0, spec.dmg, r, spec.pierce, 52, 0.0)
+	events.append([EV_SHOT, "pulse_evo" if evo else "pulse", px, py, a])
+	if evo:
+		w.k += 1
+		if w.k >= int(spec.ring):
+			w.k = 0
+			for k in 16:
+				_add_bullet(kind, px, py, a + k * Trig.STEPS / 16 + Trig.STEPS / 32, 760.0, spec.dmg, r,
+						spec.pierce, 60, 0.0)
+			events.append([EV_SHOT, "supernova", px, py, a])
 	return true
 
 
@@ -946,8 +1010,10 @@ func _b_remove(i: int) -> void:
 func _orbit(spec: Dictionary) -> void:
 	orbit_ang = (orbit_ang + int(spec.spin)) & Trig.MASK
 	var n: int = spec.n
-	var rad: float = spec.r * st_area
-	var br := 20.0 * st_area
+	var rad := orbit_radius()
+	var evo: bool = spec.get("evo", false)
+	var br := (28.0 if evo else 20.0) * st_area
+	var push := 520.0 if evo else 220.0
 	for k in n:
 		var a := orbit_ang + k * Trig.STEPS / n
 		var bx := px + Trig.cos_i(a) * rad
@@ -965,7 +1031,7 @@ func _orbit(spec: Dictionary) -> void:
 				var ox := e_x[i] - px
 				var oy := e_y[i] - py
 				var od := sqrt(ox * ox + oy * oy) + 0.001
-				_damage(i, spec.dmg, ox / od * 220.0, oy / od * 220.0)
+				_damage(i, spec.dmg, ox / od * push, oy / od * push)
 
 
 func orbit_spec() -> Dictionary:
@@ -975,25 +1041,44 @@ func orbit_spec() -> Dictionary:
 	return Defs.WEAPONS.orbit.levels[l - 1]
 
 
+## Current blade orbit radius (Event Horizon breathes between r and r2).
+func orbit_radius() -> float:
+	var spec := orbit_spec()
+	if spec.is_empty():
+		return 0.0
+	if spec.has("r2"):
+		var k := 0.5 + 0.5 * Trig.sin_i(tick * 5)
+		return (float(spec.r) + (float(spec.r2) - float(spec.r)) * k) * st_area
+	return float(spec.r) * st_area
+
+
 func _fire_arc(spec: Dictionary) -> bool:
 	var first := _nearest(px, py, 560.0)
 	if first < 0:
 		return false
 	var hit := {}
+	var reach: float = spec.get("reach", 230.0)
+	var blast: float = spec.get("blast", 0.0)
 	for s in int(spec.strikes):
 		var cur := first if s == 0 else _nearest(px, py, 560.0, hit)
 		if cur < 0:
 			break
 		var pts := PackedVector2Array([Vector2(px, py)])
+		var lx := px
+		var ly := py
 		for c in int(spec.chain):
 			hit[e_uid[cur]] = true
 			pts.append(Vector2(e_x[cur], e_y[cur]))
+			lx = e_x[cur]
+			ly = e_y[cur]
 			_damage(cur, spec.dmg, 0.0, 0.0)
-			var nxt := _nearest(e_x[cur], e_y[cur], 230.0 * st_area, hit)
+			var nxt := _nearest(e_x[cur], e_y[cur], reach * st_area, hit)
 			if nxt < 0:
 				break
 			cur = nxt
-		events.append([EV_ARC, pts])
+		events.append([EV_ARC, pts, blast > 0.0])
+		if blast > 0.0:
+			_explode(lx, ly, blast * st_area, spec.dmg)
 	return true
 
 
@@ -1001,7 +1086,50 @@ func _fire_nova(spec: Dictionary) -> bool:
 	var mr: float = spec.r * st_area
 	novas.append({"x": px, "y": py, "r": 0.0, "max": mr, "step": mr / 16.0, "dmg": spec.dmg, "hit": {}})
 	events.append([EV_NOVA, px, py, mr])
+	if spec.has("well"):
+		# Singularity: open a black hole on the nearest enemy, or ahead of the ship.
+		var t := _nearest(px, py, 620.0)
+		var wx := px + Trig.cos_i(facing) * 260.0
+		var wy := py + Trig.sin_i(facing) * 260.0
+		if t >= 0:
+			wx = e_x[t]
+			wy = e_y[t]
+		var wr: float = spec.well * st_area
+		wells.append({"x": wx, "y": wy, "r": wr, "t": WELL_TICKS, "dmg": spec.well_dmg})
+		events.append([EV_WELL, wx, wy, wr])
 	return true
+
+
+## Singularities pull everything nearby inwards, grind it, then detonate.
+func _update_wells() -> void:
+	var k := wells.size() - 1
+	while k >= 0:
+		var w: Dictionary = wells[k]
+		w.t -= 1
+		var wx: float = w.x
+		var wy: float = w.y
+		var wr: float = w.r
+		_query(wx, wy, wr)
+		var grind: bool = int(w.t) % 12 == 0
+		for q in _qn:
+			var i := _qbuf[q]
+			if e_hp[i] <= 0.0:
+				continue
+			var dx := wx - e_x[i]
+			var dy := wy - e_y[i]
+			var d2 := dx * dx + dy * dy
+			if d2 < wr * wr:
+				var d := sqrt(d2) + 0.001
+				var pull := 95.0 * (0.35 + 0.65 * (1.0 - d / wr)) * e_kb[i]
+				e_vx[i] += dx / d * pull
+				e_vy[i] += dy / d * pull
+				if grind and d < wr * 0.55:
+					_damage(i, 6.0, 0.0, 0.0)
+		if w.t <= 0:
+			wells.remove_at(k)
+			events.append([EV_IMPLODE, wx, wy, wr * 0.65])
+			_explode(wx, wy, wr * 0.65, w.dmg)
+		k -= 1
 
 
 func _update_novas() -> void:
@@ -1037,9 +1165,10 @@ func _fire_seeker(spec: Dictionary) -> bool:
 		return false
 	var a := Trig.angle_of(e_x[t] - px, e_y[t] - py)
 	var n: int = spec.n
+	var split: int = spec.get("split", 0)
 	for k in n:
 		var off := (100 + k * 30) * (1 if k % 2 == 0 else -1)
-		var i := _add_bullet(1, px, py, a + off, 360.0, spec.dmg, 12.0, 0, 150, spec.blast * st_area)
+		var i := _add_bullet(1, px, py, a + off, 360.0, spec.dmg, 12.0, split, 150, spec.blast * st_area)
 		if i >= 0:
 			b_tx[i] = e_x[t]
 			b_ty[i] = e_y[t]
@@ -1047,13 +1176,29 @@ func _fire_seeker(spec: Dictionary) -> bool:
 	return true
 
 
-func _fire_lance(spec: Dictionary) -> bool:
-	var t := _nearest(px, py, 900.0)
-	if t < 0:
-		return false
-	var a := Trig.angle_of(e_x[t] - px, e_y[t] - py)
+## Hydra Swarm: a missile's blast releases smaller hunters.
+func _split_missile(x: float, y: float, n: int, dmg: float, blast: float) -> void:
+	var a := tick * 37
+	for k in n:
+		var i := _add_bullet(2, x, y, a + k * Trig.STEPS / n, 420.0, dmg * 0.5, 9.0, 0, 90, blast * 0.6)
+		if i >= 0:
+			b_tx[i] = x + Trig.cos_i(a + k * Trig.STEPS / n) * 300.0
+			b_ty[i] = y + Trig.sin_i(a + k * Trig.STEPS / n) * 300.0
+
+
+func _fire_lance(spec: Dictionary, w: Dictionary) -> bool:
+	var a: int = w.a
+	if w.k == 0:
+		var t := _nearest(px, py, 900.0)
+		if t < 0:
+			return false
+		a = Trig.angle_of(e_x[t] - px, e_y[t] - py)
+		w.a = a
+	var evo: bool = spec.get("evo", false)
+	if evo:
+		a += int(w.k) * Trig.STEPS / 18
 	var dirs: int = spec.dirs
-	var w: float = spec.w * st_area
+	var wd: float = spec.w * st_area
 	for k in dirs:
 		var da := a + k * Trig.STEPS / dirs
 		var ux := Trig.cos_i(da)
@@ -1068,9 +1213,10 @@ func _fire_lance(spec: Dictionary) -> bool:
 			if along < -e_r[i] or along > length + e_r[i]:
 				continue
 			var perp := absf(rx * uy - ry * ux)
-			if perp < w * 0.5 + e_r[i]:
+			if perp < wd * 0.5 + e_r[i]:
 				_damage(i, spec.dmg, ux * 160.0, uy * 160.0)
-		events.append([EV_LANCE, px, py, px + ux * length, py + uy * length, w])
+		events.append([EV_LANCE, px, py, px + ux * length, py + uy * length, wd,
+				float(k) / float(dirs) if evo else -1.0])
 	return true
 
 
@@ -1081,7 +1227,8 @@ func _update_bullets() -> void:
 	while i >= 0:
 		b_life[i] -= 1
 		var kind := b_kind[i]
-		if kind == 1:
+		var homing := kind == 1 or kind == 2
+		if homing:
 			if (tick + i) % 8 == 0:
 				var t := _nearest(b_x[i], b_y[i], 650.0)
 				if t >= 0:
@@ -1098,7 +1245,7 @@ func _update_bullets() -> void:
 		var y := b_y[i]
 		var r := b_r[i]
 		var dead := b_life[i] <= 0
-		var boom := dead and kind == 1
+		var boom := dead and homing
 		if not dead:
 			_query(x, y, r)
 			for q in _qn:
@@ -1109,7 +1256,7 @@ func _update_bullets() -> void:
 				var dy2 := e_y[e] - y
 				var rr := r + e_r[e]
 				if dx2 * dx2 + dy2 * dy2 < rr * rr:
-					if kind == 1:
+					if homing:
 						boom = true
 						dead = true
 						break
@@ -1124,6 +1271,8 @@ func _update_bullets() -> void:
 			dead = true
 		if boom:
 			_explode(x, y, b_blast[i], b_dmg[i])
+			if kind == 1 and b_pierce[i] > 0:
+				_split_missile(x, y, b_pierce[i], b_dmg[i], b_blast[i])
 		if dead:
 			_b_remove(i)
 		i -= 1
@@ -1293,10 +1442,9 @@ func _on_death(i: int) -> void:
 		Defs.WARDEN:
 			bosses_killed += 1
 			events.append([EV_BOSS_DOWN, type, x, y])
-			for k in 3:
-				var a := k * Trig.STEPS / 3
-				_drop_pickup("core", x + Trig.cos_i(a) * 60.0, y + Trig.sin_i(a) * 60.0)
-			_drop_pickup("heart", x, y)
+			_drop_pickup("bigchest", x, y)
+			_drop_pickup("core", x + 70.0, y)
+			_drop_pickup("heart", x - 70.0, y)
 			for k in 12:
 				var a2 := k * Trig.STEPS / 12
 				_drop_gem(x + Trig.cos_i(a2) * 90.0, y + Trig.sin_i(a2) * 90.0, 10.0)
@@ -1306,7 +1454,7 @@ func _on_death(i: int) -> void:
 			state = WON
 			events.append([EV_WIN])
 	if elite:
-		_drop_pickup("core", x, y)
+		_drop_pickup("chest", x, y)
 	elif type < Defs.WARDEN:
 		var roll := rng.unit()
 		if roll < 0.004:
@@ -1405,6 +1553,8 @@ func _update_pickups() -> void:
 				"core":
 					xp += xp_need - xp + 0.001
 					hp = minf(max_hp, hp + 15.0)
+				"chest", "bigchest":
+					_open_chest(p.k == "bigchest", p.x, p.y)
 			events.append([EV_PICKUP, p.k, p.x, p.y])
 			pickups.remove_at(k)
 		k -= 1
@@ -1413,6 +1563,42 @@ func _update_pickups() -> void:
 		level += 1
 		xp_need = need_for(level)
 		pending_levels += 1
+
+
+## Prism Cache: evolves the first ready weapon, otherwise upgrades what you
+## own (one item, or three from a boss). Always some Flux on top.
+func _open_chest(big: bool, x: float, y: float) -> void:
+	var rewards: Array = []
+	for w in weapons:
+		if evolution_ready(w.id):
+			w.lvl = Defs.EVO_LEVEL
+			w.k = 0
+			evolutions += 1
+			rewards.append([w.id, Defs.EVO_LEVEL])
+			events.append([EV_EVOLVE, w.id])
+			events.append([EV_PICK, w.id, Defs.EVO_LEVEL])
+			break
+	var want := 3 if big else 1
+	while rewards.size() < want:
+		var pool: Array = []
+		for w in weapons:
+			if w.lvl < Defs.MAX_LEVEL:
+				pool.append(w.id)
+		for id in passive_order:
+			if int(passives[id]) < Defs.MAX_LEVEL:
+				pool.append(id)
+		if pool.is_empty():
+			break
+		var id: String = pool[rng.range_i(pool.size())]
+		_apply_card(id)
+		rewards.append([id, card_level(id)])
+	if rewards.is_empty():
+		hp = minf(max_hp, hp + max_hp * 0.5)
+		rewards.append(["heal", 0])
+	var fl := 30 if big else 10
+	flux_bonus += fl
+	rewards.append(["flux", fl])
+	events.append([EV_CHEST, rewards, big, x, y])
 
 
 # --- level-up cards ---------------------------------------------------------------
@@ -1472,7 +1658,7 @@ func _apply_card(id: String) -> void:
 				w.lvl = mini(w.lvl + 1, Defs.MAX_LEVEL)
 				found = true
 		if not found:
-			weapons.append({"id": id, "lvl": 1, "t": 10})
+			weapons.append({"id": id, "lvl": 1, "t": 10, "k": 0, "a": 0})
 		events.append([EV_PICK, id, weapon_level(id)])
 	elif Defs.PASSIVES.has(id):
 		if not passives.has(id):

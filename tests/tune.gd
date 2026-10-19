@@ -27,6 +27,10 @@ func _init() -> void:
 					hurt += e[1]
 				elif e[0] == Sim.EV_BOSS_DOWN:
 					line += " [boss%d down @%ds]" % [e[1], int(s.seconds())]
+				elif e[0] == Sim.EV_EVOLVE:
+					line += " [EVOLVED %s @%ds]" % [e[1], int(s.seconds())]
+				elif e[0] == Sim.EV_CHEST:
+					line += " [cache @%ds]" % int(s.seconds())
 			max_en = maxi(max_en, s.en)
 			if s.tick % (30 * Sim.TPS) == 0:
 				var b := s.boss_index()

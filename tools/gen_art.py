@@ -273,9 +273,55 @@ ICONS = {
 }
 
 
+def spiral(arms, r0, r1, turns, rot=0.0, steps=18):
+    out = []
+    for k in range(arms):
+        a0 = rot + 2 * math.pi * k / arms
+        out.append([((r0 + (r1 - r0) * t) * math.cos(a0 + turns * t * 2 * math.pi),
+                     (r0 + (r1 - r0) * t) * math.sin(a0 + turns * t * 2 * math.pi))
+                    for t in np.linspace(0, 1, steps)])
+    return out
+
+
+def rays(n, r0, r1, rot=0.0):
+    return [[(r0 * math.cos(rot + 2 * math.pi * k / n), r0 * math.sin(rot + 2 * math.pi * k / n)),
+             (r1 * math.cos(rot + 2 * math.pi * k / n), r1 * math.sin(rot + 2 * math.pi * k / n))] for k in range(n)]
+
+
+# Evolved weapons: richer silhouettes in the evolution's colour.
+EVO_ICONS = {
+    "pulse_evo": ([star(8, 0.95, 0.42, -math.pi / 2), regular(24, 0.2)], [], (1.0, 0.82, 0.4)),
+    "orbit_evo": ([regular(32, 0.22)], spiral(2, 0.36, 0.92, 0.55) + [[(math.cos(a) * 0.5, math.sin(a) * 0.5)
+                                                                    for a in np.linspace(0, 2 * math.pi, 25)]],
+                  (0.78, 0.5, 1.0)),
+    "arc_evo": ([[(-0.85, 0.5), (-0.85, -0.4), (-0.42, 0.0), (0.0, -0.8), (0.42, 0.0), (0.85, -0.4), (0.85, 0.5)]],
+                [[(-0.15, 0.62), (0.12, 0.62), (-0.08, 0.95)]], (1.0, 0.92, 0.45)),
+    "nova_evo": ([regular(24, 0.16)], spiral(3, 0.24, 0.95, 0.42), (0.7, 0.38, 1.0)),
+    "seeker_evo": ([[(0.0, -0.95), (0.16, -0.62), (-0.16, -0.62)], [(0.78, -0.6), (0.68, -0.25), (0.45, -0.5)],
+                    [(-0.78, -0.6), (-0.68, -0.25), (-0.45, -0.5)]],
+                   [[(0.0, 0.9), (0.0, -0.6)], [(0.0, 0.5), (0.6, -0.4)], [(0.0, 0.5), (-0.6, -0.4)]],
+                   (0.45, 1.0, 0.5)),
+    "lance_evo": ([regular(6, 0.24, math.pi / 6)], rays(6, 0.36, 0.95, -math.pi / 2), (1.0, 0.6, 0.85)),
+}
+
+# Prism Cache: an isometric cube of light.
+CUBE = regular(6, 1.0, math.pi / 6)
+CUBE_LINES = [[(0.0, 0.0), (math.cos(math.pi / 6 + k * 2 * math.pi / 3), math.sin(math.pi / 6 + k * 2 * math.pi / 3))]
+              for k in range(3)]
+
+
 def icons():
     for name, (shapes, lines, col) in ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.6, glow=6.5, fill=0.3, lines=lines), "i_" + name)
+    for name, (shapes, lines, col) in EVO_ICONS.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.38, lines=lines, core_white=0.7),
+             "i_" + name)
+    save(neon([CUBE], (1.0, 0.85, 0.35), size=96, radius=32, line=3.6, glow=8, fill=0.45, lines=CUBE_LINES),
+         "p_chest")
+    save(neon([CUBE, regular(6, 0.5, math.pi / 6)], (1.0, 0.45, 0.95), size=96, radius=34, line=3.8, glow=9,
+              fill=0.5, lines=CUBE_LINES), "p_bigchest")
+    save(neon([CUBE], (1.0, 0.85, 0.35), size=256, radius=92, line=7.0, glow=18, fill=0.4, lines=CUBE_LINES),
+         "chest_big")
 
 
 def app_icon():

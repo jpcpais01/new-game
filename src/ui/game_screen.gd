@@ -9,6 +9,7 @@ var sim: Sim
 var _stick: Joystick
 var _hud: Hud
 var _cards: LevelUpPanel
+var _chest: ChestPanel
 var _pause: Modal
 var _hint: Control
 var _card_delay := -1.0
@@ -31,6 +32,10 @@ func _ready() -> void:
 	_cards.picked.connect(_on_pick)
 	_cards.reroll_pressed.connect(_on_reroll)
 	add_child(_cards)
+	_chest = ChestPanel.new()
+	_chest.visible = false
+	_chest.closed.connect(_on_chest_closed)
+	add_child(_chest)
 
 
 func begin(seed_value: int) -> void:
@@ -38,6 +43,7 @@ func begin(seed_value: int) -> void:
 	arena.start(sim, false)
 	arena.leveled_up.connect(_on_level)
 	arena.ended.connect(_on_end)
+	arena.chest_opened.connect(_on_chest)
 	arena.hurt.connect(func(): _stick.modulate = Color(1.4, 0.6, 0.6))
 	_hud.bind(arena)
 	Sfx.music("run")
@@ -54,7 +60,7 @@ func _process(delta: float) -> void:
 		_card_delay -= delta
 		if _card_delay <= 0.0:
 			_open_cards()
-	elif sim.state == Sim.CHOOSING and not _cards.visible and _pause == null and not _over:
+	elif sim.state == Sim.CHOOSING and not _cards.visible and not _chest.visible and _pause == null and not _over:
 		_card_delay = 0.01
 
 
@@ -64,7 +70,7 @@ func _on_level() -> void:
 
 
 func _open_cards() -> void:
-	if sim.state != Sim.CHOOSING or _over:
+	if sim.state != Sim.CHOOSING or _over or _chest.visible:
 		return
 	arena.paused = true
 	_stick.release()
@@ -85,6 +91,24 @@ func _on_pick(index: int) -> void:
 		# A burst of light as play resumes.
 		arena.fx.ring(sim.px, sim.py, 10.0, 260.0, 0.45, UiKit.CYAN, 1.2)
 		arena.add_wave(sim.px, sim.py, 1.0)
+
+
+func _on_chest(rewards: Array, big: bool) -> void:
+	if _over:
+		return
+	arena.paused = true
+	_stick.release()
+	Sfx.duck(true)
+	_chest.open(rewards, big)
+
+
+func _on_chest_closed() -> void:
+	if sim.state == Sim.CHOOSING:
+		return
+	arena.paused = false
+	Sfx.duck(false)
+	arena.fx.ring(sim.px, sim.py, 10.0, 260.0, 0.45, UiKit.GOLD, 1.2)
+	arena.add_wave(sim.px, sim.py, 1.0)
 
 
 func _on_reroll() -> void:
@@ -115,7 +139,7 @@ func _on_end(won: bool) -> void:
 
 
 func open_pause() -> void:
-	if _pause != null or _over or _cards.visible:
+	if _pause != null or _over or _cards.visible or _chest.visible:
 		return
 	arena.paused = true
 	_stick.release()
@@ -143,6 +167,7 @@ func _show_hint() -> void:
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_hint)
+	move_child(_hint, _stick.get_index() + 1)
 	var l := UiKit.glow_label("DRAG ANYWHERE TO MOVE", 44, UiKit.CYAN)
 	l.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	l.offset_top = -520
@@ -172,6 +197,8 @@ func _hide_hint() -> void:
 func on_back() -> void:
 	if _over:
 		main.go_title()
+	elif _chest.visible:
+		return
 	elif _pause != null:
 		_pause.close()
 		_resume()
@@ -180,5 +207,5 @@ func on_back() -> void:
 
 
 func on_background() -> void:
-	if not _over and _pause == null and not _cards.visible:
+	if not _over and _pause == null and not _cards.visible and not _chest.visible:
 		open_pause()

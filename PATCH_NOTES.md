@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 19, 2026 · 06:00 UTC
+
+- **Weapon Evolutions.** Max out a weapon, carry its catalyst system, then open a Prism Cache to evolve it into Supernova Cannon, Event Horizon, Storm Crown, Singularity, Hydra Swarm or Spectrum. Level-up cards show what evolves with what, and a ready weapon pulses gold in your loadout.
+- **Prism Caches.** Elites and bosses now drop glowing caches under a pillar of light, with an arrow on the screen edge when one is off-screen. Opening one stops time for a slot-machine reveal of upgrades, evolutions and Flux.
+- **Elite hunts.** Elites now roam in every minute or so after the third minute, so there is always a cache worth chasing.
+- **Bosses fight back.** The Warden and the Eclipse are tougher, and they overload if you stall them for too long.
+- **A fiercer late game.** The swarm grows tougher and denser after the fifth minute to match your new firepower. Your evolutions are recorded on the title screen and in the results.
+
 ## Oct 19, 2026 · 04:00 UTC
 
 - **Welcome to Afterglow.** A brand-new game: pilot a ship of light through a neon arena while the swarm closes in. Drag anywhere to move; your weapons fire on their own.
