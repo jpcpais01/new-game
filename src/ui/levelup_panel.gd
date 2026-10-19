@@ -1,7 +1,8 @@
 class_name LevelUpPanel
 extends Control
 ## The level-up moment: the world freezes behind frosted glass and three
-## upgrade cards fly in. Tap one to take it.
+## upgrade cards fly in. Tap one to take it. Relic offers use the same panel
+## in violet.
 
 signal picked(index: int)
 signal reroll_pressed
@@ -12,6 +13,8 @@ var _title: Label
 var _reroll: Button
 var _locked := false
 var _backdrop: ColorRect
+
+const RELIC_COL := Color(0.78, 0.55, 1.0)
 
 
 func _ready() -> void:
@@ -38,14 +41,19 @@ func open(s: Sim) -> void:
 	create_tween().tween_property(self, "modulate:a", 1.0, 0.2)
 	var w := size.x
 	var h := size.y
-	_title = UiKit.glow_label("LEVEL UP", 92, UiKit.GOLD)
+	var relic := s.relic_choice
+	_title = UiKit.glow_label("RELIC" if relic else "LEVEL UP", 92, RELIC_COL if relic else UiKit.GOLD)
 	_title.position = Vector2(0, h * 0.11)
 	_title.size = Vector2(w, 120)
 	_title.pivot_offset = _title.size * 0.5
 	add_child(_title)
 	_title.scale = Vector2(1.8, 1.8)
 	create_tween().tween_property(_title, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	var sub := UiKit.label("LEVEL %d  ·  CHOOSE AN UPGRADE" % s.level, 32, UiKit.DIM, UiKit.display_light())
+	var sub := UiKit.label("CHOOSE ONE  ·  IT LASTS THE WHOLE RUN" if relic else
+			"LEVEL %d  ·  CHOOSE AN UPGRADE" % s.level, 32, UiKit.DIM, UiKit.display_light())
+	if relic:
+		Sfx.play("relic", 0.8)
+		Sfx.buzz(40)
 	sub.position = Vector2(0, h * 0.11 + 112)
 	sub.size = Vector2(w, 40)
 	add_child(sub)
@@ -111,11 +119,14 @@ func _make_card(id: String, index: int, sz: Vector2) -> Control:
 	name.size = Vector2(sz.x - tx - 30, 56)
 	card.add_child(name)
 	var tag_text := ""
-	if is_new:
+	if Defs.is_relic(id):
+		tag_text = "RELIC"
+	elif is_new:
 		tag_text = "NEW WEAPON" if Defs.is_weapon(id) else "NEW SYSTEM"
 	elif lvl > 0:
 		tag_text = "LEVEL %d  →  %d" % [lvl, lvl + 1]
-	var tag := UiKit.label(tag_text, 28, UiKit.GOLD if is_new else UiKit.DIM, UiKit.display_light(),
+	var tag := UiKit.label(tag_text, 28, UiKit.GOLD if is_new else (RELIC_COL if Defs.is_relic(id) else UiKit.DIM),
+			UiKit.display_light(),
 			HORIZONTAL_ALIGNMENT_LEFT)
 	tag.position = Vector2(tx, 92)
 	tag.size = Vector2(sz.x - tx - 30, 36)

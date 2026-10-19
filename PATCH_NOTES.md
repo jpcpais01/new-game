@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 19, 2026 · 19:00 UTC
+
+- **Relics.** The first elite you defeat and every boss now guard a relic: choose one of three, and it bends the rules for the rest of the run. Eight to find: Guardian Halo blocks a hit every 15 seconds (and saves your Chain), Ion Wake leaves a trail of burning light behind you, Starbreaker, Supercritical, Overcharge, Phoenix Plume, Midas Core and Wrath of Dawn.
+- **New weapon: Ion Scythe.** A crescent of light sweeps through everything in front of you, and from level 4 behind you too. It rewards flying close to the swarm.
+- **New weapon: Photon Mines.** Drop mines as you fly and lead the swarm over them. Up to eight wait on the field at once, and a full field sets off the oldest.
+- **Two new evolutions.** Ion Scythe with Vitality Core becomes the **Lunar Reaper**, two full-circle sweeps that heal you with every kill. Photon Mines with Attractor becomes the **Constellation**, mines that link into burning tripwires and pull the swarm in. The Codex now lists eight evolutions and every relic.
+- **A grand entrance, and new missions.** Every run opens with your ship warping in on a pillar of light. New missions: Reliquary (hold 4 relics in one run) and Grand Codex (discover all 8 evolutions).
+
 ## Oct 19, 2026 · 18:00 UTC
 
 - **The Seraph.** A third boss now descends at 6:00. It spins a wheel of burning lasers you must ride the gaps of, fires lances aimed where you are going, then vanishes and reappears beside you in a ring of fire. Wounded, it grows a fourth arm and fires three lances at once. Defeat it for a boss cache, a core and a heart.

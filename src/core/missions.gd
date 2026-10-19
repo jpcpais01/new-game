@@ -50,6 +50,8 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = (data.get("ships_won", []) as Array).size()
 		"overdrives":
 			v = run.od_uses if run != null else 0
+		"relics":
+			v = run.relics.size() if run != null else 0
 		"caches":
 			v = run.caches_opened if run != null else 0
 		"dailies":

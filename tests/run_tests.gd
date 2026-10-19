@@ -22,6 +22,9 @@ func _init() -> void:
 	_test_threats()
 	_test_seraph()
 	_test_chain()
+	_test_scythe()
+	_test_mines()
+	_test_relics()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -582,6 +585,173 @@ func _test_chain() -> void:
 	check(Missions.done(_find_mission("unbroken"), null, {"best_chain": 300}), "Unbroken mission")
 
 
+func _test_scythe() -> void:
+	var s := _quiet(101)
+	s.weapons = [{"id": "scythe", "lvl": 1, "t": 1, "k": 0, "a": 0}]
+	var front := s._spawn(Defs.BRUTE, s.px + 120.0, s.py, false, 0)
+	var back := s._spawn(Defs.BRUTE, s.px - 150.0, s.py, false, 0)
+	s.step(0, 0)
+	check(_has_event(s, Sim.EV_SLASH), "the Ion Scythe sweeps")
+	check(s.e_hp[front] < s.e_maxhp[front], "the sweep cuts what is in front")
+	check(s.e_hp[back] == s.e_maxhp[back], "a Lv1 sweep leaves what is behind you")
+	s.weapons[0].lvl = 4
+	s.weapons[0].t = 1
+	s.step(0, 0)
+	check(s.e_hp[back] < s.e_maxhp[back], "a Lv4 sweep cuts behind you too")
+	# Lunar Reaper: full circles that heal on kills.
+	var r := _quiet(102)
+	r.weapons = [{"id": "scythe", "lvl": Defs.EVO_LEVEL, "t": 1, "k": 0, "a": 0}]
+	r.hp = 50.0
+	for k in 8:
+		var a := k * Trig.STEPS / 8
+		r._spawn(Defs.DRIFTER, r.px + Trig.cos_i(a) * 150.0, r.py + Trig.sin_i(a) * 150.0, false, 0)
+	r.step(0, 0)
+	var slashes := 0
+	for e in r.events:
+		if int(e[0]) == Sim.EV_SLASH:
+			slashes += 1
+	check(r.kills == 0 and r.en == 0 or r.hp > 50.0, "the Lunar Reaper cuts down a ring (%d left)" % r.en)
+	check(r.hp > 50.0 and r.hp <= 54.0, "the Lunar Reaper heals on kills, capped per sweep (%.1f)" % r.hp)
+	for t in 10:
+		r.step(0, 0)
+	check(r.weapons[0].k == 0 and r.weapons[0].t > 10, "the Lunar Reaper sweeps twice, then recharges")
+
+
+func _test_mines() -> void:
+	var s := _quiet(111)
+	s.weapons = [{"id": "mine", "lvl": 1, "t": 1, "k": 0, "a": 0}]
+	var far := s._spawn(Defs.BRUTE, s.px + 700.0, s.py, false, 0)
+	s.e_speed[far] = 0.0
+	s.step(0, 0)
+	check(s.mines.size() == 1 and _has_event(s, Sim.EV_MINE), "Photon Mines drop a mine")
+	var m: Dictionary = s.mines[0]
+	var e := s._spawn(Defs.DRIFTER, m.x, m.y, false, 0)
+	s.e_speed[e] = 0.0
+	s.step(0, 0)
+	check(s.mines.size() == 1, "a fresh mine waits to arm")
+	for t in Sim.MINE_ARM + 2:
+		s.step(0, 0)
+	check(s.mines.is_empty() and s.e_hp[e] < s.e_maxhp[e] or s.kills > 0, "an armed mine detonates under the swarm")
+	# A full field: the oldest mine goes off to make room.
+	var f := _quiet(112)
+	f.weapons = [{"id": "mine", "lvl": 1, "t": 1, "k": 0, "a": 0}]
+	var far2 := f._spawn(Defs.BRUTE, f.px + 700.0, f.py, false, 0)
+	f.e_speed[far2] = 0.0
+	for k in 4:
+		f.weapons[0].t = 1
+		f.step(0, 0)
+	check(f.mines.size() == int(Defs.WEAPONS.mine.levels[0].max), "the field holds at most %d mines" % f.mines.size())
+	# Constellation: armed mines link into tripwires.
+	var c := _quiet(113)
+	c.weapons = [{"id": "mine", "lvl": Defs.EVO_LEVEL, "t": 999, "k": 0, "a": 0}]
+	c.mines = [{"x": c.px + 300.0, "y": c.py - 200.0, "t": 0, "life": 600, "dmg": 10.0, "blast": 100.0},
+			{"x": c.px + 300.0, "y": c.py + 200.0, "t": 0, "life": 600, "dmg": 10.0, "blast": 100.0}]
+	var w := c._spawn(Defs.BRUTE, c.px + 300.0, c.py, false, 0)
+	c.e_speed[w] = 0.0
+	check(c.mine_links().size() == 1, "two close armed mines link")
+	for t in 9:
+		c.step(0, 0)
+	check(c.e_hp[w] < c.e_maxhp[w], "a tripwire burns what crosses it")
+	check(c.mines.size() == 2, "a tripwire does not set the mines off")
+
+
+func _test_relics() -> void:
+	var s := _quiet(121)
+	_give_chest(s, "bigchest")
+	s.step(0, 0)
+	check(s.state == Sim.CHOOSING and s.relic_choice, "a boss cache offers a relic")
+	check(s.choices.size() == 3, "three relics to choose from")
+	var ok := true
+	for c in s.choices:
+		ok = ok and Defs.is_relic(c)
+	check(ok, "relic offers are relics")
+	s.rerolls = 1
+	s.reroll()
+	ok = s.relic_choice
+	for c in s.choices:
+		ok = ok and Defs.is_relic(c)
+	check(ok, "a reroll keeps it a relic offer")
+	var id: String = s.choices[0]
+	s.choose(0)
+	check(s.relics == [id] and s.state == Sim.RUNNING and not s.relic_choice, "a relic is taken")
+	check(_has_event(s, Sim.EV_RELIC), "relic event")
+	# The first elite's cache holds one too; later elites' do not.
+	var el := _quiet(122)
+	var a := el._spawn(Defs.BRUTE, el.px + 800.0, el.py, true, 0)
+	el.e_hp[a] = 0.0
+	el.step(0, 0)
+	check(el.pickups.size() == 1 and el.pickups[0].get("relic", false), "the first elite guards a relic")
+	var b := el._spawn(Defs.BRUTE, el.px - 800.0, el.py, true, 0)
+	el.e_hp[b] = 0.0
+	el.step(0, 0)
+	check(not el.pickups[1].get("relic", false), "later elites do not")
+	el.pickups[0].mag = true
+	el.pickups[0].x = el.px
+	el.pickups[0].y = el.py
+	el.step(0, 0)
+	check(el.state == Sim.CHOOSING and el.relic_choice, "the relic cache offers a relic")
+	# Guardian Halo: blocks a hit, keeps the Chain, then recharges.
+	var h := _quiet(123)
+	h._take_relic("halo")
+	h.chain = 40
+	h.chain_t = 100
+	var hp0 := h.hp
+	h._hurt(30.0)
+	check(h.hp == hp0 and h.chain == 40 and _has_event(h, Sim.EV_HALO), "the Halo blocks a hit and the Chain holds")
+	h.iframes = 0
+	h._hurt(30.0)
+	check(h.hp < hp0 and h.chain == 0, "a spent Halo lets the next hit through")
+	for t in Defs.HALO_TICKS:
+		h.step(0, 0)
+	check(h.halo_frac() >= 1.0, "the Halo recharges")
+	# Ion Wake burns what crosses the trail.
+	var wk := _quiet(124)
+	wk.weapons = []
+	wk._take_relic("wake")
+	var en := wk._spawn(Defs.BRUTE, wk.px + 200.0, wk.py, false, 0)
+	wk.e_speed[en] = 0.0
+	for t in 60:
+		wk.step(100, 0)
+	check(wk.trail.size() > 5 and wk.e_hp[en] < wk.e_maxhp[en], "Ion Wake scorches the swarm")
+	# Starbreaker and Wrath of Dawn.
+	var sb := _quiet(125)
+	sb.st_crit = 0.0
+	var e1 := sb._spawn(Defs.BRUTE, sb.px + 800.0, sb.py, true, 0)
+	sb._damage(e1, 10.0, 0.0, 0.0)
+	var plain := sb.e_maxhp[e1] - sb.e_hp[e1]
+	sb._take_relic("starbreaker")
+	sb.st_crit = 0.0
+	sb._damage(e1, 10.0, 0.0, 0.0)
+	check(absf((sb.e_maxhp[e1] - sb.e_hp[e1]) - plain * 2.6) < 1e-6, "Starbreaker hits elites +60%")
+	sb._take_relic("wrath")
+	sb.st_crit = 0.0
+	sb.hp = sb.max_hp * 0.4
+	var before := sb.e_hp[e1]
+	sb._damage(e1, 10.0, 0.0, 0.0)
+	check(absf((before - sb.e_hp[e1]) - plain * 1.6 * 1.5) < 1e-6, "Wrath of Dawn hits harder at low health")
+	# Phoenix, Midas, Supercritical, Overcharge.
+	var ph := _quiet(126)
+	var rv := ph.revives
+	var rr := ph.rerolls
+	ph._take_relic("phoenix")
+	ph._take_relic("midas")
+	ph._take_relic("supercrit")
+	check(ph.revives == rv + 1 and ph.rerolls == rr + 1, "Phoenix adds a revive, Midas a reroll")
+	check(absf(ph.st_crit - 0.15) < 1e-9 and absf(ph.st_xp - 1.25) < 1e-9, "Supercritical and Midas stats")
+	_give_chest(ph, "chest")
+	ph.step(0, 0)
+	check(ph.flux_bonus == 30, "Midas triples cache Flux (%d)" % ph.flux_bonus)
+	ph._take_relic("phoenix")
+	check(ph.relics.size() == 3, "a relic is only taken once")
+	var all := _quiet(127)
+	for r in Defs.RELIC_ORDER:
+		all._take_relic(r)
+	_give_chest(all, "bigchest")
+	all.step(0, 0)
+	check(all.state == Sim.RUNNING and all.pending_relics == 0, "no relic offer once you hold them all")
+	check(Missions.done(_find_mission("relic_keeper"), all, {}), "Reliquary mission")
+
+
 func _test_runs() -> void:
 	var t0 := Time.get_ticks_msec()
 	var total_ticks := 0
@@ -602,5 +772,6 @@ func _test_runs() -> void:
 		check(r.tick == s.tick, "replay reaches the same tick (seed %d)" % seed_v)
 		check(r.checksum() == s.checksum(), "replay matches checksum (seed %d)" % seed_v)
 		check(r.kills == s.kills and r.level == s.level, "replay matches stats (seed %d)" % seed_v)
+		check(not s.relics.is_empty() and r.relics == s.relics, "relic picks replay (seed %d: %s)" % [seed_v, s.relics])
 	var ms := Time.get_ticks_msec() - t0
 	print("sim speed: %.3f ms/tick" % (float(ms) / float(maxi(total_ticks, 1)) / 2.0))
