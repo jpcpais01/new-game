@@ -1,0 +1,131 @@
+name: Android build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache Godot and export templates
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-android
+
+      - name: Download Godot
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot && cd ~/godot
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && rm godot.zip
+          mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q templates.tpz 'templates/android_*.apk' 'templates/version.txt' && rm templates.tpz
+
+      - name: Install Godot
+        run: |
+          sudo ln -sf ~/godot/godot /usr/local/bin/godot
+          tpl=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$tpl" && cp ~/godot/templates/* "$tpl/"
+          minor=$(echo "$GODOT_VERSION" | cut -d. -f1,2)
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\n' \
+            "$ANDROID_HOME" "$JAVA_HOME" > ~/.config/godot/editor_settings-${minor}.tres
+          godot --version
+
+      - name: Import project
+        run: |
+          godot --headless --path . --import 2>&1 | tee import.log
+          if grep -E "SCRIPT ERROR|Parse Error|Compile Error" import.log; then exit 1; fi
+
+      - name: Logic tests (deterministic core)
+        run: |
+          set -o pipefail
+          godot --headless --path . -s tests/run_tests.gd 2>&1 | tee test.log
+          if grep -E "SCRIPT ERROR|Parse Error|Compile Error" test.log; then exit 1; fi
+          grep -q "ALL .* CHECKS PASSED" test.log
+
+      - name: Set version
+        id: ver
+        run: |
+          base=$(grep -oP 'config/version="\K[0-9]+\.[0-9]+' project.godot)
+          version="${base}.${{ github.run_number }}"
+          sed -i "s|^config/version=.*|config/version=\"${version}\"|" project.godot
+          sed -i "s|^version/code=.*|version/code=${{ github.run_number }}|; s|^version/name=.*|version/name=\"${version}\"|" export_presets.cfg
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=$KS_ALIAS" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+            echo "Using the private release key from repository secrets."
+          else
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$GITHUB_WORKSPACE/android/prisma-release.keystore" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=prisma" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=prisma-public-key" >> "$GITHUB_ENV"
+            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret set; signing with the committed fallback key."
+          fi
+
+      - name: Export signed APK
+        run: |
+          mkdir -p build
+          apk="build/Prisma-v${{ steps.ver.outputs.version }}.apk"
+          godot --headless --path . --export-release "Android" "$apk" 2>&1 | tee export.log
+          test -s "$apk"
+          ls -la build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Prisma-v${{ steps.ver.outputs.version }}
+          path: build/*.apk
+          retention-days: 14
+
+      - name: Release notes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          awk '/^## /{n++} n==1' PATCH_NOTES.md > notes.md
+          {
+            echo ""
+            echo "---"
+            echo "**Install:** download \`Prisma-v${{ steps.ver.outputs.version }}.apk\` below on your Android phone and open it (allow installs from your browser if asked). Updates install over the previous version and keep your progress."
+          } >> notes.md
+          cat notes.md
+
+      - name: Publish GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Prisma v${{ steps.ver.outputs.version }}
+          body_path: notes.md
+          files: build/Prisma-v${{ steps.ver.outputs.version }}.apk
+          make_latest: true
