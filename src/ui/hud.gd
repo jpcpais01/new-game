@@ -4,7 +4,9 @@ extends Control
 
 signal pause_pressed
 
-const BOSS_NAMES := {Defs.WARDEN: "THE WARDEN", Defs.ECLIPSE: "ECLIPSE"}
+const BOSS_NAMES := {Defs.WARDEN: "THE WARDEN", Defs.ECLIPSE: "ECLIPSE", Defs.SERAPH: "THE SERAPH"}
+## The Chain counter shows from this many kills in a row.
+const CHAIN_SHOW := 5
 
 var arena: Arena
 var top := 0.0
@@ -25,6 +27,12 @@ var _boss_alpha := 0.0
 var _boss_type := -1
 var _icons := {}
 var _target_level := 1
+var _chain: Label
+var _chain_mult: Label
+var _chain_alpha := 0.0
+var _chain_pop := 0.0
+var _chain_shown := 0
+var _broken: Label
 
 
 func _ready() -> void:
@@ -42,6 +50,17 @@ func _ready() -> void:
 	_boss_name = UiKit.glow_label("", 30, UiKit.RED, UiKit.display_light())
 	_boss_name.modulate.a = 0.0
 	add_child(_boss_name)
+	_chain = UiKit.glow_label("", 44, UiKit.GOLD, UiKit.display())
+	_chain.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_chain.modulate.a = 0.0
+	add_child(_chain)
+	_chain_mult = UiKit.label("", 26, Color(1.0, 0.9, 0.6, 0.85), UiKit.display_light(), HORIZONTAL_ALIGNMENT_RIGHT)
+	_chain_mult.modulate.a = 0.0
+	add_child(_chain_mult)
+	_broken = UiKit.glow_label("CHAIN BROKEN", 30, UiKit.RED, UiKit.display_light())
+	_broken.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_broken.modulate.a = 0.0
+	add_child(_broken)
 	_banner = UiKit.glow_label("", 76, UiKit.MAGENTA)
 	_banner.modulate.a = 0.0
 	add_child(_banner)
@@ -76,6 +95,19 @@ func bind(a: Arena) -> void:
 			_boss_name.text += "  ·  NIGHT %d" % arena.sim.night)
 	a.card_taken.connect(func(_id, _lvl): _rebuild_loadout())
 	a.leveled_up.connect(func(): _xp_flash = 1.0)
+	a.chain_milestone.connect(func(count: int, title: String):
+		_chain_pop = 1.0
+		show_banner(title, UiKit.GOLD, "CHAIN %s" % UiKit.fmt_int(count)))
+	a.chain_lost.connect(func(count: int):
+		if count < 25:
+			return
+		_broken.text = "CHAIN BROKEN  ·  %s" % UiKit.fmt_int(count)
+		_broken.modulate.a = 1.0
+		_broken.scale = Vector2(1.25, 1.25)
+		var tw := _broken.create_tween()
+		tw.tween_property(_broken, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_interval(0.9)
+		tw.tween_property(_broken, "modulate:a", 0.0, 0.6))
 	_rebuild_loadout()
 
 
@@ -96,6 +128,21 @@ func _layout() -> void:
 	_banner.size = Vector2(w, 110)
 	_banner.pivot_offset = _banner.size * 0.5
 	_loadout.position = Vector2(24, top + 104)
+	_chain.size = Vector2(420, 56)
+	_chain.pivot_offset = Vector2(400, 28)
+	_chain_mult.size = Vector2(420, 32)
+	_broken.size = Vector2(600, 40)
+	_broken.pivot_offset = Vector2(580, 20)
+	_place_chain()
+
+
+## The Chain sits on the right edge, below the score (lower while a boss is up).
+func _place_chain() -> void:
+	var w := size.x
+	var y := top + 236.0 + 80.0 * _boss_alpha
+	_chain.position = Vector2(w - 444, y)
+	_chain_mult.position = Vector2(w - 444, y + 52)
+	_broken.position = Vector2(w - 624, y + 6)
 
 
 func _rebuild_loadout() -> void:
@@ -133,10 +180,10 @@ func _rebuild_loadout() -> void:
 		_loadout.modulate.a = 0.9
 
 
-func show_banner(text: String, color: Color) -> void:
+func show_banner(text: String, color: Color, sub := "") -> void:
 	if text == "":
 		return
-	_banner.text = text
+	_banner.text = text if sub == "" else text + "\n" + sub
 	_banner.add_theme_color_override("font_color", color.lerp(Color.WHITE, 0.25))
 	_banner.add_theme_color_override("font_shadow_color", Color(color, 0.6))
 	var big := text.length() <= 10
@@ -178,7 +225,28 @@ func _process(delta: float) -> void:
 			_boss_shown = 1.0
 	_boss_name.modulate.a = _boss_alpha
 	_loadout.position.y = top + (104.0 + 80.0 * _boss_alpha)
+	_update_chain(s, delta)
 	queue_redraw()
+
+
+func _update_chain(s: Sim, delta: float) -> void:
+	var on := s.chain >= CHAIN_SHOW
+	_chain_alpha = move_toward(_chain_alpha, 1.0 if on else 0.0, delta * (6.0 if on else 3.0))
+	_chain_pop = maxf(0.0, _chain_pop - delta * 2.5)
+	if on:
+		if s.chain != _chain_shown:
+			_chain.scale = Vector2.ONE * (1.12 + 0.25 * _chain_pop)
+		_chain_shown = s.chain
+		_chain.text = "%s CHAIN" % UiKit.fmt_int(s.chain)
+		var m := Defs.chain_mult(s.chain)
+		_chain_mult.text = "SCORE x%.1f" % m if m > 1.0 else "KEEP IT GOING"
+		# The counter warms from gold to white-hot as the multiplier climbs.
+		var heat := clampf((m - 1.0) / (Defs.CHAIN_MAX_MULT - 1.0), 0.0, 1.0)
+		_chain.add_theme_color_override("font_color", UiKit.GOLD.lerp(Color(1.0, 0.95, 0.9), heat))
+	_chain.scale = _chain.scale.lerp(Vector2.ONE, clampf(delta * 10.0, 0.0, 1.0))
+	_chain.modulate.a = _chain_alpha
+	_chain_mult.modulate.a = _chain_alpha * 0.9
+	_place_chain()
 
 
 func _draw() -> void:
@@ -208,6 +276,15 @@ func _draw() -> void:
 	var pts := PackedVector2Array([Vector2(kx, ky - 13), Vector2(kx + 9, ky), Vector2(kx, ky + 13), Vector2(kx - 9, ky)])
 	draw_colored_polygon(pts, Color(1.0, 0.35, 0.7))
 	_draw_cache_arrows()
+	# Chain timer: a gold fuse that burns down between kills.
+	if _chain_alpha > 0.0 and arena.sim.chain > 0:
+		var fuse := clampf(float(arena.sim.chain_t) / float(Defs.CHAIN_TICKS), 0.0, 1.0)
+		var cy := _chain.position.y + 90.0
+		var cw := 220.0
+		var cx := w - 24.0 - cw
+		draw_rect(Rect2(cx, cy, cw, 6), Color(0.1, 0.06, 0.02, 0.7 * _chain_alpha))
+		var fc := UiKit.GOLD if fuse > 0.3 else UiKit.RED
+		draw_rect(Rect2(cx + cw * (1.0 - fuse), cy, cw * fuse, 6), Color(fc * 1.3, _chain_alpha))
 	# Boss bar.
 	if _boss_alpha > 0.0:
 		var by := top + 160.0

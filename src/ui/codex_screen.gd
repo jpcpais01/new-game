@@ -14,8 +14,12 @@ const LORE := [
 	["Brute", "A slow hexagonal wall that shrugs off knockback."],
 	["Spitter", "Keeps its distance and fires orbs. Hunt it down."],
 	["Bomber", "Lights its fuse when close. Shoot it and it bursts on its friends."],
+	["Phantom", "Fades out, marks a ring of light beside you, then blinks into it. Watch the ring."],
+	["Sentinel", "Anchors, tracks you with a warning line, then fires a long beam. Step out of the line."],
+	["Bastion", "Hangs back behind the swarm. Everything inside its aegis takes half damage. Break it first."],
 	["The Warden", "Arrives at 4:00. Radial bursts and summoned drifters. Overloads if you stall."],
 	["Eclipse", "Arrives at 8:00. Spiral streams, dashes and swarms. Defeat it to reach the dawn."],
+	["The Seraph", "Arrives at 6:00. A turning wheel of lasers, aimed lances, and it blinks to your side in a ring of fire. Ride the gaps between its arms."],
 ]
 
 

@@ -19,6 +19,9 @@ func _init() -> void:
 	_test_daily()
 	_test_mutators()
 	_test_afterdark()
+	_test_threats()
+	_test_seraph()
+	_test_chain()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -404,7 +407,13 @@ func _test_afterdark() -> void:
 	s.tick = s.night_next - 1
 	s.step(0, 0)
 	b = s.boss_index()
-	check(b >= 0 and s.e_type[b] == Defs.ECLIPSE and s.night == 2, "night 2 brings back the Eclipse")
+	check(b >= 0 and s.e_type[b] == Defs.SERAPH and s.night == 2, "night 2 brings back the Seraph")
+	s.e_hp[b] = 0.0
+	s.step(0, 0)
+	s.tick = s.night_next - 1
+	s.step(0, 0)
+	b = s.boss_index()
+	check(b >= 0 and s.e_type[b] == Defs.ECLIPSE and s.night == 3, "night 3 brings back the Eclipse")
 	var bosses := s.bosses_killed
 	s.e_hp[b] = 0.0
 	s.step(0, 0)
@@ -419,10 +428,158 @@ func _test_afterdark() -> void:
 	_kill_boss(s, Defs.WARDEN)
 	var data := {"best_score": 0, "best_afterdark": 0, "daily_runs": 2, "daily_streak_best": 3}
 	check(Missions.done(_find_mission("afterdark"), s, data), "Into the Afterdark mission")
-	check(Missions.done(_find_mission("nightmare"), s, data), "Nightmare: four bosses in one run")
+	check(Missions.done(_find_mission("nightmare"), s, data), "Nightmare: five bosses in one run")
+	var plain := Sim.new(61)
+	plain.tick = s.tick
+	var pe := plain._spawn(Defs.DRIFTER, 0.0, 0.0, false, 0)
+	var ne := s._spawn(Defs.DRIFTER, 0.0, 0.0, false, 0)
+	check(s.e_maxhp[ne] > plain.e_maxhp[pe] * 1.4, "the swarm toughens every night")
 	check(Missions.done(_find_mission("daybreaker"), null, data), "Daybreaker counts dailies")
 	check(Missions.done(_find_mission("ritual"), null, data), "Ritual counts the best streak")
 	check(not Missions.done(_find_mission("luminary"), null, data), "Luminary needs a big score")
+
+
+## A sim with an empty field and the director held back.
+func _quiet(seed_v: int) -> Sim:
+	var s := Sim.new(seed_v)
+	s.spawn_acc = -1e9
+	s.elite_next = 1 << 30
+	s.sched_i = Sim.SCHEDULE.size()
+	return s
+
+
+func _test_threats() -> void:
+	# Sentinel: tracks, warns, then fires a beam that hurts.
+	var s := _quiet(71)
+	var e := s._spawn(Defs.SENTINEL, s.px + 320.0, s.py, false, 0)
+	s.e_t[e] = 0
+	var charged := false
+	var fired := false
+	var warned := false
+	for k in 140:
+		s.step(0, 0)
+		for ev in s.events:
+			if ev[0] == Sim.EV_LASER:
+				if ev[6] == 0:
+					charged = true
+				else:
+					fired = true
+		if s.e_state[e] == 1 and not s.lasers().is_empty():
+			warned = true
+	check(charged and fired and warned, "Sentinels warn, then fire")
+	check(s.hp < s.max_hp, "a Sentinel beam hurts a pilot who stands still")
+	var s2 := _quiet(72)
+	var e2 := s2._spawn(Defs.SENTINEL, s2.px + 320.0, s2.py, false, 0)
+	s2.e_t[e2] = 0
+	for k in 140:
+		var dodge := 100 if s2.e_state[e2] == 1 and s2.e_t[e2] < 30 else 0
+		s2.step(0, dodge)
+	check(s2.hp == s2.max_hp, "stepping out of the line dodges the beam")
+	# Phantom: marks a spot beside you, then blinks there.
+	var p := _quiet(73)
+	var f := p._spawn(Defs.PHANTOM, p.px + 600.0, p.py, false, 0)
+	p.e_t[f] = 0
+	var marked := false
+	var arrived := false
+	for k in 60:
+		p.step(0, 0)
+		for ev in p.events:
+			if ev[0] == Sim.EV_BLINK:
+				if ev[6] == 0:
+					marked = true
+				else:
+					arrived = true
+	var dx := p.e_x[f] - p.px
+	var dy := p.e_y[f] - p.py
+	check(marked and arrived, "Phantoms mark, then blink")
+	check(absf(sqrt(dx * dx + dy * dy) - 200.0) < 40.0, "a Phantom lands beside you (%.0f)" % sqrt(dx * dx + dy * dy))
+	# Bastion: its aegis halves the damage its neighbours take.
+	var b := _quiet(74)
+	var bi := b._spawn(Defs.BASTION, b.px + 700.0, b.py, false, 0)
+	var di := b._spawn(Defs.DRIFTER, b.px + 760.0, b.py, false, 0)
+	var far := b._spawn(Defs.DRIFTER, b.px - 700.0, b.py, false, 0)
+	for k in 6:
+		b.step(0, 0)
+	check(b.e_shd[di] == 1 and b.e_shd[far] == 0 and b.e_shd[bi] == 0, "a Bastion shields its neighbours")
+	b.st_crit = 0.0
+	b.e_hp[di] = 500.0
+	b.e_hp[far] = 500.0
+	b._damage(di, 10.0, 0.0, 0.0)
+	b._damage(far, 10.0, 0.0, 0.0)
+	check(absf((500.0 - b.e_hp[di]) * 2.0 - (500.0 - b.e_hp[far])) < 0.01, "shielded enemies take half damage")
+	b.e_hp[bi] = 0.0
+	for k in 7:
+		b.step(0, 0)
+	check(b.e_shd[di] == 0, "the aegis falls with its Bastion")
+	var sp := false
+	for ev in Sim.SCHEDULE:
+		if ev[1] == "grid" and ev[2] == Defs.SENTINEL:
+			sp = true
+	check(sp, "a Laser Grid is scheduled")
+
+
+func _test_seraph() -> void:
+	var at := -1
+	for ev in Sim.SCHEDULE:
+		if ev[1] == "boss" and ev[2] == Defs.SERAPH:
+			at = ev[0]
+	check(at == 360, "the Seraph arrives at 6:00")
+	var s := _quiet(81)
+	var i := s._spawn(Defs.SERAPH, s.px + 900.0, s.py, false, 0)
+	var arms := 0
+	var lances := 0
+	var blinked := false
+	for k in 600:
+		s.iframes = 999
+		s.step(0, 0)
+		var live := 0
+		for l in s.lasers():
+			if l[5]:
+				live += 1
+		if s.e_state[i] == 2:
+			arms = maxi(arms, live)
+		elif s.e_state[i] == 4:
+			lances = maxi(lances, live)
+		for ev in s.events:
+			if ev[0] == Sim.EV_BLINK and ev[6] == 1 and ev[5] == Defs.SERAPH:
+				blinked = true
+	check(arms == 3, "the Seraph's wheel has three arms (%d)" % arms)
+	check(lances == 1, "the Seraph fires aimed lances (%d)" % lances)
+	check(blinked, "the Seraph blinks beside you")
+	s.e_hp[i] = s.e_maxhp[i] * 0.4
+	check(s.seraph_arms(i) == 4 and s.seraph_lances(i).size() == 3, "a wounded Seraph burns brighter")
+	s.e_hp[i] = 0.0
+	s.step(0, 0)
+	var big := false
+	for p in s.pickups:
+		if p.k == "bigchest":
+			big = true
+	check(s.seraph_down and s.bosses_killed == 1 and big, "the Seraph falls and drops a boss cache")
+	check(s.state == Sim.RUNNING, "the Seraph is not the last boss")
+	check(Missions.done(_find_mission("seraphfall"), s, {}), "Seraphfall mission")
+
+
+func _test_chain() -> void:
+	var s := _quiet(91)
+	for k in 60:
+		var e := s._spawn(Defs.DRIFTER, s.px + 800.0, s.py + float(k), false, 0)
+		s.e_hp[e] = 0.0
+	s.step(0, 0)
+	check(s.chain == 60 and s.chain_best == 60, "kills build the Chain (%d)" % s.chain)
+	check(_has_event(s, Sim.EV_CHAIN), "a Chain milestone is announced")
+	check(s.chain_score > 0, "a long Chain multiplies the score (%d)" % s.chain_score)
+	check(absf(Defs.chain_mult(25) - 1.1) < 1e-9 and Defs.chain_mult(100000) == Defs.CHAIN_MAX_MULT, "Chain multiplier steps")
+	s._hurt(5.0)
+	check(s.chain == 0 and _has_event(s, Sim.EV_CHAIN_LOST), "a hit breaks the Chain")
+	check(s.chain_best == 60, "the best Chain is kept")
+	var e2 := s._spawn(Defs.DRIFTER, s.px + 800.0, s.py, false, 0)
+	s.e_hp[e2] = 0.0
+	s.step(0, 0)
+	check(s.chain == 1, "a new Chain starts")
+	for k in Defs.CHAIN_TICKS + 1:
+		s.step(0, 0)
+	check(s.chain == 0, "the Chain fades without kills")
+	check(Missions.done(_find_mission("unbroken"), null, {"best_chain": 300}), "Unbroken mission")
 
 
 func _test_runs() -> void:

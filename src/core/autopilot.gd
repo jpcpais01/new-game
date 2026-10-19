@@ -32,6 +32,22 @@ static func move(s: Sim) -> Vector2i:
 			var d := sqrt(d2) + 1.0
 			fx += dx / d * 1.5
 			fy += dy / d * 1.5
+	# Step out of laser lines, warning lines included.
+	for l in s.lasers():
+		var ux := Trig.cos_i(l[2])
+		var uy := Trig.sin_i(l[2])
+		var rx: float = s.px - l[0]
+		var ry: float = s.py - l[1]
+		var along := rx * ux + ry * uy
+		if along < -40.0 or along > float(l[3]) + 40.0:
+			continue
+		var side := rx * uy - ry * ux
+		var gap: float = float(l[4]) + 90.0
+		if absf(side) < gap:
+			var sgn := 1.0 if side >= 0.0 else -1.0
+			var w := (gap - absf(side)) / gap * (6.0 if l[5] or float(l[7]) > 0.6 else 2.5)
+			fx += uy * sgn * w
+			fy += -ux * sgn * w
 	var threat := sqrt(fx * fx + fy * fy)
 	var chased := false
 	if threat < 0.9:

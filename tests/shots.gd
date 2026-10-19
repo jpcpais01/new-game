@@ -23,6 +23,10 @@ func _ready() -> void:
 		await _daily_shots()
 		get_tree().quit()
 		return
+	if args.has("threats"):
+		await _threat_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -159,6 +163,75 @@ func _daily_shots() -> void:
 	main.go_title()
 	await _wait(2.0)
 	await _shot("d7_title_after")
+
+
+## The Sentinel, Phantom and Bastion, the Chain and the Seraph's three phases.
+func _threat_shots() -> void:
+	main.start_run()
+	await _wait(1.0)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	Save.data.tutorial_done = true
+	gs._hide_hint()
+	while s.seconds() < 330.0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y)
+			var w := s.boss_index()
+			if w >= 0 and s.e_type[w] == Defs.WARDEN:
+				s.e_hp[w] = 0.0
+		s.events.clear()
+	s.hp = s.max_hp
+	for k in 3:
+		var e := s._spawn(Defs.SENTINEL, s.px + 260.0 * cos(k * 2.1), s.py + 260.0 * sin(k * 2.1), false, 0)
+		s.e_t[e] = 0
+	var b := s._spawn(Defs.BASTION, s.px - 200.0, s.py - 320.0, false, 0)
+	for k in 6:
+		s._spawn(Defs.DRIFTER, s.e_x[b] + 90.0 * cos(k), s.e_y[b] + 90.0 * sin(k), false, 0)
+	var f := s._spawn(Defs.PHANTOM, s.px + 500.0, s.py + 300.0, false, 0)
+	s.e_t[f] = 0
+	main.arena.demo = true
+	await _wait(1.2)
+	main.arena.demo = false
+	await _shot("t1_threats")
+	s.chain = 312
+	s.chain_t = Defs.CHAIN_TICKS
+	await _wait(0.6)
+	await _shot("t2_chain")
+	while s.boss_index() < 0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y)
+		s.events.clear()
+	s.e_hp[s.boss_index()] = s.e_maxhp[s.boss_index()] * 20.0
+	s.e_maxhp[s.boss_index()] *= 20.0
+	s.hp = s.max_hp
+	for st in [2, 3, 5]:
+		while s.state != Sim.DEAD and s.boss_index() >= 0 and s.e_state[s.boss_index()] != st:
+			if s.state == Sim.CHOOSING:
+				s.choose(Autopilot.pick(s))
+			else:
+				var m := Autopilot.move(s)
+				s.step(m.x, m.y)
+			s.iframes = 2
+			s.events.clear()
+		main.arena.demo = true
+		await _wait(0.35)
+		main.arena.demo = false
+		await _shot("t3_seraph_%d" % st)
+	main.go_codex()
+	await _wait(1.2)
+	var sc: Array = main.screen.find_children("*", "ScrollContainer", true, false)
+	if not sc.is_empty():
+		sc[0].scroll_vertical = 2400
+	await _wait(0.5)
+	await _shot("t4_codex")
 
 
 func _wait(t: float) -> void:

@@ -3,7 +3,8 @@ extends RefCounted
 ## Static game data: enemies, weapons, passives, the director's schedule and
 ## the Forge (permanent upgrades). Pure data, shared by the sim and the views.
 
-enum { DRIFTER, DART, SPLITTER, MITE, WEAVER, BRUTE, SPITTER, BOMBER, WARDEN, ECLIPSE }
+enum { DRIFTER, DART, SPLITTER, MITE, WEAVER, BRUTE, SPITTER, BOMBER, PHANTOM, SENTINEL, BASTION,
+		WARDEN, ECLIPSE, SERAPH }
 
 ## hp, speed (px/s), r (px), dmg (contact), xp, kb (knockback taken 0..1)
 const ENEMY := [
@@ -15,14 +16,19 @@ const ENEMY := [
 	{"name": "brute", "hp": 120.0, "speed": 54.0, "r": 38.0, "dmg": 18.0, "xp": 8, "kb": 0.25},
 	{"name": "spitter", "hp": 30.0, "speed": 84.0, "r": 22.0, "dmg": 10.0, "xp": 3, "kb": 0.9},
 	{"name": "bomber", "hp": 22.0, "speed": 128.0, "r": 20.0, "dmg": 8.0, "xp": 2, "kb": 1.0},
+	{"name": "phantom", "hp": 16.0, "speed": 96.0, "r": 18.0, "dmg": 9.0, "xp": 2, "kb": 1.0},
+	{"name": "sentinel", "hp": 46.0, "speed": 66.0, "r": 24.0, "dmg": 12.0, "xp": 4, "kb": 0.5},
+	{"name": "bastion", "hp": 80.0, "speed": 62.0, "r": 30.0, "dmg": 12.0, "xp": 6, "kb": 0.35},
 	{"name": "warden", "hp": 1700.0, "speed": 70.0, "r": 74.0, "dmg": 24.0, "xp": 60, "kb": 0.0},
 	{"name": "eclipse", "hp": 8500.0, "speed": 48.0, "r": 92.0, "dmg": 30.0, "xp": 0, "kb": 0.0},
+	{"name": "seraph", "hp": 6000.0, "speed": 60.0, "r": 82.0, "dmg": 26.0, "xp": 0, "kb": 0.0},
 ]
 
 const ENEMY_COLOR := [
 	Color(1.0, 0.3, 0.65), Color(1.0, 0.84, 0.22), Color(0.35, 1.0, 0.45), Color(0.72, 1.0, 0.3),
 	Color(0.6, 0.48, 1.0), Color(1.0, 0.55, 0.18), Color(0.88, 0.35, 1.0), Color(1.0, 0.24, 0.24),
-	Color(1.0, 0.8, 0.35), Color(1.0, 0.3, 0.88),
+	Color(0.55, 0.95, 1.0), Color(1.0, 0.42, 0.2), Color(0.35, 0.6, 1.0),
+	Color(1.0, 0.8, 0.35), Color(1.0, 0.3, 0.88), Color(0.4, 1.0, 0.85),
 ]
 
 ## Weapons: one spec per level (index 0 = level 1). cd in ticks (60/s).
@@ -280,8 +286,14 @@ const MISSIONS := [
 		"flux": 250},
 	{"id": "afterdark", "name": "Into the Afterdark", "text": "Survive 3:00 past the dawn.", "kind": "afterdark",
 		"goal": 180, "flux": 300},
-	{"id": "nightmare", "name": "Nightmare", "text": "Defeat 4 bosses in one run.", "kind": "bosses", "goal": 4,
+	{"id": "nightmare", "name": "Nightmare", "text": "Defeat 5 bosses in one run.", "kind": "bosses", "goal": 5,
 		"flux": 400},
+	{"id": "seraphfall", "name": "Seraphfall", "text": "Defeat the Seraph.", "kind": "seraph", "goal": 1,
+		"flux": 180},
+	{"id": "unbroken", "name": "Unbroken", "text": "Build a Chain of 300 kills.", "kind": "chain", "goal": 300,
+		"flux": 200},
+	{"id": "radiant", "name": "Radiant", "text": "Build a Chain of 1,000 kills.", "kind": "chain", "goal": 1000,
+		"flux": 450},
 ]
 
 
@@ -309,7 +321,7 @@ const MUTATORS := {
 	"bloodlight": {"name": "Bloodlight", "boon": false, "score": 0.2, "color": Color(0.9, 0.15, 0.3),
 		"text": "Hearts never drop and Renewal is gone. Every kill restores 0.25 HP."},
 	"dusk": {"name": "Short Night", "boon": false, "score": 0.35, "color": Color(0.75, 0.45, 1.0),
-		"text": "The night runs a quarter faster: the bosses arrive at 3:00 and 6:00."},
+		"text": "The night runs a quarter faster: the bosses arrive at 3:00, 4:30 and 6:00."},
 }
 const BOONS := ["volatile", "lucky", "overcharged", "gravity", "gilded"]
 const BANES := ["glass", "horde", "frenzy", "giants", "bloodlight", "dusk"]
@@ -317,6 +329,24 @@ const BANES := ["glass", "horde", "frenzy", "giants", "bloodlight", "dusk"]
 ## Afterdark: after the dawn you may fly on. Bosses return stronger.
 const NIGHT_BOSS_EVERY := 90
 const NIGHT_BOSS_GROWTH := 0.75
+const NIGHT_BOSSES := [WARDEN, SERAPH, ECLIPSE]
+## Each night the swarm also grows denser and tougher.
+const NIGHT_SWARM := 0.22
+const NIGHT_TOUGH := 0.18
+
+## Chain: kills within CHAIN_TICKS of each other build it; taking damage
+## breaks it. Every CHAIN_STEP kills add CHAIN_BONUS to each kill's score.
+const CHAIN_TICKS := 150
+const CHAIN_STEP := 25
+const CHAIN_BONUS := 0.1
+const CHAIN_MAX_MULT := 4.0
+## Milestones announce themselves: [kills, name].
+const CHAIN_TIERS := [[50, "ON FIRE"], [100, "RAMPAGE"], [250, "UNSTOPPABLE"], [500, "LUMINOUS"],
+		[1000, "SUPERNOVA"], [2000, "AFTERGLOW"]]
+
+
+static func chain_mult(chain: int) -> float:
+	return minf(CHAIN_MAX_MULT, 1.0 + CHAIN_BONUS * float(chain / CHAIN_STEP))
 
 
 ## The mission that unlocks a ship, or {} for ships you start with.

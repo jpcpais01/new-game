@@ -20,6 +20,7 @@ const DEFAULTS := {
 	"seen_ships": ["lumen"],
 	"best_score": 0,
 	"best_afterdark": 0,
+	"best_chain": 0,
 	"ship_best": {},
 	"daily_runs": 0,
 	"daily_streak": 0,
@@ -191,6 +192,9 @@ func record_run(sim: Sim) -> Dictionary:
 		beat.score = true
 		data.best_score = score
 	data.best_afterdark = maxi(int(data.best_afterdark), sim.afterdark_seconds())
+	if sim.chain_best > int(data.best_chain):
+		beat.chain = true
+		data.best_chain = sim.chain_best
 	var sb: Dictionary = data.ship_best
 	var rec: Dictionary = sb.get(sim.ship_id, {"time": 0.0, "score": 0, "dawn": false})
 	if score > int(rec.get("score", 0)):

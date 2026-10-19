@@ -14,6 +14,8 @@ signal card_taken(id: String, lvl: int)
 signal hurt
 signal chest_opened(rewards: Array, big: bool)
 signal overdrive_ready
+signal chain_milestone(count: int, title: String)
+signal chain_lost(count: int)
 
 const TICK := 1.0 / 60.0
 
@@ -488,11 +490,62 @@ func handle_events() -> void:
 				fx.ring(sim.px, sim.py, 40.0, 1400.0, 1.4, Color(1.0, 0.25, 0.6), 2.0)
 				add_wave(sim.px, sim.py, 2.0, 700.0)
 				shake(0.5)
+			Sim.EV_LASER:
+				_on_laser(e, loud)
+			Sim.EV_BLINK:
+				var col: Color = Defs.ENEMY_COLOR[e[5]]
+				var big: bool = e[5] == Defs.SERAPH
+				if e[6] == 0:
+					fx.ring(e[3], e[4], 140.0 if big else 70.0, 10.0, 0.5, col, 1.2)
+					if loud:
+						Sfx.play("blink", 0.7 if big else randf_range(1.0, 1.2))
+				else:
+					fx.burst(e[1], e[2], col * 1.5, 30 if big else 12, 500.0, 1.0, 0.4)
+					fx.burst(e[3], e[4], col * 1.8, 50 if big else 16, 700.0 if big else 420.0, 1.2, 0.5)
+					fx.ring(e[3], e[4], 10.0, 420.0 if big else 120.0, 0.4, col, 1.6 if big else 1.0)
+					fx.arc(PackedVector2Array([Vector2(e[1], e[2]), Vector2(e[3], e[4])]), col, 0.18)
+					if big:
+						fx.flash(e[3], e[4], 500.0, 0.5, col)
+						add_wave(e[3], e[4], 2.0, 1000.0)
+						shake(0.45)
+					if loud:
+						Sfx.play("blink", 0.55 if big else randf_range(0.8, 0.95))
+			Sim.EV_CHAIN:
+				fx.ring(sim.px, sim.py, 20.0, 300.0 + 0.2 * float(e[1]), 0.5, UiKit.GOLD, 1.4)
+				if loud:
+					Sfx.play("chain", 1.0 + 0.04 * float(Defs.CHAIN_TIERS.find_custom(func(x): return x[0] == e[1])))
+					Sfx.buzz(20)
+					chain_milestone.emit(e[1], e[2])
+			Sim.EV_CHAIN_LOST:
+				if loud:
+					if int(e[1]) >= 25:
+						Sfx.play("chain_lost")
+					chain_lost.emit(e[1])
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
 					fx.spray(e[1], e[2], ship_color * 1.6, 6, randf() * TAU, TAU, 420.0, 0.8, 0.25)
 	sim.events.clear()
+
+
+## Lasers: a whine while they charge, then a searing flash along the line.
+func _on_laser(e: Array, loud: bool) -> void:
+	var col: Color = Defs.ENEMY_COLOR[e[7]]
+	var boss: bool = e[7] == Defs.SERAPH
+	if e[6] == 0:
+		fx.flash(e[1], e[2], 70.0 if not boss else 200.0, 0.4, col)
+		if loud:
+			Sfx.play("charge", randf_range(0.95, 1.05) * (0.75 if boss else 1.0))
+		return
+	var ang := Trig.to_rad(e[3])
+	var a := Vector2(e[1], e[2])
+	var b := a + Vector2(cos(ang), sin(ang)) * float(e[4])
+	fx.beam(a, b, float(e[5]) * 1.6, col, 0.32)
+	fx.flash(e[1], e[2], 140.0 if not boss else 320.0, 0.3, col)
+	fx.spray(e[1], e[2], col * 1.6, 10, ang, 0.5, 700.0, 0.9, 0.3)
+	shake(0.3 if boss else 0.12)
+	if loud:
+		Sfx.play("laser", randf_range(0.92, 1.05) * (0.8 if boss else 1.0))
 
 
 ## Every ship's Overdrive opens with the same punch: a flash, a shockwave,
