@@ -15,8 +15,8 @@ const ENEMY := [
 	{"name": "brute", "hp": 120.0, "speed": 54.0, "r": 38.0, "dmg": 18.0, "xp": 8, "kb": 0.25},
 	{"name": "spitter", "hp": 30.0, "speed": 84.0, "r": 22.0, "dmg": 10.0, "xp": 3, "kb": 0.9},
 	{"name": "bomber", "hp": 22.0, "speed": 128.0, "r": 20.0, "dmg": 8.0, "xp": 2, "kb": 1.0},
-	{"name": "warden", "hp": 1300.0, "speed": 70.0, "r": 74.0, "dmg": 24.0, "xp": 60, "kb": 0.0},
-	{"name": "eclipse", "hp": 6000.0, "speed": 48.0, "r": 92.0, "dmg": 30.0, "xp": 0, "kb": 0.0},
+	{"name": "warden", "hp": 1700.0, "speed": 70.0, "r": 74.0, "dmg": 24.0, "xp": 60, "kb": 0.0},
+	{"name": "eclipse", "hp": 8500.0, "speed": 48.0, "r": 92.0, "dmg": 30.0, "xp": 0, "kb": 0.0},
 ]
 
 const ENEMY_COLOR := [
@@ -36,6 +36,8 @@ const WEAPONS := {
 			{"cd": 28, "dmg": 15.0, "n": 2, "pierce": 0, "text": "+50% damage, faster fire."},
 			{"cd": 28, "dmg": 15.0, "n": 3, "pierce": 1, "text": "+1 bolt. Bolts pierce an enemy."},
 			{"cd": 22, "dmg": 19.0, "n": 4, "pierce": 2, "text": "+1 bolt, more pierce, much faster fire."},
+			{"cd": 16, "dmg": 24.0, "n": 5, "pierce": 3, "ring": 3, "evo": true,
+				"text": "Five piercing star-bolts per volley, and every third volley erupts in a full ring."},
 		],
 	},
 	"orbit": {
@@ -47,6 +49,8 @@ const WEAPONS := {
 			{"n": 3, "r": 118.0, "spin": 11, "dmg": 15.0, "text": "+65% damage, faster spin."},
 			{"n": 4, "r": 132.0, "spin": 11, "dmg": 15.0, "text": "+1 blade, wider orbit."},
 			{"n": 6, "r": 140.0, "spin": 14, "dmg": 21.0, "text": "+2 blades, +40% damage."},
+			{"n": 8, "r": 140.0, "r2": 270.0, "spin": 16, "dmg": 30.0, "evo": true,
+				"text": "Eight void blades whose orbit breathes in and out, flinging enemies away."},
 		],
 	},
 	"arc": {
@@ -58,6 +62,8 @@ const WEAPONS := {
 			{"cd": 70, "dmg": 25.0, "chain": 5, "strikes": 1, "text": "+55% damage, faster."},
 			{"cd": 70, "dmg": 25.0, "chain": 7, "strikes": 2, "text": "Two bolts at once, longer chains."},
 			{"cd": 56, "dmg": 34.0, "chain": 9, "strikes": 2, "text": "+35% damage, much faster, longer chains."},
+			{"cd": 34, "dmg": 40.0, "chain": 10, "strikes": 3, "reach": 320.0, "blast": 90.0, "evo": true,
+				"text": "Three storms at once. Every chain ends in a thunderclap."},
 		],
 	},
 	"nova": {
@@ -69,6 +75,8 @@ const WEAPONS := {
 			{"cd": 150, "dmg": 24.0, "r": 280.0, "text": "+70% damage, faster."},
 			{"cd": 125, "dmg": 24.0, "r": 320.0, "text": "Wider and faster."},
 			{"cd": 110, "dmg": 36.0, "r": 360.0, "text": "+50% damage, wider, faster."},
+			{"cd": 105, "dmg": 40.0, "r": 400.0, "well": 380.0, "well_dmg": 120.0, "evo": true,
+				"text": "Each shockwave also opens a black hole that drags the swarm in, then detonates."},
 		],
 	},
 	"seeker": {
@@ -80,6 +88,8 @@ const WEAPONS := {
 			{"cd": 70, "dmg": 30.0, "n": 2, "blast": 82.0, "text": "+50% damage, bigger blasts."},
 			{"cd": 70, "dmg": 30.0, "n": 3, "blast": 96.0, "text": "+1 missile, bigger blasts."},
 			{"cd": 54, "dmg": 40.0, "n": 4, "blast": 104.0, "text": "+1 missile, +33% damage, faster."},
+			{"cd": 46, "dmg": 46.0, "n": 5, "blast": 120.0, "split": 3, "evo": true,
+				"text": "Five missiles. Every blast spawns three more hunters."},
 		],
 	},
 	"lance": {
@@ -91,11 +101,25 @@ const WEAPONS := {
 			{"cd": 110, "dmg": 46.0, "w": 40.0, "dirs": 2, "text": "Fires backwards too. Wider beam."},
 			{"cd": 92, "dmg": 58.0, "w": 44.0, "dirs": 2, "text": "+25% damage, faster."},
 			{"cd": 84, "dmg": 72.0, "w": 52.0, "dirs": 4, "text": "Four beams in a cross. +25% damage."},
+			{"cd": 64, "dmg": 80.0, "w": 58.0, "dirs": 6, "sweeps": 3, "evo": true,
+				"text": "Six rainbow beams that sweep around you three times."},
 		],
 	},
 }
 
 const WEAPON_ORDER := ["pulse", "orbit", "arc", "nova", "seeker", "lance"]
+
+## Evolutions: a Lv5 weapon plus its catalyst system (any level) evolves when
+## you open a Prism Cache. The evolved spec is the weapon's sixth level.
+const EVOLUTIONS := {
+	"pulse": {"name": "Supernova Cannon", "needs": "amplifier", "color": Color(1.0, 0.82, 0.4)},
+	"orbit": {"name": "Event Horizon", "needs": "lens", "color": Color(0.78, 0.5, 1.0)},
+	"arc": {"name": "Storm Crown", "needs": "overclock", "color": Color(1.0, 0.92, 0.45)},
+	"nova": {"name": "Singularity", "needs": "plating", "color": Color(0.7, 0.38, 1.0)},
+	"seeker": {"name": "Hydra Swarm", "needs": "fortune", "color": Color(0.45, 1.0, 0.5)},
+	"lance": {"name": "Spectrum", "needs": "thrusters", "color": Color(1.0, 0.6, 0.85)},
+}
+const EVO_LEVEL := 6
 
 const PASSIVES := {
 	"vitality": {"name": "Vitality Core", "color": Color(1.0, 0.35, 0.45), "text": "+20 max HP and heal 20."},
@@ -143,6 +167,11 @@ static func forge_def(id: String) -> Dictionary:
 
 
 static func card_info(id: String) -> Dictionary:
+	if id.ends_with("_evo"):
+		var base := id.trim_suffix("_evo")
+		var e: Dictionary = EVOLUTIONS[base].duplicate()
+		e.text = WEAPONS[base].levels[EVO_LEVEL - 1].text
+		return e
 	if WEAPONS.has(id):
 		return WEAPONS[id]
 	if PASSIVES.has(id):
@@ -152,3 +181,11 @@ static func card_info(id: String) -> Dictionary:
 
 static func is_weapon(id: String) -> bool:
 	return WEAPONS.has(id)
+
+
+## The base weapon a catalyst system evolves, or "".
+static func evolves(passive: String) -> String:
+	for w in EVOLUTIONS:
+		if EVOLUTIONS[w].needs == passive:
+			return w
+	return ""

@@ -12,6 +12,7 @@ signal boss_started(type: int)
 signal boss_ended(type: int)
 signal card_taken(id: String, lvl: int)
 signal hurt
+signal chest_opened(rewards: Array, big: bool)
 
 const TICK := 1.0 / 60.0
 
@@ -123,7 +124,7 @@ func _process(delta: float) -> void:
 			_acc -= TICK
 			steps += 1
 			handle_events()
-			if sim.state != Sim.RUNNING:
+			if sim.state != Sim.RUNNING or paused:
 				_acc = 0.0
 				break
 		if steps >= 5:
@@ -159,9 +160,31 @@ func _update_view(delta: float) -> void:
 		ship_bank = lerpf(ship_bank, 0.0, clampf(delta * 6.0, 0.0, 1.0))
 	# Missile trails.
 	for i in sim.bn:
-		if sim.b_kind[i] == 1 and randf() < 0.8:
-			fx.particle(sim.b_x[i], sim.b_y[i], randf_range(-30, 30), randf_range(-30, 30), 0.35, 0.8,
-					Color(1.6, 0.8, 0.3), 0, 3.0)
+		var kind := sim.b_kind[i]
+		if (kind == 1 or kind == 2) and randf() < 0.8:
+			var green := kind == 2 or sim.b_pierce[i] > 0
+			fx.particle(sim.b_x[i], sim.b_y[i], randf_range(-30, 30), randf_range(-30, 30), 0.35,
+					0.8 if kind == 1 else 0.55, Color(0.6, 1.8, 0.7) if green else Color(1.6, 0.8, 0.3), 0, 3.0)
+	# Singularities suck light inwards.
+	if not paused:
+		for w in sim.wells:
+			for k in 3:
+				var ang := randf() * TAU
+				var rr: float = w.r * randf_range(0.6, 1.0)
+				var sx: float = w.x + cos(ang) * rr
+				var sy: float = w.y + sin(ang) * rr
+				var tang := ang + PI * 0.5
+				fx.particle(sx, sy, (w.x - sx) * 2.2 + cos(tang) * 220.0, (w.y - sy) * 2.2 + sin(tang) * 220.0, 0.4,
+						0.9, Color(0.9, 0.5, 1.8), 1, 0.5)
+	# Event Horizon blades leave violet trails.
+	if not paused and sim.is_evolved("orbit") and sim.state == Sim.RUNNING:
+		var spec := sim.orbit_spec()
+		var n: int = spec.n
+		var rad := sim.orbit_radius()
+		for k in n:
+			var ang := Trig.to_rad(sim.orbit_ang + k * Trig.STEPS / n)
+			fx.particle(p.x + cos(ang) * rad, p.y + sin(ang) * rad, randf_range(-20, 20), randf_range(-20, 20), 0.3,
+					1.1, Color(0.9, 0.5, 1.8), 0, 4.0)
 	# Camera: follow with a little look-ahead, plus trauma shake.
 	var look := mv * 70.0
 	_cam_pos = _cam_pos.lerp(p + look, clampf(delta * 6.0, 0.0, 1.0))
@@ -267,6 +290,18 @@ func handle_events() -> void:
 							380.0, 0.6, 0.12)
 					if loud:
 						Sfx.play("shoot", randf_range(0.95, 1.08))
+				elif e[1] == "pulse_evo":
+					fx.spray(e[2] + cos(ang) * 26.0, e[3] + sin(ang) * 26.0, Color(2.0, 1.5, 0.6), 6, ang, 0.9,
+							460.0, 0.8, 0.14)
+					if loud:
+						Sfx.play("shoot", randf_range(0.8, 0.9))
+				elif e[1] == "supernova":
+					fx.ring(e[2], e[3], 20.0, 220.0, 0.35, Color(1.0, 0.8, 0.4), 1.4)
+					fx.flash(e[2], e[3], 160.0, 0.25, Color(1.0, 0.75, 0.35))
+					add_wave(e[2], e[3], 0.8, 1100.0)
+					shake(0.08)
+					if loud:
+						Sfx.play("nova", 1.35)
 				else:
 					if loud:
 						Sfx.play("missile", randf_range(0.9, 1.1))
@@ -280,7 +315,8 @@ func handle_events() -> void:
 					Sfx.play("nova", randf_range(0.95, 1.05))
 			Sim.EV_ARC:
 				var pts: PackedVector2Array = e[1]
-				fx.arc(pts, Color(0.7, 0.65, 1.0))
+				var storm: bool = e[2]
+				fx.arc(pts, Color(1.0, 0.85, 0.4) if storm else Color(0.7, 0.65, 1.0))
 				for k in range(1, pts.size()):
 					fx.spray(pts[k].x, pts[k].y, Color(1.0, 1.0, 1.8), 4, randf() * TAU, TAU, 320.0, 0.7, 0.2)
 				if loud:
@@ -288,8 +324,12 @@ func handle_events() -> void:
 			Sim.EV_LANCE:
 				var a := Vector2(e[1], e[2])
 				var b := Vector2(e[3], e[4])
-				fx.beam(a, b, e[5], Color(1.0, 0.95, 0.55))
-				fx.flash(e[1], e[2], 90.0, 0.2, Color(1.0, 0.95, 0.6))
+				var hue: float = e[6]
+				var bc := Color(1.0, 0.95, 0.55)
+				if hue >= 0.0:
+					bc = Color.from_hsv(fmod(hue + vtime * 0.4, 1.0), 0.55, 1.0)
+				fx.beam(a, b, e[5], bc)
+				fx.flash(e[1], e[2], 90.0, 0.2, bc)
 				shake(0.1)
 				if loud:
 					Sfx.play("lance", randf_range(0.95, 1.05))
@@ -325,7 +365,42 @@ func handle_events() -> void:
 					Sfx.play("boss_down")
 					Sfx.buzz(250)
 					boss_ended.emit(e[1])
+			Sim.EV_CHEST:
+				var big: bool = e[2]
+				var col := Color(1.0, 0.45, 0.95) if big else Color(1.0, 0.8, 0.35)
+				fx.ring(sim.px, sim.py, 20.0, 420.0, 0.6, col, 1.6)
+				fx.burst(sim.px, sim.py, col * 1.8, 50, 900.0, 1.4, 0.8)
+				add_wave(sim.px, sim.py, 1.6, 1000.0)
+				_flash = 0.6
+				shake(0.3)
+				if loud:
+					Sfx.buzz(60)
+					chest_opened.emit(e[1], big)
+			Sim.EV_EVOLVE:
+				var col: Color = Defs.EVOLUTIONS[e[1]].color
+				for k in 3:
+					fx.ring(sim.px, sim.py, 20.0, 380.0 + 200.0 * k, 0.7 + 0.2 * k, col, 1.8)
+				fx.burst(sim.px, sim.py, col * 2.0, 80, 1100.0, 1.6, 1.0)
+				add_wave(sim.px, sim.py, 2.5, 900.0)
+				_flash = 1.0
+				shake(0.6)
+			Sim.EV_WELL:
+				fx.flash(e[1], e[2], e[3] * 0.6, 0.4, Color(0.6, 0.3, 1.0))
+				fx.ring(e[1], e[2], e[3], 20.0, 0.5, Color(0.8, 0.45, 1.0), 1.4)
+				add_wave(e[1], e[2], 0.7, 700.0)
+				if loud:
+					Sfx.play("well", randf_range(0.95, 1.05))
+			Sim.EV_IMPLODE:
+				fx.flash(e[1], e[2], e[3] * 1.8, 0.45, Color(0.75, 0.4, 1.0))
+				fx.ring(e[1], e[2], 20.0, e[3] * 1.3, 0.45, Color(0.85, 0.5, 1.0), 2.0)
+				fx.burst(e[1], e[2], Color(1.2, 0.7, 2.0), 40, 900.0, 1.3, 0.6)
+				add_wave(e[1], e[2], 2.0, 1000.0)
+				shake(0.3)
+				if loud:
+					Sfx.play("implode", randf_range(0.9, 1.05))
 			Sim.EV_PICKUP:
+				if e[1] == "chest" or e[1] == "bigchest":
+					continue
 				var col := Color(1.0, 0.4, 0.5) if e[1] == "heart" else (Color(0.4, 0.8, 1.0) if e[1] == "magnet" else Color(1.0, 0.9, 0.4))
 				fx.ring(sim.px, sim.py, 10.0, 160.0, 0.4, col, 1.2)
 				fx.burst(sim.px, sim.py, col * 1.6, 20, 420.0, 1.0, 0.6)

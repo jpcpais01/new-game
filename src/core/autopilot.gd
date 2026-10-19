@@ -3,7 +3,7 @@ extends RefCounted
 ## A simple kiting pilot used by the title demo and the tests: flees nearby threats, drifts towards
 ## gems when safe, stays off the arena wall, and picks cards by preference.
 
-const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "vitality", "amplifier", "overclock",
+const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "amplifier", "vitality", "overclock",
 		"magnet", "thrusters", "plating", "lens", "renewal", "fortune", "scholar", "heal", "flux"]
 
 
@@ -31,7 +31,20 @@ static func move(s: Sim) -> Vector2i:
 			fx += dx / d * 1.5
 			fy += dy / d * 1.5
 	var threat := sqrt(fx * fx + fy * fy)
-	if threat < 0.4:
+	var chased := false
+	if threat < 0.9:
+		for p in s.pickups:
+			if p.k != "chest" and p.k != "bigchest":
+				continue
+			var dx: float = p.x - s.px
+			var dy: float = p.y - s.py
+			var d := sqrt(dx * dx + dy * dy) + 1.0
+			if d < 1100.0:
+				fx += dx / d * 0.8
+				fy += dy / d * 0.8
+				chased = true
+				break
+	if threat < 0.4 and not chased:
 		var best := -1
 		var bd := 500.0 * 500.0
 		for i in s.gn:

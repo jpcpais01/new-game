@@ -393,7 +393,52 @@ def music():
     write_ogg("music_menu", norm(menu, 0.65))
 
 
+def sfx_evolution():
+    """Prism Cache and evolution sounds (own RNG so older sounds stay identical)."""
+    global rng
+    rng = np.random.default_rng(31)
+    # Cache opening: a shimmering riser into a bright burst.
+    n = int(1.5 * SR)
+    tt = np.arange(n) / SR
+    rise = np.zeros(n)
+    for k, m in enumerate([72, 76, 79, 83, 86, 88, 91, 95]):
+        st = int(k * 0.11 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        rise[st:] += np.sin(2 * np.pi * mtof(m) * t2) * expdecay(seg, 5) * (0.5 + 0.07 * k)
+    rise += highpass(noise(n), 3000) * env(n, 0.9, 0.5) * 0.35
+    rise += np.sin(sweep_phase(80, 40, n)) * env(n, 0.95, 0.5) * 0.5
+    write_wav("chest", rise, 0.8)
+    # Evolution: a huge major chord with a downward whoosh and sub drop.
+    n = int(2.6 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for m in [45, 57, 64, 69, 73, 76, 81]:
+        x += saw_from_phase(2 * np.pi * mtof(m) * tt, 7) * env(n, 0.01, 0.3, 0.55, 1.6, 0.5) * 0.18
+    x = lowpass(x, 4200)
+    x += np.sin(sweep_phase(140, 30, n, 0.5)) * expdecay(n, 2.0) * 0.9
+    x += highpass(noise(n), 1800) * expdecay(n, 3.5) * 0.4
+    write_wav("evolve", x, 0.9)
+    # Singularity opening: reversed suction.
+    n = int(1.1 * SR)
+    x = lowpass(noise(n), 900) * env(n, 0.9, 0.15) * 0.9
+    x += np.sin(sweep_phase(50, 160, n, 2.0)) * env(n, 0.9, 0.15) * 0.6
+    write_wav("well", x, 0.7)
+    # Singularity detonation: a deep crunch.
+    n = int(1.0 * SR)
+    x = np.sin(sweep_phase(200, 28, n, 0.35)) * expdecay(n, 4.5) * 1.1
+    x += lowpass(noise(n), 2200) * expdecay(n, 6) * 1.0
+    x += highpass(noise(n), 4000) * expdecay(n, 18) * 0.3
+    write_wav("implode", x, 0.9)
+
+
 if __name__ == "__main__":
+    import sys
+    if "--evo" in sys.argv:
+        sfx_evolution()
+        print("evolution audio ok")
+        sys.exit(0)
     sfx()
     music()
+    sfx_evolution()
     print("audio ok")

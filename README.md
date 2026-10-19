@@ -3,7 +3,9 @@
 **Survive the swarm. Become the light.** A neon arena survivor for Android:
 drag to steer a ship of light, your weapons fire on their own, every level-up
 offers three upgrade cards, and two bosses stand between you and the dawn at
-8:00. Every run earns Flux for permanent upgrades in the Forge. Built with
+8:00. Elites and bosses drop Prism Caches: max a weapon, carry its catalyst
+system, and a cache evolves it into one of six evolved forms. Every run earns
+Flux for permanent upgrades in the Forge. Built with
 Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
@@ -16,7 +18,7 @@ publishes a new release automatically.
 | --- | --- |
 | `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). |
 | `src/view/` | Drawing only: `arena.gd` (runs the sim in real time, camera, shake, slow-mo, events → effects/sound), `entities.gd`, `fx.gd` (particles, rings, beams, lightning, damage numbers), `background.gdshader` (warping grid). |
-| `src/ui/` | Screens: title (live autopilot demo behind it), game (joystick, HUD, level-up cards, pause, results), Forge, settings. |
+| `src/ui/` | Screens: title (live autopilot demo behind it), game (joystick, HUD, level-up cards, Prism Cache reveal, pause, results), Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |
 | `assets/` | Generated sprites/icons/audio (see `tools/`) and fonts (Orbitron, Rajdhani; OFL). |
 | `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `shots.tscn` (screenshots). |

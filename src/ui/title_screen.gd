@@ -51,6 +51,12 @@ func _ready() -> void:
 				UiKit.display_light())
 		col.add_child(best)
 		UiKit.pop_in(best, 0.5)
+	var known: Array = d.get("evolved", [])
+	if not known.is_empty():
+		var evo := UiKit.label("EVOLUTIONS DISCOVERED  %d / %d" % [known.size(), Defs.EVOLUTIONS.size()], 28,
+				UiKit.GOLD, UiKit.display_light())
+		col.add_child(evo)
+		UiKit.pop_in(evo, 0.55)
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 40)
 	col.add_child(gap)

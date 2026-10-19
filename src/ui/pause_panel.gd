@@ -22,17 +22,36 @@ func build() -> void:
 		ids.append(w.id)
 	ids.append_array(sim.passive_order)
 	for id in ids:
+		var did := sim.display_id(id)
 		var cell := VBoxContainer.new()
 		cell.add_theme_constant_override("separation", 0)
-		cell.add_child(UiKit.icon_rect(id, 120))
-		var nm := UiKit.label("%s  %d" % [String(Defs.card_info(id).get("name", id)).split(" ")[0].to_upper(),
-				sim.card_level(id)], 18, Art.card_color(id), UiKit.display_light())
+		cell.add_child(UiKit.icon_rect(did, 120))
+		var lv := sim.card_level(id)
+		var nm := UiKit.label("%s  %s" % [String(Defs.card_info(did).get("name", id)).split(" ")[0].to_upper(),
+				"EVO" if lv >= Defs.EVO_LEVEL else str(lv)], 18, Art.card_color(did), UiKit.display_light())
 		nm.custom_minimum_size = Vector2(230, 30)
 		cell.add_child(nm)
 		grid.add_child(cell)
 	var cc := CenterContainer.new()
 	cc.add_child(grid)
 	body.add_child(cc)
+	# Evolution recipes for the weapons you carry.
+	var lines: Array = []
+	for w in sim.weapons:
+		if sim.is_evolved(w.id):
+			continue
+		var evo: Dictionary = Defs.EVOLUTIONS[w.id]
+		var ready := sim.evolution_ready(w.id)
+		var have := sim.passives.has(evo.needs)
+		var l := UiKit.label("%s %s  +  %s  →  %s" % [
+				String(Defs.WEAPONS[w.id].name).to_upper(), "5" if w.lvl >= Defs.MAX_LEVEL else "%d/5" % w.lvl,
+				String(Defs.PASSIVES[evo.needs].name).to_upper() + ("" if have else "?"),
+				String(evo.name).to_upper()], 22, UiKit.GOLD if ready else UiKit.DIM, UiKit.display_light())
+		lines.append(l)
+	if not lines.is_empty():
+		body.add_child(UiKit.label("EVOLUTIONS  ·  OPEN A PRISM CACHE WHEN READY", 22, UiKit.CYAN, UiKit.display()))
+		for l in lines:
+			body.add_child(l)
 	var res := UiKit.button("RESUME", UiKit.CYAN, 48, true)
 	res.custom_minimum_size = Vector2(0, 130)
 	res.pressed.connect(func():

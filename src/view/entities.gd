@@ -155,12 +155,45 @@ func _draw_glow() -> void:
 		draw_set_transform(Vector2(x, y), 0.0, Vector2(sc, sc))
 		var c: Color = tier[1]
 		draw_texture(gem, Vector2(-24, -24), c * 1.5)
-	# Pickups.
+	# Singularities: rings collapsing into a violet core.
+	var ring := Art.tex("ring")
+	var glow := Art.tex("glow")
+	for w in s.wells:
+		var wr: float = w.r
+		var life := clampf(float(w.t) / float(Sim.WELL_TICKS), 0.0, 1.0)
+		var grow := clampf((1.0 - life) * 6.0, 0.0, 1.0)
+		for k in 4:
+			var ph := fmod(t * 1.8 + k * 0.25, 1.0)
+			var rr := wr * (1.0 - ph) * grow
+			var sc := rr / 110.0
+			draw_set_transform(Vector2(w.x, w.y), t * 2.0 + k, Vector2(sc, sc))
+			draw_texture(ring, Vector2(-128, -128), Color(0.8, 0.4, 1.6, ph * 0.7))
+		var core_s := (0.9 + 0.5 * (1.0 - life) + 0.1 * sin(t * 30.0)) * grow
+		draw_set_transform(Vector2(w.x, w.y), 0.0, Vector2(core_s, core_s))
+		draw_texture(glow, Vector2(-64, -64), Color(0.7, 0.3, 1.4, 0.9))
+		draw_set_transform(Vector2(w.x, w.y), -t * 6.0, Vector2(core_s, core_s) * 0.35)
+		draw_texture(Art.tex("i_nova_evo"), Vector2(-48, -48), Color(1.6, 1.2, 2.0))
+	# Pickups. Prism Caches stand under a pillar of light so you can find them.
 	for p in s.pickups:
-		var tex := Art.tex("p_" + String(p.k))
+		var kind := String(p.k)
+		var tex := Art.tex("p_" + kind)
 		var pulse := 1.0 + 0.12 * sin(t * 7.0)
+		if kind == "chest" or kind == "bigchest":
+			var big := kind == "bigchest"
+			var col := Color(1.0, 0.45, 0.95) if big else Color(1.0, 0.8, 0.35)
+			draw_set_transform(Vector2(p.x, p.y), -PI * 0.5, Vector2.ONE)
+			draw_texture_rect(Art.tex("beam"), Rect2(0, -26, 900, 52), false, Color(col, 0.35 + 0.1 * sin(t * 4.0)))
+			var rs := (1.15 if big else 0.85) * (1.0 + 0.06 * sin(t * 5.0))
+			draw_set_transform(Vector2(p.x, p.y), t * 1.4, Vector2(rs, rs) * 0.6)
+			draw_texture(ring, Vector2(-128, -128), Color(col * 1.4, 0.8))
+			draw_set_transform(Vector2(p.x, p.y), 0.0, Vector2(rs, rs) * 1.5)
+			draw_texture(glow, Vector2(-64, -64), Color(col, 0.35))
+			var bob := sin(t * 3.0) * 6.0
+			draw_set_transform(Vector2(p.x, p.y + bob), sin(t * 1.5) * 0.15, Vector2(rs, rs) * 1.05)
+			draw_texture(tex, Vector2(-48, -48), Color(1.7, 1.7, 1.7))
+			continue
 		draw_set_transform(Vector2(p.x, p.y), sin(t * 2.0) * 0.2, Vector2(pulse, pulse) * 0.75)
-		draw_texture(Art.tex("glow"), Vector2(-64, -64), Color(1, 1, 1, 0.25))
+		draw_texture(glow, Vector2(-64, -64), Color(1, 1, 1, 0.25))
 		draw_texture(tex, Vector2(-48, -48), Color(1.5, 1.5, 1.5))
 	# Enemy orbs.
 	var orb := Art.tex("orb")
@@ -178,19 +211,33 @@ func _draw_glow() -> void:
 		var x := lerpf(s.b_ox[i], s.b_x[i], a)
 		var y := lerpf(s.b_oy[i], s.b_y[i], a)
 		var ang := atan2(s.b_vy[i], s.b_vx[i])
-		if s.b_kind[i] == 0:
-			var sc := s.b_r[i] / 9.0
-			draw_set_transform(Vector2(x, y), ang, Vector2(sc * 1.1, sc))
-			draw_texture(bolt, Vector2(-44, -12), Color(0.6, 1.9, 2.2))
-		else:
-			draw_set_transform(Vector2(x, y), ang, Vector2(1.1, 1.1))
-			draw_texture(missile, Vector2(-32, -32), Color(2.0, 1.5, 0.8))
+		match s.b_kind[i]:
+			0:
+				var sc := s.b_r[i] / 9.0
+				draw_set_transform(Vector2(x, y), ang, Vector2(sc * 1.1, sc))
+				draw_texture(bolt, Vector2(-44, -12), Color(0.6, 1.9, 2.2))
+			3:
+				var sc := s.b_r[i] / 9.0
+				draw_set_transform(Vector2(x, y), ang, Vector2(sc * 1.25, sc))
+				draw_texture(bolt, Vector2(-44, -12), Color(2.4, 1.7, 0.7))
+				draw_set_transform(Vector2(x, y), 0.0, Vector2(0.5, 0.5))
+				draw_texture(glow, Vector2(-64, -64), Color(1.0, 0.7, 0.3, 0.35))
+			1:
+				var hydra := s.b_pierce[i] > 0
+				draw_set_transform(Vector2(x, y), ang, Vector2(1.25, 1.25) if hydra else Vector2(1.1, 1.1))
+				draw_texture(missile, Vector2(-32, -32), Color(0.9, 2.2, 1.0) if hydra else Color(2.0, 1.5, 0.8))
+			_:
+				draw_set_transform(Vector2(x, y), ang, Vector2(0.75, 0.75))
+				draw_texture(missile, Vector2(-32, -32), Color(0.7, 2.0, 0.9))
 	# Orbit blades.
 	var spec := s.orbit_spec()
 	if not spec.is_empty():
 		var blade := Art.tex("blade")
 		var n: int = spec.n
-		var rad: float = spec.r * s.st_area
+		var rad := s.orbit_radius()
+		var evo: bool = spec.get("evo", false)
+		var bcol := Color(1.7, 1.0, 2.6) if evo else Color(1.3, 2.0, 2.0)
+		var bsc := 1.15 if evo else 0.85
 		var px := lerpf(s.ppx, s.px, a)
 		var py := lerpf(s.ppy, s.py, a)
 		var base := float(s.orbit_ang) + float(spec.spin) * a
@@ -198,11 +245,17 @@ func _draw_glow() -> void:
 			var ang := Trig.to_rad(int(base) + k * Trig.STEPS / n) + (base - floorf(base)) * TAU / Trig.STEPS
 			var bx := px + cos(ang) * rad
 			var by := py + sin(ang) * rad
-			draw_set_transform(Vector2(bx, by), ang + PI * 0.5, Vector2(0.85, 0.85) * sqrt(s.st_area))
-			draw_texture(blade, Vector2(-48, -48), Color(1.3, 2.0, 2.0))
-		# Faint orbit path.
+			draw_set_transform(Vector2(bx, by), ang + PI * 0.5, Vector2(bsc, bsc) * sqrt(s.st_area))
+			draw_texture(blade, Vector2(-48, -48), bcol)
+		# Faint orbit path (a swirling accretion disc once evolved).
 		draw_set_transform(Vector2(px, py), 0.0, Vector2.ONE)
-		draw_arc(Vector2.ZERO, rad, 0.0, TAU, 64, Color(0.4, 1.0, 1.0, 0.08), 3.0)
+		if evo:
+			for k in 3:
+				var rr := rad * (0.82 + 0.09 * k)
+				var a0 := -t * (2.0 + k) + k
+				draw_arc(Vector2.ZERO, rr, a0, a0 + PI * 1.2, 40, Color(0.7, 0.4, 1.0, 0.16), 6.0 - k)
+		else:
+			draw_arc(Vector2.ZERO, rad, 0.0, TAU, 64, Color(0.4, 1.0, 1.0, 0.08), 3.0)
 	# Ship core glow.
 	if s.state != Sim.DEAD:
 		var x := lerpf(s.ppx, s.px, a)

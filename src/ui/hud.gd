@@ -104,15 +104,23 @@ func _rebuild_loadout() -> void:
 		var slot := Control.new()
 		slot.custom_minimum_size = Vector2(54, 64)
 		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var ic := UiKit.icon_rect(id, 54)
+		var did := arena.sim.display_id(id)
+		var ic := UiKit.icon_rect(did, 54)
 		slot.add_child(ic)
 		var lv := arena.sim.card_level(id)
-		var pips := UiKit.label("•".repeat(lv), 18, Art.card_color(id), UiKit.bold())
+		var evo := lv >= Defs.EVO_LEVEL
+		var pips := UiKit.label("EVO" if evo else "•".repeat(lv), 16 if evo else 18, Art.card_color(did),
+				UiKit.display() if evo else UiKit.bold())
 		pips.position = Vector2(0, 46)
 		pips.size = Vector2(54, 18)
 		slot.add_child(pips)
 		_loadout.add_child(slot)
 		_icons[id] = slot
+		if arena.sim.evolution_ready(id):
+			# Ready to evolve: the slot pulses gold until the next cache.
+			var tw := ic.create_tween().set_loops()
+			tw.tween_property(ic, "modulate", Color(2.0, 1.6, 0.6), 0.45)
+			tw.tween_property(ic, "modulate", Color.WHITE, 0.45)
 	if _boss_type == -1 and _loadout.get_child_count() > 0:
 		_loadout.modulate.a = 0.9
 
@@ -185,6 +193,7 @@ func _draw() -> void:
 	var ky := top + 69.0
 	var pts := PackedVector2Array([Vector2(kx, ky - 13), Vector2(kx + 9, ky), Vector2(kx, ky + 13), Vector2(kx - 9, ky)])
 	draw_colored_polygon(pts, Color(1.0, 0.35, 0.7))
+	_draw_cache_arrows()
 	# Boss bar.
 	if _boss_alpha > 0.0:
 		var by := top + 160.0
@@ -197,3 +206,32 @@ func _draw() -> void:
 		for k in range(1, 10):
 			var x := br.position.x + bw * k / 10.0
 			draw_line(Vector2(x, by), Vector2(x, by + 18), Color(0, 0, 0, 0.5 * _boss_alpha), 2.0)
+
+
+## Off-screen Prism Caches get a pulsing arrow on the screen edge.
+func _draw_cache_arrows() -> void:
+	if arena == null or arena.sim == null or arena.sim.pickups.is_empty():
+		return
+	var vs := size
+	var center := arena.camera.get_screen_center_position()
+	var half := vs * 0.5
+	var t := arena.vtime
+	for p in arena.sim.pickups:
+		if p.k != "chest" and p.k != "bigchest":
+			continue
+		var rel := Vector2(p.x, p.y) - center
+		if absf(rel.x) < half.x - 40.0 and absf(rel.y) < half.y - 40.0:
+			continue
+		var col := Color(1.0, 0.45, 0.95) if p.k == "bigchest" else UiKit.GOLD
+		var dir := rel.normalized()
+		var margin := Vector2(70.0, 70.0)
+		var lim := half - margin
+		var k := minf(lim.x / maxf(absf(dir.x), 0.001), lim.y / maxf(absf(dir.y), 0.001))
+		var pos := half + dir * k
+		pos.y = clampf(pos.y, top + 220.0, vs.y - 70.0)
+		var pulse := 1.0 + 0.15 * sin(t * 8.0)
+		var tip := pos + dir * 34.0 * pulse
+		var side := dir.orthogonal() * 22.0 * pulse
+		draw_colored_polygon(PackedVector2Array([tip, pos - dir * 6.0 + side, pos - dir * 6.0 - side]), col)
+		draw_texture_rect(Art.tex("p_" + String(p.k)), Rect2(pos - dir * 52.0 - Vector2(32, 32), Vector2(64, 64)),
+				false, Color(1.2, 1.2, 1.2, 0.95))

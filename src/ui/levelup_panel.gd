@@ -129,6 +129,7 @@ func _make_card(id: String, index: int, sz: Vector2) -> Control:
 	desc.position = Vector2(tx, 140)
 	desc.size = Vector2(sz.x - tx - 34, 110)
 	card.add_child(desc)
+	_evo_badge(card, id, sz, name)
 	# Level pips.
 	if Defs.is_weapon(id) or Defs.PASSIVES.has(id):
 		var pips := HBoxContainer.new()
@@ -180,3 +181,42 @@ func close() -> void:
 	var tw := create_tween()
 	tw.tween_property(self, "modulate:a", 0.0, 0.15)
 	tw.tween_callback(func(): visible = false)
+
+
+## Top-right badge showing what this card evolves with (weapons) or into
+## (catalyst systems for a weapon you carry). Gold when it is relevant now.
+func _evo_badge(card: Control, id: String, sz: Vector2, name: Label) -> void:
+	var icon_id := ""
+	var hot := false
+	if Defs.EVOLUTIONS.has(id):
+		var need: String = Defs.EVOLUTIONS[id].needs
+		icon_id = need
+		hot = sim.passives.has(need)
+	elif Defs.PASSIVES.has(id):
+		var base := Defs.evolves(id)
+		if base != "" and sim.weapon_level(base) > 0 and not sim.is_evolved(base):
+			icon_id = base + "_evo"
+			hot = true
+	if icon_id == "":
+		return
+	name.size.x -= 120.0
+	var col := UiKit.GOLD if hot else Color(1, 1, 1, 0.35)
+	var disc := Panel.new()
+	disc.add_theme_stylebox_override("panel", UiKit.box(col, Color(col, 0.1), 50, 2, 8 if hot else 0))
+	disc.position = Vector2(sz.x - 124, 16)
+	disc.size = Vector2(96, 96)
+	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(disc)
+	var ic := UiKit.icon_rect(icon_id, 76)
+	ic.position = Vector2(10, 10)
+	ic.size = Vector2(76, 76)
+	ic.modulate = Color.WHITE if hot else Color(1, 1, 1, 0.45)
+	disc.add_child(ic)
+	var tag := UiKit.label("EVOLVES", 18, col, UiKit.display())
+	tag.position = Vector2(sz.x - 134, 112)
+	tag.size = Vector2(116, 24)
+	card.add_child(tag)
+	if hot:
+		var tw := disc.create_tween().set_loops()
+		tw.tween_property(disc, "modulate", Color(1.5, 1.3, 0.8), 0.5)
+		tw.tween_property(disc, "modulate", Color.WHITE, 0.5)

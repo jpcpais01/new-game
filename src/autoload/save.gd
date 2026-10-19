@@ -13,6 +13,7 @@ const DEFAULTS := {
 	"total_kills": 0,
 	"total_flux": 0,
 	"tutorial_done": false,
+	"evolved": [],
 	"settings": {"sound": true, "music": true, "haptics": true, "shake": true, "numbers": true},
 }
 
@@ -106,5 +107,10 @@ func record_run(sim: Sim) -> Dictionary:
 	if sim.level > int(data.best_level):
 		beat.level = true
 		data.best_level = sim.level
+	var known: Array = data.evolved
+	for w in sim.weapons:
+		if sim.is_evolved(w.id) and not known.has(w.id):
+			known.append(w.id)
+			beat[w.id] = true
 	save_data()
 	return beat

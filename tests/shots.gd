@@ -34,6 +34,28 @@ func _ready() -> void:
 	await _wait(1.6)
 	main.arena.demo = false
 	await _shot("2_run")
+	# Evolved arsenal in action.
+	s.weapons = [
+		{"id": "pulse", "lvl": Defs.EVO_LEVEL, "t": 5, "k": 0, "a": 0},
+		{"id": "orbit", "lvl": Defs.EVO_LEVEL, "t": 5, "k": 0, "a": 0},
+		{"id": "nova", "lvl": Defs.EVO_LEVEL, "t": 5, "k": 0, "a": 0},
+		{"id": "lance", "lvl": Defs.EVO_LEVEL, "t": 5, "k": 0, "a": 0},
+	]
+	s.hp = s.max_hp
+	main.arena.demo = true
+	await _wait(1.3)
+	main.arena.demo = false
+	await _shot("2b_evolved")
+	# A Prism Cache that evolves the Seeker Swarm.
+	s.weapons[3] = {"id": "seeker", "lvl": Defs.MAX_LEVEL, "t": 5, "k": 0, "a": 0}
+	s.passives["fortune"] = 1
+	s.passive_order.append("fortune")
+	s.pickups.append({"k": "bigchest", "x": s.px, "y": s.py, "mag": true, "spd": 0.0})
+	await _wait(3.4)
+	await _shot("2c_cache")
+	gs._chest.visible = false
+	gs._on_chest_closed()
+	await _wait(0.5)
 	s.xp = s.xp_need
 	main.arena.demo = false
 	await _wait(1.2)
