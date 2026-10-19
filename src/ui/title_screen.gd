@@ -67,6 +67,10 @@ func _ready() -> void:
 	chip.add_child(UiKit.icon_rect("ship_" + String(sd.id), 64))
 	chip.add_child(UiKit.label("%s  ·  %s" % [String(sd.name).to_upper(), String(sd.od).to_upper()], 30,
 			Color(sd.color).lerp(Color.WHITE, 0.25), UiKit.display()))
+	var rad := Save.current_radiance()
+	if rad > 0:
+		chip.add_child(UiKit.icon_rect("radiance", 56))
+		chip.add_child(UiKit.label("R%d" % rad, 30, Defs.radiance_color(rad), UiKit.display()))
 	col.add_child(chip)
 	UiKit.pop_in(chip, 0.4)
 	var gap1 := Control.new()

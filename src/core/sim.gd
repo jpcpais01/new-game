@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 6
+const RULES_VERSION := 7
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -74,6 +74,7 @@ const EV_MINE := 35       # x, y (mines dropped)
 const EV_RELIC := 36      # relic id (taken)
 const EV_HALO := 37       # x, y (the Guardian Halo blocks a hit)
 const EV_RELIC_OFFER := 38
+const EV_BANISH := 39      # card id banished, slot, new card id
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -192,6 +193,13 @@ var r_over := false
 var r_midas := false
 var r_wrath := false
 
+# Radiance (ascension) and banished cards
+var radiance := 0             # 0..Defs.MAX_RADIANCE, from loadout.radiance
+var heal_mult := 1.0
+var overload_ticks := OVERLOAD_TICKS
+var banishes := 0
+var banished := {}            # card id -> true: never offered again this run
+
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
 var sched_i := 0
@@ -276,7 +284,7 @@ var _blasts: Array = []
 
 # --- replay log ---------------------------------------------------------------------
 var log_moves := PackedInt32Array()    # RLE pairs: code, count
-var log_actions := PackedInt32Array()  # pairs: tick, action (0..2 pick, 9 reroll)
+var log_actions := PackedInt32Array()  # pairs: tick, action (0..2 pick, 8 night, 9 reroll, 10..12 banish)
 
 
 func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
@@ -296,6 +304,16 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 		sched_scale = 0.75
 	if mods.has("gilded"):
 		elite_next = 60 * TPS
+	radiance = clampi(int(loadout.get("radiance", 0)), 0, Defs.MAX_RADIANCE)
+	if radiance >= 3 and not mods.has("gilded"):
+		elite_next = 150 * TPS
+	if radiance >= 6:
+		heal_mult = 0.65
+	if radiance >= 9:
+		overload_ticks = 75 * TPS
+	if radiance >= 10:
+		sched_scale *= 0.9
+	banishes = Defs.BASE_BANISHES + int(loadout.get("banish", 0))
 	revives = int(loadout.get("revive", 0))
 	rerolls = int(loadout.get("reroll", 0)) + int(ship_stats.get("reroll", 0))
 	weapons.append({"id": sd.weapon, "lvl": int(ship_stats.get("wlvl", 1)), "t": 20, "k": 0, "a": 0})
@@ -414,6 +432,31 @@ func continue_night() -> void:
 	events.append([EV_WAVE, "AFTERDARK"])
 
 
+## Banish level-up card k: it leaves the pool for the rest of the run and a
+## fresh card takes its slot.
+func banish(k: int) -> void:
+	if state != CHOOSING or relic_choice or banishes <= 0 or k < 0 or k >= choices.size():
+		return
+	var id: String = choices[k]
+	if not can_banish(id):
+		return
+	events.clear()
+	log_actions.append(tick)
+	log_actions.append(10 + k)
+	banishes -= 1
+	banished[id] = true
+	var others: Array = choices.duplicate()
+	others.remove_at(k)
+	var fresh := _roll_cards(1, others)
+	var nid: String = fresh[0] if not fresh.is_empty() else "heal"
+	choices[k] = nid
+	events.append([EV_BANISH, id, k, nid])
+
+
+static func can_banish(id: String) -> bool:
+	return Defs.is_weapon(id) or Defs.PASSIVES.has(id)
+
+
 func reroll() -> void:
 	if state != CHOOSING or rerolls <= 0:
 		return
@@ -492,6 +535,7 @@ func flux_earned() -> int:
 	var mult := 1.0 + 0.12 * float(loadout.get("greed", 0))
 	if ship_id == "nyx":
 		mult *= 1.5
+	mult *= Defs.radiance_flux(radiance)
 	return int(float(base) * mult)
 
 
@@ -504,7 +548,7 @@ func score() -> int:
 
 
 func score_mult() -> float:
-	return Daily.multiplier(mods.keys())
+	return Daily.multiplier(mods.keys()) * Defs.radiance_score(radiance)
 
 
 ## Seconds survived past the dawn (0 before it).
@@ -552,6 +596,8 @@ static func from_replay(data: Dictionary, upto_tick: int = -1) -> Sim:
 			ai += 2
 			if act == 9:
 				s.reroll()
+			elif act >= 10:
+				s.banish(act - 10)
 			else:
 				s.choose(act)
 			continue
@@ -630,7 +676,7 @@ func _move_player(ix: int, iy: int) -> void:
 	if l > 0.2:
 		facing = Trig.angle_of(mx, my)
 	if st_regen > 0.0 and hp < max_hp:
-		hp = minf(max_hp, hp + st_regen * DT)
+		_heal(st_regen * DT)
 	if iframes > 0:
 		iframes -= 1
 
@@ -648,6 +694,8 @@ func _director() -> void:
 	var rate := 1.7 + 1.3 * tm + 0.16 * tm * tm
 	if mods.has("horde"):
 		rate *= 2.0
+	if radiance >= 2:
+		rate *= 1.15
 	if boss_index() >= 0:
 		rate *= 0.55
 	if tick < surge_until:
@@ -655,7 +703,12 @@ func _director() -> void:
 	if endless:
 		rate *= 1.0 + Defs.NIGHT_SWARM * float(night)
 	if tick >= elite_next:
-		elite_next = tick + ((35 + rng.range_i(15)) if mods.has("gilded") else (55 + rng.range_i(25))) * TPS
+		if mods.has("gilded"):
+			elite_next = tick + (35 + rng.range_i(15)) * TPS
+		elif radiance >= 3:
+			elite_next = tick + (40 + rng.range_i(20)) * TPS
+		else:
+			elite_next = tick + (55 + rng.range_i(25)) * TPS
 		if boss_index() < 0:
 			var kinds := [Defs.DRIFTER, Defs.DART, Defs.WEAVER, Defs.SPLITTER, Defs.SPITTER, Defs.BRUTE,
 					Defs.SENTINEL, Defs.BASTION]
@@ -663,7 +716,8 @@ func _director() -> void:
 			var a := rng.range_i(Trig.STEPS)
 			_spawn_at_safe(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0, true, 70)
 			events.append([EV_ELITE, type])
-	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0) + (60 if mods.has("horde") else 0) + 25 * night)
+	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0) + (60 if mods.has("horde") else 0) + 25 * night
+			+ (40 if radiance >= 8 else 0))
 	if en < cap:
 		spawn_acc += rate * DT
 	while spawn_acc >= 1.0:
@@ -780,11 +834,19 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	var hpm := 1.0 + 0.35 * tm + 0.08 * tm * tm
 	var spm := 1.0 + minf(0.3, 0.04 * tm)
 	var dmm := 1.0 + 0.14 * tm
+	if radiance >= 4:
+		dmm *= 1.2
 	if type >= Defs.WARDEN:
-		hpm = boss_mult
+		hpm = boss_mult * (1.3 if radiance >= 5 else 1.0)
 		spm = 1.0
-		dmm = 1.0 + 0.15 * float(night)
+		dmm = (1.0 + 0.15 * float(night)) * (1.2 if radiance >= 4 else 1.0)
 	else:
+		if radiance >= 1:
+			hpm *= 1.15
+		if radiance >= 7:
+			spm *= 1.1
+		if radiance >= 8:
+			hpm *= 1.15
 		if mods.has("horde"):
 			hpm *= 0.67
 		if mods.has("giants"):
@@ -1068,9 +1130,9 @@ func _beam_hit(x: float, y: float, a: int, length: float, half_w: float) -> bool
 func _seraph(i: int, dx: float, dy: float, d: float) -> float:
 	e_t[i] += 1
 	var t := e_t[i]
-	var overload := t > OVERLOAD_TICKS
+	var overload := t > overload_ticks
 	var enraged := e_hp[i] < e_maxhp[i] * 0.5 or overload
-	if t == OVERLOAD_TICKS:
+	if t == overload_ticks:
 		events.append([EV_WAVE, "OVERLOAD"])
 	if t % 1200 == 420:
 		for k in 6:
@@ -1143,12 +1205,12 @@ func _seraph(i: int, dx: float, dy: float, d: float) -> float:
 
 ## The Seraph's wheel has three arms, four once it is wounded.
 func seraph_arms(i: int) -> int:
-	return 4 if e_hp[i] < e_maxhp[i] * 0.5 or e_t[i] > OVERLOAD_TICKS else 3
+	return 4 if e_hp[i] < e_maxhp[i] * 0.5 or e_t[i] > overload_ticks else 3
 
 
 ## Angle offsets of the Seraph's aimed lances (side lances once wounded).
 func seraph_lances(i: int) -> Array:
-	if e_hp[i] < e_maxhp[i] * 0.5 or e_t[i] > OVERLOAD_TICKS:
+	if e_hp[i] < e_maxhp[i] * 0.5 or e_t[i] > overload_ticks:
 		return [0, Trig.STEPS / 10, -Trig.STEPS / 10]
 	return [0]
 
@@ -1223,7 +1285,7 @@ func _warden(i: int, dx: float, dy: float, d: float) -> float:
 	var t := e_t[i]
 	var enraged := e_hp[i] < e_maxhp[i] * 0.5
 	# Overload: a Warden left alive too long fights twice as hard.
-	if e_state[i] == 0 and t > OVERLOAD_TICKS:
+	if e_state[i] == 0 and t > overload_ticks:
 		e_state[i] = 5
 		events.append([EV_WAVE, "OVERLOAD"])
 	var overload := e_state[i] == 5
@@ -1253,13 +1315,13 @@ func _eclipse(i: int, dx: float, dy: float, d: float) -> float:
 	e_t[i] += 1
 	var t := e_t[i]
 	var c := t % 760
-	var enraged := e_hp[i] < e_maxhp[i] * 0.4 or t > OVERLOAD_TICKS
-	if t == OVERLOAD_TICKS:
+	var enraged := e_hp[i] < e_maxhp[i] * 0.4 or t > overload_ticks
+	if t == overload_ticks:
 		events.append([EV_WAVE, "OVERLOAD"])
 	if c < 220:
 		e_state[i] = 0
 		if t % 6 == 0:
-			var arms := (4 if t > OVERLOAD_TICKS * 2 else 3) if enraged else 2
+			var arms := (4 if t > overload_ticks * 2 else 3) if enraged else 2
 			e_k[i] += 29
 			for k in arms:
 				_fire_orb(e_x[i], e_y[i], e_k[i] + k * Trig.STEPS / arms, 170.0, 15.0)
@@ -1761,7 +1823,7 @@ func _fire_scythe(spec: Dictionary, w: Dictionary) -> bool:
 			_damage(i, spec.dmg, rx / d * 380.0, ry / d * 380.0)
 			if leech > 0.0 and e_hp[i] <= 0.0 and healed < 4.0:
 				healed += leech
-				hp = minf(max_hp, hp + leech)
+				_heal(leech)
 		events.append([EV_SLASH, px, py, da, r, half, evo, int(w.k)])
 	return true
 
@@ -1960,7 +2022,7 @@ func _overdrive() -> void:
 	od_k = 0
 	iframes = maxi(iframes, 30)
 	if r_over:
-		hp = minf(max_hp, hp + 25.0)
+		_heal(25.0)
 	var sc := _od_scale()
 	events.append([EV_OVERDRIVE, ship_id, px, py])
 	match ship_id:
@@ -2287,6 +2349,10 @@ func _hurt(dmg: float) -> void:
 			events.append([EV_DEAD])
 
 
+func _heal(amount: float) -> void:
+	hp = minf(max_hp, hp + amount * heal_mult)
+
+
 func _shove(x: float, y: float, rad: float, force: float) -> void:
 	for i in en:
 		var dx := e_x[i] - x
@@ -2340,7 +2406,7 @@ func _on_death(i: int) -> void:
 		if chain == int(tier[0]):
 			events.append([EV_CHAIN, chain, tier[1]])
 	if mods.has("bloodlight"):
-		hp = minf(max_hp, hp + 0.25)
+		_heal(0.25)
 	if mods.has("volatile") and type < Defs.WARDEN and rng.unit() < 0.25:
 		_blasts.append([x, y, 95.0, 16.0 * _od_scale()])
 	if od_t <= 0:
@@ -2461,7 +2527,7 @@ func _update_gems() -> void:
 			var v := g_val[i]
 			xp += v * st_xp
 			if ship_id == "halcyon":
-				hp = minf(max_hp, hp + v * 0.08)
+				_heal(v * 0.08)
 			events.append([EV_GEM, g_x[i], g_y[i], v])
 			var l := gn - 1
 			if i != l:
@@ -2500,13 +2566,13 @@ func _update_pickups() -> void:
 		if take:
 			match p.k:
 				"heart":
-					hp = minf(max_hp, hp + 30.0)
+					_heal(30.0)
 				"magnet":
 					for g in gn:
 						g_mag[g] = 1
 				"core":
 					xp += xp_need - xp + 0.001
-					hp = minf(max_hp, hp + 15.0)
+					_heal(15.0)
 				"chest", "bigchest":
 					_open_chest(p.k == "bigchest", p.x, p.y, p.get("relic", false))
 			events.append([EV_PICKUP, p.k, p.x, p.y])
@@ -2549,7 +2615,7 @@ func _open_chest(big: bool, x: float, y: float, relic := false) -> void:
 		_apply_card(id)
 		rewards.append([id, card_level(id)])
 	if rewards.is_empty():
-		hp = minf(max_hp, hp + max_hp * 0.5)
+		_heal(max_hp * 0.5)
 		rewards.append(["heal", 0])
 	var fl := 30 if big else 10
 	if mods.has("lucky"):
@@ -2573,9 +2639,16 @@ func _start_choice() -> void:
 
 
 func _roll_choices() -> Array:
+	return _roll_cards(3, [])
+
+
+## n level-up cards, never one in `exclude` or banished.
+func _roll_cards(n: int, exclude: Array) -> Array:
 	var pool: Array = []
 	var wts: Array = []
 	for id in Defs.WEAPON_ORDER:
+		if banished.has(id) or exclude.has(id):
+			continue
 		var l := weapon_level(id)
 		if l > 0 and l < Defs.MAX_LEVEL:
 			pool.append(id)
@@ -2587,6 +2660,8 @@ func _roll_choices() -> Array:
 	for id in Defs.PASSIVE_ORDER:
 		if id == "renewal" and mods.has("bloodlight"):
 			continue
+		if banished.has(id) or exclude.has(id):
+			continue
 		var l := int(passives.get(id, 0))
 		if l > 0 and l < Defs.MAX_LEVEL:
 			pool.append(id)
@@ -2595,7 +2670,7 @@ func _roll_choices() -> Array:
 			pool.append(id)
 			wts.append(1.4)
 	var out: Array = []
-	while out.size() < 3 and not pool.is_empty():
+	while out.size() < n and not pool.is_empty():
 		var total := 0.0
 		for w in wts:
 			total += w
@@ -2609,10 +2684,9 @@ func _roll_choices() -> Array:
 		out.append(pool[pick])
 		pool.remove_at(pick)
 		wts.remove_at(pick)
-	if out.size() < 3:
-		out.append("heal")
-	if out.size() < 3:
-		out.append("flux")
+	for extra in ["heal", "flux"]:
+		if out.size() < n and not exclude.has(extra):
+			out.append(extra)
 	return out
 
 
@@ -2632,10 +2706,10 @@ func _apply_card(id: String) -> void:
 		passives[id] = int(passives.get(id, 0)) + 1
 		_recompute()
 		if id == "vitality":
-			hp = minf(max_hp, hp + 20.0)
+			_heal(20.0)
 		events.append([EV_PICK, id, passives[id]])
 	elif id == "heal":
-		hp = minf(max_hp, hp + max_hp * 0.4)
+		_heal(max_hp * 0.4)
 		events.append([EV_PICK, id, 0])
 	elif id == "flux":
 		flux_bonus += 25

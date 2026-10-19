@@ -25,6 +25,8 @@ func _init() -> void:
 	_test_scythe()
 	_test_mines()
 	_test_relics()
+	_test_radiance()
+	_test_banish()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -750,6 +752,96 @@ func _test_relics() -> void:
 	all.step(0, 0)
 	check(all.state == Sim.RUNNING and all.pending_relics == 0, "no relic offer once you hold them all")
 	check(Missions.done(_find_mission("relic_keeper"), all, {}), "Reliquary mission")
+
+
+func _test_radiance() -> void:
+	# Radiance 0 is the plain game, bit for bit.
+	var a := Sim.new(41, {})
+	var b := Sim.new(41, {"radiance": 0})
+	for i in 1800:
+		a.step(30, -20)
+		b.step(30, -20)
+		if a.state == Sim.CHOOSING:
+			a.choose(0)
+			b.choose(0)
+	check(a.checksum() == b.checksum(), "Radiance 0 changes nothing")
+	var r0 := _quiet(42)
+	var r8 := Sim.new(42, {"radiance": 8})
+	var d0 := r0._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	var d8 := r8._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	check(absf(r8.e_maxhp[d8] / r0.e_maxhp[d0] - 1.15 * 1.15) < 1e-6, "Kindled and Legion toughen the swarm")
+	check(absf(r8.e_dmg[d8] / r0.e_dmg[d0] - 1.2) < 1e-6, "Sharp: enemies hit harder")
+	var w0 := r0._spawn(Defs.WARDEN, 600.0, 0.0, false, 0)
+	var w8 := r8._spawn(Defs.WARDEN, 600.0, 0.0, false, 0)
+	check(absf(r8.e_maxhp[w8] / r0.e_maxhp[w0] - 1.3) < 1e-6, "Titans: bosses have more HP")
+	check(r8.heal_mult < 1.0 and r0.heal_mult == 1.0, "Scarcity weakens healing")
+	r8.hp = 10.0
+	r8._heal(30.0)
+	check(absf(r8.hp - 10.0 - 30.0 * 0.65) < 1e-9, "healing is scaled")
+	var r10 := Sim.new(43, {"radiance": 10})
+	check(r10.overload_ticks == 75 * Sim.TPS and r0.overload_ticks == Sim.OVERLOAD_TICKS, "Impatient bosses")
+	check(absf(r10.sched_scale - 0.9) < 1e-9, "Eventide runs the night faster")
+	check(r10.elite_next == 150 * Sim.TPS, "Hunted: elites from 2:30")
+	check(absf(r10.score_mult() - 2.5) < 1e-9, "Radiance 10 scores x2.5")
+	check(Sim.new(1, {"radiance": 99}).radiance == Defs.MAX_RADIANCE, "Radiance is clamped")
+	check(Defs.RADIANCE.size() == Defs.MAX_RADIANCE, "one rule per Radiance level")
+	var fl0 := Sim.new(44, {})
+	var fl5 := Sim.new(44, {"radiance": 5})
+	fl0.kills = 600
+	fl5.kills = 600
+	check(fl5.flux_earned() == int(float(fl0.flux_earned()) * 1.5), "Radiance pays more Flux")
+	# Missions read the highest level cleared.
+	var m := _find_mission("zenith")
+	check(not Missions.done(m, null, {"radiance_cleared": 4}), "Zenith needs Radiance 5")
+	check(Missions.done(m, null, {"radiance_cleared": 5}), "Zenith from the save")
+	var won := Sim.new(45, {"radiance": 5})
+	won.dawn = true
+	check(Missions.done(m, won, {"radiance_cleared": 2}), "Zenith from a run")
+	check(Missions.progress(_find_mission("kindled"), null, {}) == 0, "no Radiance cleared yet")
+
+
+func _test_banish() -> void:
+	var s := Sim.new(51, {"banish": 1})
+	check(s.banishes == Defs.BASE_BANISHES + 1, "banishes from the Forge")
+	s.xp = s.xp_need
+	s.step(0, 0)
+	check(s.state == Sim.CHOOSING, "cards open for banishing")
+	var gone: String = s.choices[1]
+	var keep0: String = s.choices[0]
+	var keep2: String = s.choices[2]
+	s.banish(1)
+	check(s.banished.has(gone) and s.banishes == Defs.BASE_BANISHES, "a card is banished")
+	check(s.choices.size() == 3 and s.choices[0] == keep0 and s.choices[2] == keep2, "other cards stay put")
+	check(s.choices[1] != gone and s.choices[1] != keep0 and s.choices[1] != keep2, "a fresh card fills the slot")
+	check(_has_event(s, Sim.EV_BANISH), "banish event")
+	var ok := true
+	for i in 300:
+		for c in s._roll_choices():
+			if c == gone:
+				ok = false
+	check(ok, "a banished card never returns")
+	s.choices[0] = "heal"
+	var left := s.banishes
+	s.banish(0)
+	check(s.banishes == left and s.choices[0] == "heal", "Repair cannot be banished")
+	s.choose(2)
+	s.banish(0)
+	check(s.banishes == left, "no banishing outside a choice")
+	# Run on with the bot banishing as it goes; the replay must follow.
+	var r := Sim.new(52, {"banish": 2})
+	while r.tick < 150 * Sim.TPS and (r.state == Sim.RUNNING or r.state == Sim.CHOOSING):
+		if r.state == Sim.CHOOSING:
+			var bk := r.choices.find_custom(func(c): return Sim.can_banish(c))
+			if r.banishes > 0 and not r.relic_choice and bk >= 0:
+				r.banish(bk)
+			else:
+				r.choose(Autopilot.pick(r))
+			continue
+		var mv := Autopilot.move(r)
+		r.step(mv.x, mv.y, Autopilot.burst(r))
+	check(r.banished.size() == 3, "the run banished three cards (%d)" % r.banished.size())
+	var rp := Sim.from_replay(r.to_replay())
+	check(rp.checksum() == r.checksum() and rp.banished == r.banished, "banishes replay")
 
 
 func _test_runs() -> void:

@@ -135,10 +135,26 @@ static func pick(s: Sim) -> int:
 	return best
 
 
+## A card slot worth banishing, or -1: once the pilot carries three weapons it
+## banishes new ones so its build stays focused.
+static func banish_pick(s: Sim) -> int:
+	if s.banishes <= 0 or s.relic_choice or s.weapons.size() < 3:
+		return -1
+	for k in s.choices.size():
+		var id: String = s.choices[k]
+		if Defs.is_weapon(id) and s.weapon_level(id) == 0 and not favor.has(id):
+			return k
+	return -1
+
+
 static func play(s: Sim, max_ticks: int) -> void:
 	while s.tick < max_ticks:
 		if s.state == Sim.CHOOSING:
-			s.choose(pick(s))
+			var b := banish_pick(s)
+			if b >= 0:
+				s.banish(b)
+			else:
+				s.choose(pick(s))
 		elif s.state == Sim.RUNNING:
 			var m := move(s)
 			s.step(m.x, m.y, burst(s))

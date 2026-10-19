@@ -28,6 +28,9 @@ const DEFAULTS := {
 	"daily_last": -1,
 	"daily_log": [],
 	"daily_replay": {},
+	"radiance": 0,
+	"radiance_cleared": -1,
+	"tips": [],
 	"settings": {"sound": true, "music": true, "haptics": true, "shake": true, "numbers": true},
 }
 
@@ -86,6 +89,9 @@ func load_data() -> void:
 					data.settings[s] = parsed[k][s]
 			else:
 				data[k] = parsed[k]
+	# Saves from before Radiance: an earlier dawn already clears level 0.
+	if int(data.wins) > 0 and int(data.radiance_cleared) < 0:
+		data.radiance_cleared = 0
 
 
 func save_data() -> void:
@@ -107,14 +113,50 @@ func forge_level(id: String) -> int:
 	return int(data.forge.get(id, 0))
 
 
-## The loadout a new run starts with: Forge levels as plain ints plus the ship.
+## The loadout a new run starts with: Forge levels as plain ints, the ship
+## and the Radiance level.
 func loadout() -> Dictionary:
 	var out := {"ship": current_ship()}
 	for f in Defs.FORGE:
 		var l := forge_level(f.id)
 		if l > 0:
 			out[f.id] = l
+	var r := current_radiance()
+	if r > 0:
+		out.radiance = r
 	return out
+
+
+## The highest Radiance level the player may choose (0 until the first dawn).
+func radiance_max() -> int:
+	return clampi(int(data.radiance_cleared) + 1, 0, Defs.MAX_RADIANCE)
+
+
+func current_radiance() -> int:
+	return clampi(int(data.radiance), 0, radiance_max())
+
+
+func set_radiance(r: int) -> void:
+	data.radiance = clampi(r, 0, radiance_max())
+	save_data()
+
+
+## The highest Radiance a ship has reached the dawn at, or -1.
+func ship_radiance(id: String) -> int:
+	var rec: Dictionary = (data.ship_best as Dictionary).get(id, {})
+	if rec.is_empty():
+		return -1
+	return int(rec.get("radiance", 0 if bool(rec.get("dawn", false)) else -1))
+
+
+## One-time coach tips: true the first time a key is asked for.
+func tip_once(key: String) -> bool:
+	var seen: Array = data.tips
+	if seen.has(key):
+		return false
+	seen.append(key)
+	save_data()
+	return true
 
 
 ## Today's UTC day number: the Daily Run key. The wall clock is fine here; the
@@ -201,8 +243,18 @@ func record_run(sim: Sim) -> Dictionary:
 		beat.ship_score = true
 	rec.time = maxf(float(rec.get("time", 0.0)), sim.seconds())
 	rec.score = maxi(int(rec.get("score", 0)), score)
+	var ship_rad := ship_radiance(sim.ship_id)
 	rec.dawn = bool(rec.get("dawn", false)) or sim.dawn
+	rec.radiance = maxi(ship_rad, sim.radiance) if sim.dawn else ship_rad
 	sb[sim.ship_id] = rec
+	# Radiance: every dawn at your highest level unlocks the next one.
+	if sim.dawn and sim.radiance > int(data.radiance_cleared):
+		var old_max := radiance_max()
+		data.radiance_cleared = sim.radiance
+		if radiance_max() > old_max:
+			beat.radiance_unlocked = radiance_max()
+			if sim.radiance > 0 and sim.radiance == old_max:
+				data.radiance = radiance_max()
 	if sim.loadout.has("daily"):
 		_record_daily(sim, score, beat)
 	data.flux = int(data.flux) + earned

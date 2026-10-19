@@ -46,6 +46,7 @@ func build() -> void:
 	cc.add_child(grid)
 	body.add_child(cc)
 	_score_box()
+	_radiance()
 	_evolutions()
 	_missions()
 	var flux_box := PanelContainer.new()
@@ -79,6 +80,37 @@ func build() -> void:
 	h.pressed.connect(func(): home.emit())
 	row.add_child(h)
 	body.add_child(row)
+
+
+## Radiance cleared, and the next level unlocked.
+func _radiance() -> void:
+	if not beat.has("radiance_unlocked") and sim.radiance <= 0:
+		return
+	var r := int(beat.get("radiance_unlocked", sim.radiance))
+	var col := Defs.radiance_color(r)
+	var h := HBoxContainer.new()
+	h.alignment = BoxContainer.ALIGNMENT_CENTER
+	h.add_theme_constant_override("separation", 14)
+	h.add_child(UiKit.icon_rect("radiance", 64))
+	var text := "RADIANCE %d" % sim.radiance
+	if beat.has("radiance_unlocked"):
+		text = "RADIANCE %d UNLOCKED" % r
+	elif won:
+		text += "  CLEARED"
+	h.add_child(UiKit.glow_label(text, 40 if beat.has("radiance_unlocked") else 32, col))
+	body.add_child(h)
+	UiKit.pop_in(h, 0.65, 20)
+	if beat.has("radiance_unlocked"):
+		Sfx.play("ascend")
+		var sub := UiKit.label(("%s  ·  %s" % [String(Defs.RADIANCE[r - 1].name).to_upper(),
+				String(Defs.RADIANCE[r - 1].text)]) + ("  Your next flight burns brighter." if
+				Save.current_radiance() == r else "  Choose it in the Hangar."), 28, UiKit.DIM)
+		sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sub.custom_minimum_size = Vector2(760, 0)
+		body.add_child(sub)
+		var tw := h.create_tween().set_loops()
+		tw.tween_property(h, "modulate", Color(1.4, 1.25, 1.0), 0.6)
+		tw.tween_property(h, "modulate", Color.WHITE, 0.6)
 
 
 ## The score, counting up, with the Daily Run's standing under it.
