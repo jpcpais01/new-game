@@ -15,6 +15,7 @@ var _pause: Modal
 var _hint: Control
 var _card_delay := -1.0
 var _over := false
+var _dawn: Control
 
 
 func _ready() -> void:
@@ -42,8 +43,8 @@ func _ready() -> void:
 	add_child(_chest)
 
 
-func begin(seed_value: int) -> void:
-	sim = Sim.new(seed_value, Save.loadout())
+func begin(seed_value: int, loadout: Dictionary) -> void:
+	sim = Sim.new(seed_value, loadout)
 	arena.start(sim, false)
 	arena.leveled_up.connect(_on_level)
 	arena.ended.connect(_on_end)
@@ -56,6 +57,8 @@ func begin(seed_value: int) -> void:
 	Sfx.music("run")
 	if not bool(Save.data.tutorial_done):
 		_show_hint()
+	if not sim.mods.is_empty():
+		_show_mods()
 
 
 func _process(delta: float) -> void:
@@ -148,6 +151,9 @@ func _on_reroll() -> void:
 func _on_end(won: bool) -> void:
 	if _over:
 		return
+	if won and not sim.endless:
+		_offer_night()
+		return
 	_over = true
 	_stick.release()
 	_stick.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -156,9 +162,9 @@ func _on_end(won: bool) -> void:
 	Save.save_data()
 	var r := ResultsPanel.new()
 	r.sim = sim
-	r.won = won
+	r.won = sim.dawn
 	r.beat = beat
-	r.retry.connect(func(): main.start_run())
+	r.retry.connect(func(): main.start_daily() if sim.loadout.has("daily") else main.start_run())
 	r.forge.connect(func(): main.go_forge())
 	r.home.connect(func(): main.go_title())
 	r.hangar.connect(func(): main.go_hangar())
@@ -166,8 +172,27 @@ func _on_end(won: bool) -> void:
 	Sfx.music("menu")
 
 
+## Dawn reached: bank the win, or fly on into the Afterdark for a bigger score.
+func _offer_night() -> void:
+	_stick.release()
+	var p := DawnPanel.new()
+	p.sim = sim
+	_dawn = p
+	p.chose.connect(func(go_on: bool):
+		_dawn = null
+		if go_on:
+			sim.continue_night()
+			arena.handle_events()
+			arena.night_fall()
+			Sfx.music("run")
+		else:
+			_on_end(false))
+	add_child(p)
+	Sfx.music("menu")
+
+
 func open_pause() -> void:
-	if _pause != null or _over or _cards.visible or _chest.visible:
+	if _pause != null or _over or _dawn != null or _cards.visible or _chest.visible:
 		return
 	arena.paused = true
 	_stick.release()
@@ -188,6 +213,36 @@ func _resume() -> void:
 	if not _cards.visible:
 		arena.paused = false
 	Sfx.duck(false)
+
+
+## Daily runs open with today's rules, then fade away.
+func _show_mods() -> void:
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	box.offset_top = main.safe_top() + 300
+	box.offset_bottom = box.offset_top + 400
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 6)
+	add_child(box)
+	var head := "DAILY RUN  ·  " + Daily.label(int(sim.loadout.daily)) if sim.loadout.has("daily") else "MUTATORS"
+	box.add_child(UiKit.glow_label(head, 44, UiKit.GOLD))
+	box.add_child(UiKit.label("SCORE  x%.2f" % sim.score_mult(), 28, UiKit.DIM, UiKit.display_light()))
+	var k := 0
+	for id in sim.loadout.get("mods", []):
+		var m: Dictionary = Defs.MUTATORS[id]
+		var l := HBoxContainer.new()
+		l.alignment = BoxContainer.ALIGNMENT_CENTER
+		l.add_theme_constant_override("separation", 12)
+		l.add_child(UiKit.icon_rect("mod_" + String(id), 56))
+		l.add_child(UiKit.glow_label(String(m.name).to_upper(), 36, m.color, UiKit.display_light()))
+		box.add_child(l)
+		UiKit.pop_in(l, 0.3 + 0.25 * k, 0)
+		k += 1
+	UiKit.pop_in(box, 0.2, 0)
+	var tw := box.create_tween()
+	tw.tween_interval(4.5)
+	tw.tween_property(box, "modulate:a", 0.0, 0.8)
+	tw.tween_callback(box.queue_free)
 
 
 func _show_hint() -> void:
@@ -225,7 +280,7 @@ func _hide_hint() -> void:
 func on_back() -> void:
 	if _over:
 		main.go_title()
-	elif _chest.visible:
+	elif _chest.visible or _dawn != null:
 		return
 	elif _pause != null:
 		_pause.close()

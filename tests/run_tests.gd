@@ -16,6 +16,9 @@ func _init() -> void:
 	_test_ships()
 	_test_overdrive_replay()
 	_test_missions()
+	_test_daily()
+	_test_mutators()
+	_test_afterdark()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -282,12 +285,157 @@ func _test_missions() -> void:
 			check(not Defs.ship_mission(sd.id).is_empty(), "%s has an unlock mission" % sd.id)
 
 
+func _test_daily() -> void:
+	var a := Daily.for_day(20745)
+	var b := Daily.for_day(20745)
+	check(a.seed == b.seed and a.ship == b.ship and a.mods == b.mods, "a day's run is the same for everyone")
+	check(Daily.for_day(20746).seed != a.seed, "the next day is a different run")
+	check(Daily.label(20745) == "OCT 19", "day 20745 is Oct 19 (%s)" % Daily.label(20745))
+	check(Daily.label(11016) == "FEB 29", "leap day label (%s)" % Daily.label(11016))
+	var ships := {}
+	for d in 60:
+		var dd := Daily.for_day(20000 + d)
+		var mods: Array = dd.mods
+		ships[dd.ship] = true
+		var boons := 0
+		for id in mods:
+			if Defs.MUTATORS[id].boon:
+				boons += 1
+		if mods.size() != 3 or boons != 1 or mods[1] == mods[2]:
+			check(false, "day %d: one boon and two distinct banes (%s)" % [20000 + d, str(mods)])
+		check(not dd.loadout.has("power") and dd.loadout.daily == 20000 + d, "daily loadout has no Forge")
+	check(ships.size() >= 5, "dailies rotate through the fleet (%d ships)" % ships.size())
+	var s := Sim.new(int(a.seed), a.loadout)
+	check(s.mods.size() == 3, "daily mutators reach the sim")
+	check(s.score_mult() > 1.3, "banes raise the score multiplier (%.2f)" % s.score_mult())
+	# A short daily run replays exactly.
+	Autopilot.play(s, 40 * Sim.TPS)
+	var r := Sim.from_replay(s.to_replay())
+	check(r.checksum() == s.checksum(), "daily replay checksum")
+
+
+func _test_mutators() -> void:
+	var base := Sim.new(51)
+	var g := Sim.new(51, {"mods": ["glass"]})
+	check(is_equal_approx(g.max_hp, base.max_hp * 0.5) and g.hp == g.max_hp, "Glass Heart halves HP")
+	check(g.st_might > base.st_might + 0.39, "Glass Heart hits harder")
+	var gr := Sim.new(51, {"mods": ["gravity"]})
+	check(is_equal_approx(gr.st_magnet, base.st_magnet * 3.0), "Gravity triples pickup range")
+	var gi := Sim.new(51, {"mods": ["giants"]})
+	var e := gi._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	check(gi.e_r[e] > Defs.ENEMY[Defs.DRIFTER].r * 1.25 and gi.e_maxhp[e] >= Defs.ENEMY[Defs.DRIFTER].hp * 1.99,
+			"Giants are big and tough")
+	var fr := Sim.new(51, {"mods": ["frenzy"]})
+	var f := fr._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	check(fr.e_speed[f] > Defs.ENEMY[Defs.DRIFTER].speed * 1.1, "Frenzy speeds the swarm")
+	var oc := Sim.new(51, {"mods": ["overcharged"]})
+	var k := oc._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	oc.e_hp[k] = 0.0
+	oc.step(0, 0)
+	check(is_equal_approx(oc.od, 2.0), "Overcharged doubles Overdrive charge (%.1f)" % oc.od)
+	var bl := Sim.new(51, {"mods": ["bloodlight"]})
+	bl.hp = 50.0
+	var j := bl._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	bl.e_hp[j] = 0.0
+	bl.step(0, 0)
+	check(bl.hp > 50.0, "Bloodlight heals on kills")
+	for t in 40:
+		var cs := bl._roll_choices()
+		if cs.has("renewal"):
+			check(false, "Bloodlight removes Renewal")
+			break
+	var du := Sim.new(51, {"mods": ["dusk"]})
+	du.sched_i = 3
+	du.tick = 180 * Sim.TPS - 1
+	du.step(0, 0)
+	check(du.boss_index() >= 0 and du.e_type[du.boss_index()] == Defs.WARDEN, "Short Night: Warden at 3:00")
+	var gl := Sim.new(51, {"mods": ["gilded"]})
+	check(gl.elite_next == 60 * Sim.TPS, "Gilded elites from the first minute")
+	var lu := Sim.new(52, {"mods": ["lucky"]})
+	_give_chest(lu, "chest")
+	lu.step(0, 0)
+	check(lu.flux_bonus == 20, "Lucky Star doubles cache Flux")
+	var v := Sim.new(53, {"mods": ["volatile"]})
+	_surround(v, Defs.DRIFTER, 40)
+	v.hp = 1e9
+	v.max_hp = 1e9
+	var blasts := 0
+	for t in 600:
+		if v.state == Sim.CHOOSING:
+			v.choose(0)
+		v.step(0, 0)
+		for ev in v.events:
+			if int(ev[0]) == Sim.EV_BLAST:
+				blasts += 1
+	check(blasts > 0, "Volatile enemies detonate (%d)" % blasts)
+	for id in Defs.MUTATORS:
+		check(Defs.BOONS.has(id) != Defs.BANES.has(id), "%s is a boon or a bane" % id)
+		check(bool(Defs.MUTATORS[id].boon) == Defs.BOONS.has(id), "%s listed correctly" % id)
+
+
+func _kill_boss(s: Sim, type: int) -> void:
+	var i := s._spawn(type, s.px + 600.0, s.py, false, 0)
+	s.e_hp[i] = 0.0
+	s.step(0, 0)
+
+
+func _test_afterdark() -> void:
+	var s := Sim.new(61)
+	s.tick = 480 * Sim.TPS
+	s.sched_i = Sim.SCHEDULE.size()
+	var sc0 := s.score()
+	_kill_boss(s, Defs.ECLIPSE)
+	check(s.state == Sim.WON and s.dawn, "the Eclipse brings the dawn")
+	check(s.score() > sc0 + 10000, "the dawn is worth a big score")
+	s.step(0, 0)
+	check(s.state == Sim.WON, "a won run waits for a choice")
+	s.continue_night()
+	check(s.state == Sim.RUNNING and s.endless, "continue into the Afterdark")
+	check(_has_event(s, Sim.EV_WAVE), "Afterdark banner")
+	s.continue_night()
+	check(s.log_actions.size() == 2, "continuing twice does nothing")
+	s.tick = s.night_next - 1
+	s.step(0, 0)
+	var b := s.boss_index()
+	check(b >= 0 and s.e_type[b] == Defs.WARDEN and s.night == 1, "night 1 brings back the Warden")
+	check(s.e_maxhp[b] > Defs.ENEMY[Defs.WARDEN].hp * 1.5, "night bosses are tougher (%.0f)" % s.e_maxhp[b])
+	s.e_hp[b] = 0.0
+	s.step(0, 0)
+	s.tick = s.night_next - 1
+	s.step(0, 0)
+	b = s.boss_index()
+	check(b >= 0 and s.e_type[b] == Defs.ECLIPSE and s.night == 2, "night 2 brings back the Eclipse")
+	var bosses := s.bosses_killed
+	s.e_hp[b] = 0.0
+	s.step(0, 0)
+	check(s.state == Sim.RUNNING and s.bosses_killed == bosses + 1, "an Afterdark Eclipse does not end the run")
+	var big := false
+	for p in s.pickups:
+		if p.k == "bigchest":
+			big = true
+	check(big, "an Afterdark Eclipse drops a boss cache")
+	check(s.afterdark_seconds() > 100, "Afterdark time is counted (%d)" % s.afterdark_seconds())
+	s.tick += 80 * Sim.TPS
+	_kill_boss(s, Defs.WARDEN)
+	var data := {"best_score": 0, "best_afterdark": 0, "daily_runs": 2, "daily_streak_best": 3}
+	check(Missions.done(_find_mission("afterdark"), s, data), "Into the Afterdark mission")
+	check(Missions.done(_find_mission("nightmare"), s, data), "Nightmare: four bosses in one run")
+	check(Missions.done(_find_mission("daybreaker"), null, data), "Daybreaker counts dailies")
+	check(Missions.done(_find_mission("ritual"), null, data), "Ritual counts the best streak")
+	check(not Missions.done(_find_mission("luminary"), null, data), "Luminary needs a big score")
+
+
 func _test_runs() -> void:
 	var t0 := Time.get_ticks_msec()
 	var total_ticks := 0
 	for seed_v in [1, 2, 3]:
 		var s := Sim.new(seed_v, {"hull": 2, "power": 1})
 		Autopilot.play(s, 9 * 60 * Sim.TPS)
+		if s.state == Sim.WON:
+			# Fly on into the Afterdark so the replay covers it too.
+			s.continue_night()
+			Autopilot.play(s, s.tick + 100 * Sim.TPS)
+			check(s.endless and s.dawn, "Afterdark continues a won run (seed %d)" % seed_v)
 		total_ticks += s.tick
 		print("seed %d: state=%d t=%.0fs lvl=%d kills=%d en=%d flux=%d hp=%.0f weapons=%s" % [
 			seed_v, s.state, s.seconds(), s.level, s.kills, s.en, s.flux_earned(), s.hp,

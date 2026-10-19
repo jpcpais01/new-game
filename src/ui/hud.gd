@@ -12,6 +12,8 @@ var top := 0.0
 var _level: Label
 var _timer: Label
 var _kills: Label
+var _score: Label
+var _score_shown := 0.0
 var _boss_name: Label
 var _banner: Label
 var _loadout: HBoxContainer
@@ -35,6 +37,8 @@ func _ready() -> void:
 	add_child(_timer)
 	_kills = UiKit.label("0", 36, Color(1, 1, 1, 0.9), UiKit.display(), HORIZONTAL_ALIGNMENT_RIGHT)
 	add_child(_kills)
+	_score = UiKit.label("0", 28, Color(1, 1, 1, 0.7), UiKit.display_light(), HORIZONTAL_ALIGNMENT_RIGHT)
+	add_child(_score)
 	_boss_name = UiKit.glow_label("", 30, UiKit.RED, UiKit.display_light())
 	_boss_name.modulate.a = 0.0
 	add_child(_boss_name)
@@ -67,7 +71,9 @@ func bind(a: Arena) -> void:
 	a.banner.connect(show_banner)
 	a.boss_started.connect(func(type):
 		_boss_type = type
-		_boss_name.text = BOSS_NAMES.get(type, "BOSS"))
+		_boss_name.text = BOSS_NAMES.get(type, "BOSS")
+		if arena.sim.endless:
+			_boss_name.text += "  ·  NIGHT %d" % arena.sim.night)
 	a.card_taken.connect(func(_id, _lvl): _rebuild_loadout())
 	a.leveled_up.connect(func(): _xp_flash = 1.0)
 	_rebuild_loadout()
@@ -82,6 +88,8 @@ func _layout() -> void:
 	_kills.position = Vector2(w - 420, top + 44)
 	_kills.size = Vector2(250, 50)
 	_pause.position = Vector2(w - 110, top + 40)
+	_score.position = Vector2(w - 540, top + 100)
+	_score.size = Vector2(400, 36)
 	_boss_name.position = Vector2(0, top + 122)
 	_boss_name.size = Vector2(w, 40)
 	_banner.position = Vector2(0, size.y * 0.3)
@@ -149,6 +157,12 @@ func _process(delta: float) -> void:
 	_level.text = "LV %d" % s.level
 	_timer.text = UiKit.fmt_time(s.seconds())
 	_kills.text = UiKit.fmt_int(s.kills)
+	var sc := float(s.score())
+	_score_shown = sc if sc < _score_shown else lerpf(_score_shown, sc, clampf(delta * 6.0, 0.0, 1.0))
+	_score.text = "SCORE " + UiKit.fmt_int(int(ceil(_score_shown)))
+	if s.endless:
+		_timer.add_theme_color_override("font_color", Color(1.0, 0.55, 0.85))
+		_timer.add_theme_color_override("font_shadow_color", Color(1.0, 0.2, 0.6, 0.6))
 	var frac := clampf(s.xp / s.xp_need, 0.0, 1.0)
 	if frac < _xp_shown - 0.3:
 		_xp_shown = 0.0

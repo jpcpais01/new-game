@@ -14,6 +14,7 @@ uniform float hurt = 0.0;
 uniform float flash = 0.0;
 uniform vec3 tint = vec3(0.35, 0.95, 1.0);
 uniform float t = 0.0;
+uniform float night = 0.0;
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -76,6 +77,9 @@ void fragment() {
 	vec3 col = vec3(0.012, 0.01, 0.032);
 	col += vec3(0.16, 0.03, 0.24) * pow(n1, 3.0) * 1.6;
 	col += vec3(0.0, 0.09, 0.16) * pow(n2, 3.2) * 1.4;
+	// The Afterdark: the nebula bleeds crimson and a dark corona breathes.
+	col = mix(col, vec3(0.03, 0.004, 0.012) + vec3(0.32, 0.02, 0.1) * pow(n1, 2.6) * 1.8
+			+ vec3(0.14, 0.0, 0.2) * pow(n2, 3.0) * 1.4, night);
 
 	// Stars (two parallax depths).
 	vec2 s1 = (cam * 0.35 + sp) / 7.0;
@@ -85,6 +89,7 @@ void fragment() {
 	col += vec3(0.7, 0.8, 1.0) * st * (0.5 + 0.5 * sin(t * 2.0 + hash(floor(s1)) * 40.0));
 
 	vec3 gridc = mix(tint, vec3(1.0, 0.18, 0.42), clamp(danger, 0.0, 1.0));
+	gridc = mix(gridc, vec3(1.0, 0.22, 0.55), night * 0.75);
 	float near = exp(-pdist / 650.0);
 	float lines = minor * 0.09 + major * 0.2 + dots * 0.22;
 	col += gridc * lines * (0.3 + 1.1 * near + band_glow * 1.6);
@@ -94,7 +99,7 @@ void fragment() {
 	float r = length(w);
 	float edge = abs(r - arena_r);
 	float pulse = 0.75 + 0.25 * sin(t * 3.0 + atan(w.y, w.x) * 12.0);
-	vec3 wallc = vec3(1.0, 0.28, 0.65);
+	vec3 wallc = mix(vec3(1.0, 0.28, 0.65), vec3(1.0, 0.7, 0.3), night);
 	if (r > arena_r) {
 		col *= 0.3;
 		float stripe = step(0.5, fract((w.x + w.y) / 70.0 - t * 0.4));
@@ -105,7 +110,7 @@ void fragment() {
 	// Vignette, hurt and flash.
 	vec2 vu = (UV - 0.5) * vec2(1.0, view_size.y / view_size.x) * 0.9;
 	float vig = length(vu);
-	col *= 1.0 - 0.5 * smoothstep(0.35, 1.1, vig);
+	col *= 1.0 - (0.5 + 0.25 * night * (0.8 + 0.2 * sin(t * 1.3))) * smoothstep(0.35, 1.1, vig);
 	col += vec3(0.75, 0.02, 0.08) * hurt * smoothstep(0.3, 0.95, vig);
 	col += vec3(0.6, 0.9, 1.0) * flash * 0.35;
 	COLOR = vec4(col, 1.0);

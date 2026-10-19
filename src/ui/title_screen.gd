@@ -84,8 +84,14 @@ func _ready() -> void:
 	pulse.tween_property(play, "modulate", Color(1, 1, 1), 0.9).set_trans(Tween.TRANS_SINE)
 
 	var gap2 := Control.new()
-	gap2.custom_minimum_size = Vector2(0, 34)
+	gap2.custom_minimum_size = Vector2(0, 26)
 	col.add_child(gap2)
+	var daily := _daily_button()
+	col.add_child(daily)
+	UiKit.pop_in(daily, 0.5)
+	var gap2b := Control.new()
+	gap2b.custom_minimum_size = Vector2(0, 24)
+	col.add_child(gap2b)
 	var row0 := HBoxContainer.new()
 	row0.alignment = BoxContainer.ALIGNMENT_CENTER
 	row0.add_theme_constant_override("separation", 28)
@@ -112,13 +118,17 @@ func _ready() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 28)
 	col.add_child(row)
-	var forge := UiKit.button("FORGE  ◆ %s" % UiKit.fmt_int(int(d.flux)), UiKit.GOLD, 38)
-	forge.custom_minimum_size = Vector2(430, 110)
+	var forge := UiKit.button("FORGE  ◆ %s" % UiKit.fmt_int(int(d.flux)), UiKit.GOLD, 34)
+	forge.custom_minimum_size = Vector2(400, 110)
 	forge.pressed.connect(func(): main.go_forge())
 	row.add_child(forge)
+	var codex := UiKit.button("CODEX", UiKit.MAGENTA, 34)
+	codex.custom_minimum_size = Vector2(260, 110)
+	codex.pressed.connect(func(): main.go_codex())
+	row.add_child(codex)
 	var gear := UiKit.button("⚙", UiKit.MAGENTA, 46)
 	gear.add_theme_font_override("font", UiKit.body())
-	gear.custom_minimum_size = Vector2(160, 110)
+	gear.custom_minimum_size = Vector2(140, 110)
 	gear.pressed.connect(_open_settings)
 	row.add_child(gear)
 	UiKit.pop_in(row, 0.6)
@@ -132,6 +142,47 @@ func _ready() -> void:
 	ver.offset_top = -60
 	ver.offset_bottom = -24
 	add_child(ver)
+
+
+## Today's Daily Run: the ship, the streak, and a glow until you have flown it.
+func _daily_button() -> Control:
+	var day := Save.today()
+	var dd := Daily.for_day(day)
+	var played := not Save.daily_entry(day).is_empty()
+	var b := UiKit.button("", UiKit.GOLD, 36)
+	b.custom_minimum_size = Vector2(888, 120)
+	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	b.pressed.connect(func(): main.go_daily())
+	var h := HBoxContainer.new()
+	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	h.offset_left = 30
+	h.offset_right = -30
+	h.add_theme_constant_override("separation", 16)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(h)
+	h.add_child(UiKit.icon_rect("daily", 76))
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", -4)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(v)
+	v.add_child(UiKit.label("DAILY RUN", 38, UiKit.GOLD.lerp(Color.WHITE, 0.3), UiKit.display(),
+			HORIZONTAL_ALIGNMENT_LEFT))
+	var e := Save.daily_entry(day)
+	var sub := "BEST %s" % UiKit.fmt_int(int(e.score)) if played else "NEW RUN  ·  BOUNTY WAITING"
+	var streak := Save.live_streak()
+	if streak > 0:
+		sub += "  ·  STREAK %d" % streak
+	v.add_child(UiKit.label(sub, 24, UiKit.DIM, UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT))
+	for id in dd.mods:
+		h.add_child(UiKit.icon_rect("mod_" + String(id), 52))
+	h.add_child(UiKit.icon_rect("ship_" + String(dd.ship), 64))
+	if not played:
+		var tw := b.create_tween().set_loops()
+		tw.tween_property(b, "modulate", Color(1.35, 1.3, 1.15), 0.7).set_trans(Tween.TRANS_SINE)
+		tw.tween_property(b, "modulate", Color.WHITE, 0.7).set_trans(Tween.TRANS_SINE)
+	return b
 
 
 func _gradient() -> GradientTexture2D:

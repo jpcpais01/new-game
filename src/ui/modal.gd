@@ -7,6 +7,7 @@ signal closed
 var body: VBoxContainer
 var panel: PanelContainer
 var accent := UiKit.CYAN
+var _scroll: ScrollContainer
 
 
 func _ready() -> void:
@@ -26,10 +27,18 @@ func _ready() -> void:
 	panel = PanelContainer.new()
 	panel.custom_minimum_size = Vector2(880, 0)
 	center.add_child(panel)
+	# Tall content (a big results screen on a short phone) scrolls inside the panel.
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(_scroll)
 	body = VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_theme_constant_override("separation", 26)
-	panel.add_child(body)
+	_scroll.add_child(body)
 	build()
+	_fit()
+	body.minimum_size_changed.connect(_fit)
+	resized.connect(_fit)
 	var sb := UiKit.box(accent, Color(0.035, 0.025, 0.09, 0.96), 34, 3, 26)
 	sb.content_margin_left = 54
 	sb.content_margin_right = 54
@@ -42,6 +51,12 @@ func _ready() -> void:
 	var tw := create_tween().set_parallel()
 	tw.tween_property(self, "modulate:a", 1.0, 0.2)
 	tw.tween_property(panel, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _fit() -> void:
+	var limit := maxf(400.0, get_viewport_rect().size.y - 220.0)
+	_scroll.custom_minimum_size = Vector2(body.get_combined_minimum_size().x,
+			minf(body.get_combined_minimum_size().y, limit))
 
 
 ## Override to add content to `body`.

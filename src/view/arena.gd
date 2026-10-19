@@ -50,6 +50,7 @@ var _kill_sounds := 0
 var _end_timer := -1.0
 var _cam_pos := Vector2.ZERO
 var _danger := 0.0
+var _night := 0.0
 
 
 func _ready() -> void:
@@ -80,10 +81,24 @@ func start(new_sim: Sim, is_demo: bool) -> void:
 	_hitstop = 0.0
 	_end_timer = -1.0
 	hp_ghost = 1.0
+	_night = 1.0 if sim.endless else 0.0
 	fx.clear()
 	_waves.clear()
 	_cam_pos = Vector2(sim.px, sim.py)
 	camera.position = _cam_pos
+
+
+## The run flies on past the dawn: the light inverts into the Afterdark.
+func night_fall() -> void:
+	for k in 4:
+		fx.ring(sim.px, sim.py, 30.0, 700.0 + 300.0 * k, 0.8 + 0.3 * k, Color(1.0, 0.3, 0.7), 1.8)
+	fx.burst(sim.px, sim.py, Color(2.0, 0.6, 1.6), 90, 1100.0, 1.6, 1.1)
+	add_wave(sim.px, sim.py, 3.0, 800.0)
+	_flash = 1.0
+	shake(0.7)
+	slowmo(0.2, 1.0)
+	Sfx.play("od_ready", 0.7)
+	Sfx.buzz(200)
 
 
 ## Brief slow motion (view only; the simulation is unaffected).
@@ -249,6 +264,8 @@ func _update_bg(delta: float, p: Vector2) -> void:
 	bg_mat.set_shader_parameter("hurt", _hurt)
 	bg_mat.set_shader_parameter("flash", _flash)
 	bg_mat.set_shader_parameter("t", vtime)
+	_night = move_toward(_night, 1.0 if sim.endless else 0.0, delta * 0.4)
+	bg_mat.set_shader_parameter("night", _night)
 	bg_mat.set_shader_parameter("arena_r", Sim.ARENA_R)
 
 
@@ -354,7 +371,7 @@ func handle_events() -> void:
 				if loud:
 					Sfx.play("boom", randf_range(0.85, 1.15))
 			Sim.EV_BOSS:
-				banner.emit("WARNING", UiKit.RED)
+				banner.emit("NIGHT %d" % sim.night if sim.endless else "WARNING", UiKit.RED)
 				boss_started.emit(e[1])
 				shake(0.4)
 				if loud:
@@ -467,6 +484,10 @@ func handle_events() -> void:
 					Sfx.play("od_ready")
 					Sfx.buzz(25)
 					overdrive_ready.emit()
+			Sim.EV_NIGHT:
+				fx.ring(sim.px, sim.py, 40.0, 1400.0, 1.4, Color(1.0, 0.25, 0.6), 2.0)
+				add_wave(sim.px, sim.py, 2.0, 700.0)
+				shake(0.5)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:

@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 19, 2026 · 12:00 UTC
+
+- **The Daily Run.** One hand-picked run per day, the same for every pilot: a fixed ship (even one you have not unlocked yet), one boon and two banes, and no Forge upgrades. Your first flight each day pays a Daily Bounty, keeping a streak raises it, and a log tracks your best score for every day.
+- **Eleven mutators.** Volatile enemies that detonate, Lucky Star, Overcharged, Gravity, Gilded elite hunts, Glass Heart, Horde, Frenzy, Giants, Bloodlight and Short Night. Each bane raises the score multiplier, and each one has its own neon icon.
+- **Into the Afterdark.** Defeat the Eclipse and you can now fly on. The arena bleeds crimson, the swarm keeps growing, and every 90 seconds the Warden or the Eclipse returns, stronger each night. Your dawn is banked the moment you choose; everything after it is score.
+- **Score.** Every run now has a score built from kills, elites, bosses, time and the dawn. It ticks up live in the corner, counts up on the results screen and records your best overall and with every ship, shown in the Hangar.
+- **The Codex and five new missions.** A new Codex screen shows all six evolutions (silhouettes until you discover them, recipes always visible) and a field guide to the swarm. New missions: Daybreaker, Ritual, Luminary, Into the Afterdark and Nightmare.
+
 ## Oct 19, 2026 · 09:00 UTC
 
 - **The Hangar: seven ships.** Lumen is joined by Vesper the bulwark, Kestrel the hunter, Strix the glass cannon, Halcyon the harvester, Aurora the prism and Nyx the eclipse-born. Each one starts with its own weapon, plays by its own rules and has its own neon silhouette.

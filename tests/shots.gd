@@ -19,6 +19,10 @@ func _ready() -> void:
 	add_child(main)
 	await _wait(2.5)
 	await _shot("1_title")
+	if args.has("daily"):
+		await _daily_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -99,6 +103,62 @@ func _ready() -> void:
 	await _wait(1.4)
 	await _shot("8_missions")
 	get_tree().quit()
+
+
+## The Daily Run, the dawn choice, the Afterdark, the results and the Codex.
+func _daily_shots() -> void:
+	Save.data.evolved = ["pulse", "nova"]
+	Save.data.daily_log = [
+		{"day": Save.today() - 1, "score": 84210, "time": 512.0, "kills": 6400, "dawn": false, "ship": "kestrel", "tries": 3},
+		{"day": Save.today() - 2, "score": 131560, "time": 690.0, "kills": 9100, "dawn": true, "ship": "vesper", "tries": 1},
+	]
+	Save.data.daily_last = Save.today() - 1
+	Save.data.daily_streak = 2
+	Save.data.daily_streak_best = 2
+	main.go_daily()
+	await _wait(1.4)
+	await _shot("d1_daily")
+	main.start_daily()
+	await _wait(1.6)
+	await _shot("d2_daily_intro")
+	var gs = main.screen
+	var s: Sim = gs.sim
+	while s.state != Sim.WON and s.state != Sim.DEAD and s.tick < 10 * 60 * Sim.TPS:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.step(m.x, m.y, Autopilot.burst(s))
+		s.events.clear()
+	if s.state != Sim.WON:
+		# Force the dawn so the screens below have something to show.
+		s.state = Sim.RUNNING
+		var i := s._spawn(Defs.ECLIPSE, s.px + 500.0, s.py, false, 0)
+		s.e_hp[i] = 0.0
+		s.step(0, 0)
+		s.events.clear()
+	gs._on_end(true)
+	await _wait(1.4)
+	await _shot("d3_dawn")
+	var dp = gs._dawn
+	dp.chose.emit(true)
+	dp.close()
+	await _wait(0.3)
+	s.tick = s.night_next - 1
+	main.arena.demo = true
+	await _wait(3.5)
+	main.arena.demo = false
+	await _shot("d4_afterdark")
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(2.5)
+	await _shot("d5_results")
+	main.go_codex()
+	await _wait(1.4)
+	await _shot("d6_codex")
+	main.go_title()
+	await _wait(2.0)
+	await _shot("d7_title_after")
 
 
 func _wait(t: float) -> void:

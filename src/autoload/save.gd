@@ -18,6 +18,15 @@ const DEFAULTS := {
 	"missions": [],
 	"ships_won": [],
 	"seen_ships": ["lumen"],
+	"best_score": 0,
+	"best_afterdark": 0,
+	"ship_best": {},
+	"daily_runs": 0,
+	"daily_streak": 0,
+	"daily_streak_best": 0,
+	"daily_last": -1,
+	"daily_log": [],
+	"daily_replay": {},
 	"settings": {"sound": true, "music": true, "haptics": true, "shake": true, "numbers": true},
 }
 
@@ -107,6 +116,38 @@ func loadout() -> Dictionary:
 	return out
 
 
+## Today's UTC day number: the Daily Run key. The wall clock is fine here; the
+## rules only ever see the day number.
+static func today() -> int:
+	return int(floor(Time.get_unix_time_from_system() / 86400.0))
+
+
+## Seconds until the next Daily Run.
+static func daily_left() -> int:
+	var now := Time.get_unix_time_from_system()
+	return int(86400.0 - fmod(now, 86400.0))
+
+
+## This player's record for a day: {day, score, time, kills, dawn, ship, tries}, or {}.
+func daily_entry(day: int) -> Dictionary:
+	for e in data.daily_log:
+		if int(e.day) == day:
+			return e
+	return {}
+
+
+## The streak still counts if the last Daily was today or yesterday.
+func live_streak() -> int:
+	var last := int(data.daily_last)
+	return int(data.daily_streak) if last >= today() - 1 else 0
+
+
+## Flux paid for the first Daily Run of a day: grows with the score and the streak.
+static func daily_bounty(score: int, streak: int) -> int:
+	var base := mini(400, 50 + score / 400)
+	return int(float(base) * (1.0 + 0.1 * float(clampi(streak - 1, 0, 5))))
+
+
 ## The selected ship, falling back to Lumen if it is somehow locked.
 func current_ship() -> String:
 	var id := String(data.get("ship", "lumen"))
@@ -145,11 +186,26 @@ func buy(id: String) -> bool:
 func record_run(sim: Sim) -> Dictionary:
 	var beat := {}
 	var earned := sim.flux_earned()
+	var score := sim.score()
+	if score > int(data.best_score):
+		beat.score = true
+		data.best_score = score
+	data.best_afterdark = maxi(int(data.best_afterdark), sim.afterdark_seconds())
+	var sb: Dictionary = data.ship_best
+	var rec: Dictionary = sb.get(sim.ship_id, {"time": 0.0, "score": 0, "dawn": false})
+	if score > int(rec.get("score", 0)):
+		beat.ship_score = true
+	rec.time = maxf(float(rec.get("time", 0.0)), sim.seconds())
+	rec.score = maxi(int(rec.get("score", 0)), score)
+	rec.dawn = bool(rec.get("dawn", false)) or sim.dawn
+	sb[sim.ship_id] = rec
+	if sim.loadout.has("daily"):
+		_record_daily(sim, score, beat)
 	data.flux = int(data.flux) + earned
 	data.total_flux = int(data.total_flux) + earned
 	data.runs = int(data.runs) + 1
 	data.total_kills = int(data.total_kills) + sim.kills
-	if sim.state == Sim.WON:
+	if sim.dawn:
 		data.wins = int(data.wins) + 1
 		var won: Array = data.ships_won
 		if not won.has(sim.ship_id):
@@ -185,3 +241,37 @@ func record_run(sim: Sim) -> Dictionary:
 	beat.ships = ships
 	save_data()
 	return beat
+
+
+## Daily Run bookkeeping: per-day best, tries, streak, bounty, best replay.
+func _record_daily(sim: Sim, score: int, beat: Dictionary) -> void:
+	var day := int(sim.loadout.daily)
+	data.daily_runs = int(data.daily_runs) + 1
+	var log: Array = data.daily_log
+	var e := daily_entry(day)
+	var first := e.is_empty()
+	if first:
+		var last := int(data.daily_last)
+		data.daily_streak = int(data.daily_streak) + 1 if last == day - 1 else 1
+		data.daily_streak_best = maxi(int(data.daily_streak_best), int(data.daily_streak))
+		data.daily_last = maxi(last, day)
+		e = {"day": day, "score": 0, "time": 0.0, "kills": 0, "dawn": false, "ship": sim.ship_id, "tries": 0}
+		log.append(e)
+		var bounty := daily_bounty(score, int(data.daily_streak))
+		beat.bounty = bounty
+		data.flux = int(data.flux) + bounty
+		data.total_flux = int(data.total_flux) + bounty
+	e.tries = int(e.tries) + 1
+	beat.daily_prev = int(e.score)
+	if score > int(e.score):
+		if not first:
+			beat.daily_best = true
+		e.score = score
+		e.time = sim.seconds()
+		e.kills = sim.kills
+		e.dawn = sim.dawn
+		data.daily_replay = sim.to_replay()
+	# Keep the last 60 days.
+	log.sort_custom(func(a, b): return int(a.day) > int(b.day))
+	while log.size() > 60:
+		log.pop_back()
