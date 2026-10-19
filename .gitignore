@@ -1,0 +1,12 @@
+# Godot
+.godot/
+*.translation
+export_credentials.cfg
+/build/
+/android/build/
+*.apk
+*.aab
+*.idsig
+# OS
+.DS_Store
+Thumbs.db
