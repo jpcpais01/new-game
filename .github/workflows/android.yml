@@ -89,23 +89,23 @@ jobs:
             echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
             echo "Using the private release key from repository secrets."
           else
-            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$GITHUB_WORKSPACE/android/prisma-release.keystore" >> "$GITHUB_ENV"
-            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=prisma" >> "$GITHUB_ENV"
-            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=prisma-public-key" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$GITHUB_WORKSPACE/android/afterglow-fallback.keystore" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=afterglow" >> "$GITHUB_ENV"
+            echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=afterglow-public-key" >> "$GITHUB_ENV"
             echo "::notice::No ANDROID_KEYSTORE_BASE64 secret set; signing with the committed fallback key."
           fi
 
       - name: Export signed APK
         run: |
           mkdir -p build
-          apk="build/Prisma-v${{ steps.ver.outputs.version }}.apk"
+          apk="build/Afterglow-v${{ steps.ver.outputs.version }}.apk"
           godot --headless --path . --export-release "Android" "$apk" 2>&1 | tee export.log
           test -s "$apk"
           ls -la build
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Prisma-v${{ steps.ver.outputs.version }}
+          name: Afterglow-v${{ steps.ver.outputs.version }}
           path: build/*.apk
           retention-days: 14
 
@@ -116,7 +116,7 @@ jobs:
           {
             echo ""
             echo "---"
-            echo "**Install:** download \`Prisma-v${{ steps.ver.outputs.version }}.apk\` below on your Android phone and open it (allow installs from your browser if asked). Updates install over the previous version and keep your progress."
+            echo "**Install:** download \`Afterglow-v${{ steps.ver.outputs.version }}.apk\` below on your Android phone and open it (allow installs from your browser if asked). Updates install over the previous version and keep your progress."
           } >> notes.md
           cat notes.md
 
@@ -125,7 +125,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}
-          name: Prisma v${{ steps.ver.outputs.version }}
+          name: Afterglow v${{ steps.ver.outputs.version }}
           body_path: notes.md
-          files: build/Prisma-v${{ steps.ver.outputs.version }}.apk
+          files: build/Afterglow-v${{ steps.ver.outputs.version }}.apk
           make_latest: true

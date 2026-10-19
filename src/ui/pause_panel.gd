@@ -1,0 +1,54 @@
+class_name PausePanel
+extends Modal
+## Pause: current build, resume, settings, abandon run.
+
+signal resume
+signal quit
+
+var sim: Sim
+
+
+func build() -> void:
+	heading("PAUSED", UiKit.CYAN, 70)
+	var info := UiKit.label("%s   ·   LV %d   ·   %s KILLS" % [UiKit.fmt_time(sim.seconds()), sim.level,
+			UiKit.fmt_int(sim.kills)], 32, UiKit.DIM, UiKit.display_light())
+	body.add_child(info)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 20)
+	grid.add_theme_constant_override("v_separation", 18)
+	var ids: Array = []
+	for w in sim.weapons:
+		ids.append(w.id)
+	ids.append_array(sim.passive_order)
+	for id in ids:
+		var cell := VBoxContainer.new()
+		cell.add_theme_constant_override("separation", 0)
+		cell.add_child(UiKit.icon_rect(id, 120))
+		var nm := UiKit.label("%s  %d" % [String(Defs.card_info(id).get("name", id)).split(" ")[0].to_upper(),
+				sim.card_level(id)], 18, Art.card_color(id), UiKit.display_light())
+		nm.custom_minimum_size = Vector2(230, 30)
+		cell.add_child(nm)
+		grid.add_child(cell)
+	var cc := CenterContainer.new()
+	cc.add_child(grid)
+	body.add_child(cc)
+	var res := UiKit.button("RESUME", UiKit.CYAN, 48, true)
+	res.custom_minimum_size = Vector2(0, 130)
+	res.pressed.connect(func():
+		resume.emit()
+		close())
+	body.add_child(res)
+	var set := UiKit.button("SETTINGS", UiKit.MAGENTA, 38)
+	set.pressed.connect(func(): add_child(SettingsPanel.new()))
+	body.add_child(set)
+	var q := UiKit.button("ABANDON RUN", UiKit.RED, 34)
+	var armed := [false]
+	q.pressed.connect(func():
+		if not armed[0]:
+			armed[0] = true
+			q.text = "TAP AGAIN TO ABANDON"
+			return
+		quit.emit()
+		close())
+	body.add_child(q)

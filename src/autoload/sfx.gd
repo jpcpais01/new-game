@@ -1,18 +1,28 @@
 extends Node
-## Sound effects, music and haptics. Sounds are synthesised offline by
-## tools/gen_audio.py; each name gets a small round-robin pool of players so
-## overlapping, differently pitched hits never cut each other off.
+## Sound effects, layered music and haptics. Every sound is synthesised by
+## tools/gen_audio.py. Each sound has a small pool of players and a minimum
+## gap, so hundreds of hits per second never turn into noise.
 
-const SOUNDS := ["pick", "place", "drop_bad", "clear", "prism", "perfect", "deal",
-		"gameover", "newbest", "click", "land", "combo", "whoosh"]
-const POOL := 4
-## Pentatonic ladder (semitones) that clear sounds climb as a combo grows.
-const LADDER := [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31]
+const SOUNDS := {
+	# name: [pool size, min gap seconds, base volume dB]
+	"click": [2, 0.03, -4.0], "card": [3, 0.03, -3.0], "select": [2, 0.05, -1.0],
+	"levelup": [2, 0.1, -1.0], "shoot": [4, 0.05, -15.0], "hit": [4, 0.035, -13.0],
+	"kill": [6, 0.028, -8.0], "kill_big": [3, 0.08, -2.0], "gem": [6, 0.022, -11.0],
+	"hurt": [2, 0.1, -1.0], "nova": [2, 0.1, -4.0], "zap": [3, 0.06, -8.0],
+	"lance": [2, 0.08, -5.0], "missile": [3, 0.06, -12.0], "boom": [4, 0.05, -6.0],
+	"alarm": [1, 0.5, -6.0], "boss_down": [1, 0.5, 0.0], "pickup": [2, 0.06, -3.0],
+	"revive": [1, 0.5, 0.0], "win": [1, 0.5, 0.0], "lose": [1, 0.5, -1.0],
+	"wave": [1, 0.3, -4.0], "dash": [3, 0.08, -10.0], "buy": [2, 0.05, -2.0],
+}
 
 var _pools := {}
 var _next := {}
-var _music: AudioStreamPlayer
-var _music_tween: Tween
+var _last := {}
+var _menu: AudioStreamPlayer
+var _run: AudioStreamPlayer
+var _drive: AudioStreamPlayer
+var _intensity := 0.0
+var _mode := ""
 
 
 func _ready() -> void:
@@ -25,7 +35,7 @@ func _ready() -> void:
 			continue
 		var stream: AudioStream = load(path)
 		var pool := []
-		for i in POOL:
+		for i in int(SOUNDS[n][0]):
 			var p := AudioStreamPlayer.new()
 			p.stream = stream
 			p.bus = "SFX"
@@ -33,16 +43,25 @@ func _ready() -> void:
 			pool.append(p)
 		_pools[n] = pool
 		_next[n] = 0
-	_music = AudioStreamPlayer.new()
-	_music.bus = "Music"
-	_music.volume_db = -60.0
-	if ResourceLoader.exists("res://assets/audio/music.ogg"):
-		var m: AudioStream = load("res://assets/audio/music.ogg")
+		_last[n] = -1.0
+	_menu = _music_player("music_menu")
+	_run = _music_player("music_run")
+	_drive = _music_player("music_drive")
+	apply_settings()
+
+
+func _music_player(n: String) -> AudioStreamPlayer:
+	var p := AudioStreamPlayer.new()
+	p.bus = "Music"
+	p.volume_db = -80.0
+	var path := "res://assets/audio/%s.ogg" % n
+	if ResourceLoader.exists(path):
+		var m: AudioStream = load(path)
 		if m is AudioStreamOggVorbis:
 			m.loop = true
-		_music.stream = m
-	add_child(_music)
-	apply_settings()
+		p.stream = m
+	add_child(p)
+	return p
 
 
 func _ensure_bus(bus_name: String) -> void:
@@ -56,50 +75,76 @@ func _ensure_bus(bus_name: String) -> void:
 
 func apply_settings() -> void:
 	AudioServer.set_bus_mute(AudioServer.get_bus_index("SFX"), not Save.setting("sound"))
-	var music_on := Save.setting("music")
-	AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"), not music_on)
-	if music_on and _music.stream != null and not _music.playing:
-		start_music()
+	AudioServer.set_bus_mute(AudioServer.get_bus_index("Music"), not Save.setting("music"))
 
 
 func play(sound: String, pitch := 1.0, volume_db := 0.0) -> void:
 	if not _pools.has(sound):
 		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - float(_last[sound]) < float(SOUNDS[sound][1]):
+		return
+	_last[sound] = now
 	var pool: Array = _pools[sound]
 	var p: AudioStreamPlayer = pool[_next[sound]]
 	_next[sound] = (_next[sound] + 1) % pool.size()
 	p.pitch_scale = clampf(pitch, 0.25, 4.0)
-	p.volume_db = volume_db
+	p.volume_db = float(SOUNDS[sound][2]) + volume_db
 	p.play()
 
 
-## Play a sound transposed up the pentatonic ladder by `step`.
-func play_step(sound: String, step: int, volume_db := 0.0) -> void:
-	var semis: int = LADDER[clampi(step, 0, LADDER.size() - 1)]
-	play(sound, pow(2.0, semis / 12.0), volume_db)
+## Short vibration on phones (if enabled).
+func buzz(ms: int) -> void:
+	if Save.setting("haptics") and OS.has_feature("mobile"):
+		Input.vibrate_handheld(ms)
 
 
-func start_music() -> void:
-	if _music.stream == null:
+## "menu" or "run". Crossfades between the two music beds.
+func music(mode: String) -> void:
+	if mode == _mode:
 		return
-	if not _music.playing:
-		_music.play()
-	if _music_tween:
-		_music_tween.kill()
-	_music_tween = create_tween()
-	_music_tween.tween_property(_music, "volume_db", -9.0, 2.5)
+	_mode = mode
+	if mode == "run":
+		_fade(_menu, -80.0, 0.8)
+		_run.play(0.0)
+		_drive.play(0.0)
+		_run.volume_db = -30.0
+		_fade(_run, -6.0, 1.2)
+		_drive.volume_db = -80.0
+		_intensity = 0.0
+	else:
+		_fade(_run, -80.0, 0.8)
+		_fade(_drive, -80.0, 0.8)
+		if not _menu.playing:
+			_menu.play()
+		_menu.volume_db = -30.0
+		_fade(_menu, -8.0, 1.5)
 
 
-func duck_music(duck: bool) -> void:
-	if _music_tween:
-		_music_tween.kill()
-	_music_tween = create_tween()
-	_music_tween.tween_property(_music, "volume_db", -20.0 if duck else -9.0, 0.6)
+## 0..1: how hard the run's drive layer (drums/arps) plays.
+func set_intensity(v: float) -> void:
+	_intensity = clampf(v, 0.0, 1.0)
 
 
-## Haptic tap. `strength` 0..1. No-op on desktop or when disabled.
-func haptic(ms: int, strength := 0.5) -> void:
-	if not Save.setting("haptics"):
+func duck(on: bool) -> void:
+	var target := -14.0 if on else -6.0
+	if _mode == "run":
+		_fade(_run, target, 0.3)
+
+
+func _process(delta: float) -> void:
+	if _mode == "run" and _drive.playing:
+		var target := lerpf(-40.0, -5.0, sqrt(_intensity))
+		_drive.volume_db = lerpf(_drive.volume_db, target, clampf(delta * 1.5, 0.0, 1.0))
+		# Keep the layers locked together.
+		if absf(_drive.get_playback_position() - _run.get_playback_position()) > 0.08:
+			_drive.seek(_run.get_playback_position())
+
+
+func _fade(p: AudioStreamPlayer, db: float, t: float) -> void:
+	if p.stream == null:
 		return
-	if OS.has_feature("android") or OS.has_feature("ios"):
-		Input.vibrate_handheld(ms, clampf(strength, 0.05, 1.0))
+	var tw := create_tween()
+	tw.tween_property(p, "volume_db", db, t)
+	if db <= -79.0:
+		tw.tween_callback(p.stop)

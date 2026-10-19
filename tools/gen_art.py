@@ -1,400 +1,317 @@
 #!/usr/bin/env python3
-"""Generates every bitmap Prisma uses: gem tiles, effect sprites, UI icons
-and the app icon. Run from the repo root: python3 tools/gen_art.py
+"""Generates every bitmap in assets/sprites and assets/icon.
 
-Everything is rendered at 4x and box-filtered down (premultiplied) so edges
-are clean at any scale. Output goes to assets/.
+Neon look: each shape is a signed-distance field turned into a white-hot tube,
+a coloured halo and a faint inner fill. Effect textures are white so the game
+can tint them. Rerun after editing: python3 tools/gen_art.py
 """
 import math
 import os
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TILES = os.path.join(ROOT, "assets", "tiles")
-ICONS = os.path.join(ROOT, "assets", "icons")
-APPICON = os.path.join(ROOT, "assets", "icon")
-SS = 4
-
-GEMS = ["ff4d6d", "ffb238", "3ee38a", "35cfff", "9c6bff", "ff6bd5"]
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+SPR = os.path.join(ROOT, "assets", "sprites")
+ICO = os.path.join(ROOT, "assets", "icon")
 
 
-def hex_rgb(h):
-    return np.array([int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)])
+def grid(size):
+    y, x = np.mgrid[0:size, 0:size].astype(np.float64)
+    c = (size - 1) / 2.0
+    return x - c, y - c
 
 
-def smoothstep(a, b, x):
-    t = np.clip((x - a) / (b - a), 0.0, 1.0)
-    return t * t * (3 - 2 * t)
+def seg_dist(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    t = np.clip(((px - ax) * dx + (py - ay) * dy) / max(l2, 1e-9), 0.0, 1.0)
+    qx, qy = ax + t * dx - px, ay + t * dy - py
+    return np.sqrt(qx * qx + qy * qy)
 
 
-def downsample(rgba, factor):
-    """Premultiplied box filter: rgba float array HxWx4 in [0,1]."""
-    h, w, _ = rgba.shape
-    pm = rgba.copy()
-    pm[..., :3] *= pm[..., 3:4]
-    pm = pm.reshape(h // factor, factor, w // factor, factor, 4).mean(axis=(1, 3))
-    a = pm[..., 3:4]
-    rgb = np.where(a > 1e-6, pm[..., :3] / np.maximum(a, 1e-6), 0)
-    return np.concatenate([rgb, a], axis=-1)
+def poly_inside(px, py, pts):
+    inside = np.zeros(px.shape, dtype=bool)
+    n = len(pts)
+    for i in range(n):
+        ax, ay = pts[i]
+        bx, by = pts[(i + 1) % n]
+        cond = (ay > py) != (by > py)
+        xint = (bx - ax) * (py - ay) / np.where(by - ay == 0, 1e-9, by - ay) + ax
+        inside ^= cond & (px < xint)
+    return inside
 
 
-def save(rgba, path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    img = Image.fromarray((np.clip(rgba, 0, 1) * 255 + 0.5).astype(np.uint8), "RGBA")
-    img.save(path, optimize=True)
+def regular(n, r=1.0, rot=0.0):
+    return [(r * math.cos(rot + 2 * math.pi * i / n), r * math.sin(rot + 2 * math.pi * i / n)) for i in range(n)]
 
 
-def rounded_box(n, half, radius):
-    ys, xs = np.mgrid[0:n, 0:n].astype(np.float64) + 0.5
-    px, py = xs - n / 2, ys - n / 2
-    qx = np.abs(px) - half + radius
-    qy = np.abs(py) - half + radius
-    out = np.sqrt(np.maximum(qx, 0) ** 2 + np.maximum(qy, 0) ** 2)
-    ins = np.minimum(np.maximum(qx, qy), 0)
-    return out + ins - radius, xs / n, ys / n
+def star(n, r1, r2, rot=0.0):
+    pts = []
+    for i in range(n * 2):
+        r = r1 if i % 2 == 0 else r2
+        a = rot + math.pi * i / n
+        pts.append((r * math.cos(a), r * math.sin(a)))
+    return pts
 
 
-def gem_tile(color_hex, size=128):
-    n = size * SS
-    base = hex_rgb(color_hex)
-    d, u, v = rounded_box(n, n / 2 - 1.5 * SS, n * 0.2)
-    gy, gx = np.gradient(d)
-    gl = np.sqrt(gx ** 2 + gy ** 2) + 1e-9
-    nx, ny = gx / gl, gy / gl
-    light = np.array([-0.62, -0.78])
-    shade = nx * light[0] + ny * light[1]
-
-    bevel = n * 0.12
-    face_t = smoothstep(-bevel - 1.5 * SS, -bevel + 1.5 * SS, d)  # 0 face .. 1 bevel
-    # Face: gentle vertical gradient, brighter at the top.
-    face = base[None, None, :] * (1.12 - 0.26 * v[..., None])
-    face = face + (1 - face) * (0.10 * (1 - v[..., None]))
-    # Bevel: lit from the top-left.
-    lit = np.clip(shade, 0, 1)[..., None]
-    dark = np.clip(-shade, 0, 1)[..., None]
-    bev = base[None, None, :] + (1 - base[None, None, :]) * lit * 0.55
-    bev = bev * (1 - dark * 0.45)
-    rgb = face * (1 - face_t[..., None]) + bev * face_t[..., None]
-
-    # Facet line where the face meets the bevel.
-    facet = np.exp(-((d + bevel) / (1.2 * SS)) ** 2) * np.clip(shade * 0.5 + 0.5, 0, 1)
-    rgb = rgb + (1 - rgb) * facet[..., None] * 0.35
-
-    # Glossy highlight in the upper half of the face.
-    ex = (u - 0.42) / 0.30
-    ey = (v - 0.30) / 0.15
-    e = np.sqrt(ex ** 2 + ey ** 2)
-    gloss = (1 - smoothstep(0.35, 1.0, e)) * (1 - face_t) * 0.28
-    rgb = rgb + (1 - rgb) * gloss[..., None]
-    # Specular sparkle.
-    sd = np.sqrt((u - 0.26) ** 2 + (v - 0.24) ** 2)
-    spec = (1 - smoothstep(0.015, 0.05, sd)) * 0.9
-    rgb = rgb + (1 - rgb) * spec[..., None]
-
-    # Dark rim for definition.
-    rim = smoothstep(-2.5 * SS, 0, d)
-    rgb = rgb * (1 - rim[..., None] * 0.45)
-
-    alpha = np.clip(-d / SS * 0.9 + 0.5, 0, 1)
-    rgba = np.concatenate([np.clip(rgb, 0, 1), alpha[..., None]], axis=-1)
-    return downsample(rgba, SS)
+def neon(shapes, color, size=128, radius=40.0, line=3.4, glow=9.0, fill=0.22, core_white=0.6,
+         lines=(), glow_amt=0.9):
+    """shapes: closed polygons in unit coords; lines: open polylines in unit coords."""
+    px, py = grid(size)
+    d = np.full(px.shape, 1e9)
+    inside = np.zeros(px.shape, dtype=bool)
+    for pts in shapes:
+        sp = [(x * radius, y * radius) for x, y in pts]
+        n = len(sp)
+        for i in range(n):
+            d = np.minimum(d, seg_dist(px, py, *sp[i], *sp[(i + 1) % n]))
+        inside ^= poly_inside(px, py, sp)
+    for pts in lines:
+        sp = [(x * radius, y * radius) for x, y in pts]
+        for i in range(len(sp) - 1):
+            d = np.minimum(d, seg_dist(px, py, *sp[i], *sp[i + 1]))
+    core = np.clip(1.0 - (d - line * 0.5) / 1.3, 0.0, 1.0)
+    halo = np.exp(-d / glow) * glow_amt
+    # Fade the halo out before the texture edge so it never clips.
+    rr = np.sqrt(px * px + py * py) / (size * 0.5)
+    halo *= np.clip((1.0 - rr) / 0.18, 0.0, 1.0)
+    fil = inside * fill * (0.55 + 0.45 * np.clip(np.sqrt(px * px + py * py) / radius, 0, 1))
+    col = np.array(color, dtype=np.float64)
+    white = np.ones(3)
+    tube_rgb = col * (1 - core_white) + white * core_white
+    a_core = core
+    a_halo = halo * (1 - core)
+    a_fill = fil * (1 - core) * (1 - np.clip(halo, 0, 1) * 0.5)
+    alpha = np.clip(a_core + a_halo + a_fill, 0, 1)
+    rgb = (tube_rgb[None, None, :] * a_core[..., None]
+           + col[None, None, :] * a_halo[..., None]
+           + (col * 0.55)[None, None, :] * a_fill[..., None])
+    rgb = rgb / np.maximum(alpha, 1e-6)[..., None]
+    return to_img(rgb, alpha)
 
 
-def white_tile(size=128):
-    """Shape-only tile (white) used for flashes and tinted overlays."""
-    n = size * SS
-    d, u, v = rounded_box(n, n / 2 - 1.5 * SS, n * 0.2)
-    alpha = np.clip(-d / SS * 0.9 + 0.5, 0, 1)
-    rgb = np.ones((n, n, 3))
-    return downsample(np.concatenate([rgb, alpha[..., None]], axis=-1), SS)
+def to_img(rgb, alpha):
+    out = np.zeros(alpha.shape + (4,), dtype=np.uint8)
+    out[..., :3] = np.clip(rgb * 255 + 0.5, 0, 255).astype(np.uint8)
+    out[..., 3] = np.clip(alpha * 255 + 0.5, 0, 255).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
 
 
-def ghost_tile(size=128):
-    n = size * SS
-    d, u, v = rounded_box(n, n / 2 - 3 * SS, n * 0.2)
-    w = 3.2 * SS
-    ring = np.exp(-((d + w) / w) ** 2)
-    fill = np.where(d < 0, 0.22, 0.0)
-    alpha = np.clip(ring * 0.95 + fill, 0, 1) * np.clip(-d / SS + 0.5 + w / SS * 2, 0, 1)
-    rgb = np.ones((n, n, 3))
-    return downsample(np.concatenate([rgb, alpha[..., None]], axis=-1), SS)
+def white_img(alpha):
+    rgb = np.ones(alpha.shape + (3,))
+    return to_img(rgb, np.clip(alpha, 0, 1))
 
 
-def slot_tile(size=128):
-    n = size * SS
-    d, u, v = rounded_box(n, n / 2 - 3 * SS, n * 0.18)
-    inside = np.clip(-d / SS + 0.5, 0, 1)
-    # Inner shadow at the top edge, faint light at the bottom: reads as a recess.
-    top = smoothstep(0.45, 0.0, v) * smoothstep(-n * 0.08, 0, d)
-    bottom = smoothstep(0.55, 1.0, v) * smoothstep(-n * 0.05, 0, d)
-    rgb = np.ones((n, n, 3)) * (1 - top[..., None])
-    alpha = inside * (0.055 + top * 0.18 + bottom * 0.05)
-    return downsample(np.concatenate([rgb, alpha[..., None]], axis=-1), SS)
+def save(img, name, folder=SPR):
+    os.makedirs(folder, exist_ok=True)
+    img.save(os.path.join(folder, name + ".png"))
 
 
-def radial(size, fn):
-    ys, xs = np.mgrid[0:size, 0:size].astype(np.float64) + 0.5
-    x = (xs / size) * 2 - 1
-    y = (ys / size) * 2 - 1
-    a = np.clip(fn(x, y), 0, 1)
-    rgb = np.ones((size, size, 3))
-    return np.concatenate([rgb, a[..., None]], axis=-1)
+# --- shapes (unit radius, pointing +x) ---------------------------------------
+SHIP = [(1.0, 0.0), (-0.72, 0.74), (-0.38, 0.0), (-0.72, -0.74)]
+DIAMOND = [(1.0, 0.0), (0.0, 0.74), (-1.0, 0.0), (0.0, -0.74)]
+DART = [(1.0, 0.0), (-0.75, 0.62), (-0.42, 0.0), (-0.75, -0.62)]
+BOWTIE = [(-0.8, -0.8), (0.0, -0.22), (0.8, -0.8), (0.8, 0.8), (0.0, 0.22), (-0.8, 0.8)]
+BLADE = [(1.0, 0.0), (0.0, 0.26), (-1.0, 0.0), (0.0, -0.26)]
+GEM = [(0.0, -1.0), (0.66, 0.0), (0.0, 1.0), (-0.66, 0.0)]
+
+ENEMIES = {
+    # name: (shapes, colour, extra kwargs)
+    "drifter": ([DIAMOND], (1.0, 0.3, 0.65), {}),
+    "dart": ([DART], (1.0, 0.84, 0.22), {}),
+    "splitter": ([regular(5, 1.0, -math.pi / 2), regular(5, 0.45, math.pi / 2)], (0.35, 1.0, 0.45), {}),
+    "mite": ([regular(3, 1.0)], (0.72, 1.0, 0.3), {"line": 3.0}),
+    "weaver": ([BOWTIE], (0.6, 0.48, 1.0), {}),
+    "brute": ([regular(6, 1.0), regular(6, 0.55)], (1.0, 0.55, 0.18), {"line": 4.2}),
+    "spitter": ([star(4, 1.0, 0.42)], (0.88, 0.35, 1.0), {}),
+    "bomber": ([star(9, 1.0, 0.7)], (1.0, 0.24, 0.24), {}),
+    "warden": ([regular(8, 1.0, math.pi / 8), regular(4, 0.5, math.pi / 4), regular(8, 0.78, math.pi / 8)],
+               (1.0, 0.8, 0.35), {"line": 4.4, "glow": 12.0}),
+    "eclipse": ([regular(40, 1.0), regular(40, 0.62), star(12, 0.5, 0.3)], (1.0, 0.3, 0.88),
+                {"line": 4.6, "glow": 13.0, "fill": 0.42}),
+}
 
 
-def beam(w=256, h=64):
-    ys, xs = np.mgrid[0:h, 0:w].astype(np.float64) + 0.5
-    y = ys / h * 2 - 1
-    x = xs / w * 2 - 1
-    a = np.exp(-(y / 0.32) ** 2) * (1 - smoothstep(0.75, 1.0, np.abs(x)))
-    core = np.exp(-(y / 0.08) ** 2) * (1 - smoothstep(0.85, 1.0, np.abs(x)))
-    a = np.clip(a * 0.7 + core, 0, 1)
-    return np.concatenate([np.ones((h, w, 3)), a[..., None]], axis=-1)
+def enemy_sprites():
+    for name, (shapes, col, kw) in ENEMIES.items():
+        save(neon(shapes, col, **kw), "e_" + name)
+        # White silhouette used for the hit flash.
+        px, py = grid(128)
+        inside = np.zeros(px.shape, dtype=bool)
+        d = np.full(px.shape, 1e9)
+        for pts in shapes:
+            sp = [(x * 40.0, y * 40.0) for x, y in pts]
+            inside ^= poly_inside(px, py, sp)
+            for i in range(len(sp)):
+                d = np.minimum(d, seg_dist(px, py, *sp[i], *sp[(i + 1) % len(sp)]))
+        a = np.maximum(inside * 0.85, np.clip(1.0 - (d - 2.5) / 1.5, 0, 1)) + np.exp(-d / 6.0) * 0.5
+        save(white_img(a), "w_" + name)
 
 
-# ---------------------------------------------------------------- icons ----
-
-def icon_canvas(size=96):
-    n = size * SS
-    img = Image.new("L", (n, n), 0)
-    return img, ImageDraw.Draw(img), n
-
-
-def icon_save(img, size, name):
-    small = img.resize((size, size), Image.LANCZOS)
-    a = np.asarray(small).astype(np.float64) / 255.0
-    rgba = np.concatenate([np.ones(a.shape + (3,)), a[..., None]], axis=-1)
-    save(rgba, os.path.join(ICONS, name + ".png"))
-
-
-def draw_icons(size=96):
-    def k(v):
-        return v * size * SS / 96.0
-
-    # pause
-    img, d, n = icon_canvas(size)
-    d.rounded_rectangle([k(26), k(20), k(42), k(76)], radius=k(6), fill=255)
-    d.rounded_rectangle([k(54), k(20), k(70), k(76)], radius=k(6), fill=255)
-    icon_save(img, size, "pause")
-
-    # play
-    img, d, n = icon_canvas(size)
-    d.polygon([(k(30), k(18)), (k(30), k(78)), (k(80), k(48))], fill=255)
-    img = img.filter(ImageFilter.GaussianBlur(k(1.5)))
-    img = img.point(lambda p: 255 if p > 110 else int(p * 255 / 110))
-    icon_save(img, size, "play")
-
-    # home
-    img, d, n = icon_canvas(size)
-    d.polygon([(k(48), k(14)), (k(86), k(48)), (k(76), k(48)), (k(76), k(82)),
-               (k(58), k(82)), (k(58), k(60)), (k(38), k(60)), (k(38), k(82)),
-               (k(20), k(82)), (k(20), k(48)), (k(10), k(48))], fill=255)
-    icon_save(img, size, "home")
-
-    # replay (circular arrow)
-    img, d, n = icon_canvas(size)
-    d.arc([k(16), k(16), k(80), k(80)], start=-60, end=230, fill=255, width=int(k(12)))
-    d.polygon([(k(62), k(6)), (k(84), k(26)), (k(56), k(34))], fill=255)
-    icon_save(img, size, "replay")
-
-    # gear
-    img, d, n = icon_canvas(size)
-    c = n / 2
-    for i in range(8):
-        ang = i * math.pi / 4
-        pts = []
-        for da, rr in ((-0.2, k(30)), (-0.13, k(44)), (0.13, k(44)), (0.2, k(30))):
-            pts.append((c + math.cos(ang + da) * rr, c + math.sin(ang + da) * rr))
-        d.polygon(pts, fill=255)
-    d.ellipse([c - k(32), c - k(32), c + k(32), c + k(32)], fill=255)
-    d.ellipse([c - k(13), c - k(13), c + k(13), c + k(13)], fill=0)
-    icon_save(img, size, "gear")
-
-    # stats bars
-    img, d, n = icon_canvas(size)
-    d.rounded_rectangle([k(14), k(50), k(32), k(82)], radius=k(5), fill=255)
-    d.rounded_rectangle([k(39), k(28), k(57), k(82)], radius=k(5), fill=255)
-    d.rounded_rectangle([k(64), k(12), k(82), k(82)], radius=k(5), fill=255)
-    icon_save(img, size, "stats")
-
-    # sparkle (what's new)
-    img, d, n = icon_canvas(size)
-
-    def star4(cx, cy, r, t):
-        pts = []
-        for i in range(8):
-            ang = i * math.pi / 4 - math.pi / 2
-            rr = r if i % 2 == 0 else r * t
-            pts.append((cx + math.cos(ang) * rr, cy + math.sin(ang) * rr))
-        d.polygon(pts, fill=255)
-    star4(k(42), k(52), k(36), 0.3)
-    star4(k(76), k(22), k(16), 0.32)
-    icon_save(img, size, "sparkle")
-
-    # crown
-    img, d, n = icon_canvas(size)
-    d.polygon([(k(12), k(30)), (k(30), k(52)), (k(48), k(18)), (k(66), k(52)),
-               (k(84), k(30)), (k(78), k(72)), (k(18), k(72))], fill=255)
-    d.rounded_rectangle([k(18), k(76), k(78), k(86)], radius=k(4), fill=255)
-    for x, y in ((12, 28), (48, 15), (84, 28)):
-        d.ellipse([k(x - 7), k(y - 7), k(x + 7), k(y + 7)], fill=255)
-    icon_save(img, size, "crown")
-
-    # flame
-    img, d, n = icon_canvas(size)
-
-    def flame(cx, base_y, half_w, height, fill):
-        pts = []
-        steps = 60
-        tip = base_y - height
-        body = base_y - half_w
-        for i in range(steps + 1):  # right side, tip -> widest point
-            s = i / steps
-            y = tip + (body - tip) * s
-            w = half_w * (s ** 0.75)
-            pts.append((cx + w + half_w * 0.18 * math.sin(s * math.pi) * (1 - s), y))
-        for i in range(steps + 1):  # bottom semicircle
-            a = i / steps * math.pi
-            pts.append((cx + math.cos(a) * half_w, body + math.sin(a) * half_w))
-        for i in range(steps, -1, -1):  # left side back up
-            s = i / steps
-            y = tip + (body - tip) * s
-            w = half_w * (s ** 0.75)
-            pts.append((cx - w + half_w * 0.18 * math.sin(s * math.pi) * (1 - s), y))
-        d.polygon(pts, fill=fill)
-    flame(k(48), k(88), k(28), k(80), 255)
-    flame(k(50), k(86), k(11), k(34), 0)
-    icon_save(img, size, "flame")
-
-    # calendar
-    img, d, n = icon_canvas(size)
-    d.rounded_rectangle([k(12), k(20), k(84), k(84)], radius=k(10), fill=255)
-    d.rectangle([k(20), k(38), k(76), k(76)], fill=0)
-    d.rounded_rectangle([k(26), k(10), k(36), k(30)], radius=k(4), fill=255)
-    d.rounded_rectangle([k(60), k(10), k(70), k(30)], radius=k(4), fill=255)
-    for gx in range(3):
-        for gy in range(2):
-            x0 = k(26 + gx * 17)
-            y0 = k(44 + gy * 16)
-            d.rounded_rectangle([x0, y0, x0 + k(11), y0 + k(10)], radius=k(2), fill=255)
-    icon_save(img, size, "calendar")
-
-    # close
-    img, d, n = icon_canvas(size)
-    d.line([k(24), k(24), k(72), k(72)], fill=255, width=int(k(12)))
-    d.line([k(72), k(24), k(24), k(72)], fill=255, width=int(k(12)))
-    for x, y in ((24, 24), (72, 72), (72, 24), (24, 72)):
-        d.ellipse([k(x - 6), k(y - 6), k(x + 6), k(y + 6)], fill=255)
-    icon_save(img, size, "close")
-
-    # trophy-ish medal (stats/best)
-    img, d, n = icon_canvas(size)
-    d.polygon([(k(30), k(8)), (k(44), k(8)), (k(52), k(36)), (k(40), k(40))], fill=255)
-    d.polygon([(k(66), k(8)), (k(52), k(8)), (k(44), k(36)), (k(56), k(40))], fill=255)
-    d.ellipse([k(22), k(34), k(74), k(86)], fill=255)
-    d.ellipse([k(34), k(46), k(62), k(74)], fill=0)
-    icon_save(img, size, "medal")
-
-    # sound (speaker)
-    img, d, n = icon_canvas(size)
-    d.polygon([(k(10), k(36)), (k(28), k(36)), (k(50), k(16)), (k(50), k(80)), (k(28), k(60)), (k(10), k(60))], fill=255)
-    d.arc([k(44), k(28), k(72), k(68)], start=-55, end=55, fill=255, width=int(k(8)))
-    d.arc([k(48), k(14), k(90), k(82)], start=-55, end=55, fill=255, width=int(k(8)))
-    icon_save(img, size, "sound")
-
-    # music note
-    img, d, n = icon_canvas(size)
-    d.ellipse([k(14), k(58), k(42), k(82)], fill=255)
-    d.ellipse([k(54), k(50), k(82), k(74)], fill=255)
-    d.rectangle([k(34), k(18), k(42), k(70)], fill=255)
-    d.rectangle([k(74), k(10), k(82), k(62)], fill=255)
-    d.polygon([(k(34), k(18)), (k(82), k(8)), (k(82), k(22)), (k(34), k(32))], fill=255)
-    icon_save(img, size, "music")
-
-    # vibrate (phone with waves)
-    img, d, n = icon_canvas(size)
-    d.rounded_rectangle([k(32), k(12), k(64), k(84)], radius=k(8), fill=255)
-    d.rounded_rectangle([k(38), k(20), k(58), k(70)], radius=k(3), fill=0)
-    for x0 in (14, 76):
-        d.line([k(x0 + 3), k(30), k(x0 + 3), k(66)], fill=255, width=int(k(6)))
-    icon_save(img, size, "vibrate")
+def fx_sprites():
+    # Soft dot.
+    px, py = grid(32)
+    r = np.sqrt(px * px + py * py) / 16.0
+    save(white_img(np.exp(-r * r * 5.0) * np.clip((1 - r) / 0.2, 0, 1)), "spark")
+    # Big soft glow.
+    px, py = grid(128)
+    r = np.sqrt(px * px + py * py) / 64.0
+    save(white_img(np.clip(1 - r, 0, 1) ** 2.2), "glow")
+    # Thin ring with halo (radius 0.86 of half size).
+    px, py = grid(256)
+    r = np.sqrt(px * px + py * py)
+    d = np.abs(r - 110.0)
+    a = np.clip(1 - (d - 1.6) / 1.4, 0, 1) + np.exp(-d / 7.0) * 0.55
+    a *= np.clip((128 - r) / 8.0, 0, 1)
+    save(white_img(a), "ring")
+    # Soft filled disc (shockwave body).
+    a = np.clip((r - 40) / 72.0, 0, 1) ** 2 * np.clip((114 - r) / 6.0, 0, 1)
+    save(white_img(a * 0.8), "disc")
+    # Bolt: capsule pointing +x.
+    w, h = 64, 24
+    y, x = np.mgrid[0:h, 0:w].astype(np.float64)
+    d = seg_dist(x, y, 14, h / 2 - 0.5, w - 14, h / 2 - 0.5)
+    a = np.clip(1 - (d - 3.0) / 1.3, 0, 1) + np.exp(-d / 3.5) * 0.7
+    save(white_img(a), "bolt")
+    # Streak: tapered line for sparks.
+    w, h = 64, 12
+    y, x = np.mgrid[0:h, 0:w].astype(np.float64)
+    t = x / (w - 1)
+    width = 0.6 + 2.4 * t
+    d = np.abs(y - (h - 1) / 2) / width
+    a = np.exp(-d * d * 1.6) * np.clip(t * 1.4, 0, 1) * np.clip((1 - t) / 0.08, 0, 1)
+    save(white_img(a), "streak")
+    # Beam profile (across the beam = y), stretched along x at runtime.
+    w, h = 8, 64
+    y, x = np.mgrid[0:h, 0:w].astype(np.float64)
+    d = np.abs(y - (h - 1) / 2) / (h / 2)
+    a = np.exp(-d * d * 9.0) * 0.8 + np.clip(1 - d / 0.16, 0, 1)
+    save(white_img(a), "beam")
+    # Orb (enemy bullet): hot core + halo.
+    px, py = grid(48)
+    r = np.sqrt(px * px + py * py)
+    a = np.clip(1 - (r - 6) / 1.5, 0, 1) + np.exp(-np.maximum(r - 6, 0) / 4.0) * 0.8
+    a *= np.clip((24 - r) / 4, 0, 1)
+    core = np.clip(1 - (r - 4) / 2, 0, 1)
+    rgb = np.ones((48, 48, 3))
+    img = to_img(rgb, np.clip(a, 0, 1))
+    save(img, "orb")
+    save(white_img(core), "orb_core")
+    # Hexagon cell used for the warp-in portal.
+    save(neon([regular(6, 1.0, math.pi / 6)], (1, 1, 1), size=128, radius=52, line=2.4, glow=7, fill=0.0,
+              core_white=1.0), "portal")
 
 
-# ------------------------------------------------------------ app icon ----
+def player_sprites():
+    save(neon([SHIP], (0.35, 0.95, 1.0), radius=40, line=4.0, glow=10, fill=0.35, core_white=0.75), "ship")
+    save(neon([BLADE], (0.55, 1.0, 1.0), size=96, radius=40, line=3.0, glow=6, fill=0.5, core_white=0.8), "blade")
+    save(neon([DART], (1.0, 0.75, 0.35), size=64, radius=20, line=2.6, glow=5, fill=0.5, core_white=0.8),
+         "missile")
+    # Gem: white-hot so it can be tinted per tier.
+    save(neon([GEM], (1, 1, 1), size=48, radius=15, line=2.4, glow=4.5, fill=0.55, core_white=1.0), "gem")
+    # Pickups.
+    heart = []
+    for i in range(48):
+        t = 2 * math.pi * i / 48
+        hx = 16 * math.sin(t) ** 3
+        hy = -(13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t))
+        heart.append((hx / 17.0, hy / 17.0))
+    save(neon([heart], (1.0, 0.35, 0.45), size=96, radius=34, line=3.6, glow=7, fill=0.5), "p_heart")
+    mag = [(-0.8, -0.9), (-0.8, 0.15), (-0.55, 0.62), (0.0, 0.85), (0.55, 0.62), (0.8, 0.15), (0.8, -0.9)]
+    save(neon([], (0.4, 0.8, 1.0), size=96, radius=32, line=4.5, glow=7, lines=[mag]), "p_magnet")
+    save(neon([star(5, 1.0, 0.45, -math.pi / 2)], (1.0, 0.9, 0.4), size=96, radius=36, line=3.6, glow=8, fill=0.5),
+         "p_core")
+
+
+ICONS = {
+    # id: (closed shapes, open lines, colour)
+    "pulse": ([[(0.1, -0.25), (0.75, 0.0), (0.1, 0.25)]], [[(-0.85, -0.45), (-0.1, -0.45)], [(-0.85, 0.0), (0.05, 0.0)],
+                                                          [(-0.85, 0.45), (-0.1, 0.45)]], (0.35, 0.95, 1.0)),
+    "orbit": ([regular(32, 0.32)], [[(math.cos(a) * 0.82, math.sin(a) * 0.82) for a in np.linspace(0.3, 2.6, 12)],
+                                    [(math.cos(a) * 0.82, math.sin(a) * 0.82) for a in np.linspace(3.4, 5.7, 12)]],
+              (0.55, 1.0, 1.0)),
+    "arc": ([], [[(-0.2, -0.95), (-0.55, 0.05), (0.05, 0.0), (-0.3, 0.95)], [(0.25, -0.9), (0.62, -0.3), (0.4, -0.15),
+                                                                          (0.75, 0.4)]], (0.75, 0.7, 1.0)),
+    "nova": ([regular(32, 0.25), regular(40, 0.58), regular(48, 0.9)], [], (1.0, 0.55, 0.9)),
+    "seeker": ([[(0.9, -0.5), (0.25, -0.55), (0.6, 0.0)]],
+               [[(-0.85, 0.75), (-0.4, 0.2), (0.0, -0.1), (0.62, -0.5)]], (1.0, 0.72, 0.3)),
+    "lance": ([[(0.95, 0.0), (0.55, 0.22), (-0.9, 0.12), (-0.9, -0.12), (0.55, -0.22)]], [], (1.0, 0.95, 0.6)),
+    "vitality": ([[(-0.25, -0.85), (0.25, -0.85), (0.25, -0.25), (0.85, -0.25), (0.85, 0.25), (0.25, 0.25),
+                   (0.25, 0.85), (-0.25, 0.85), (-0.25, 0.25), (-0.85, 0.25), (-0.85, -0.25), (-0.25, -0.25)]], [],
+                 (1.0, 0.35, 0.45)),
+    "thrusters": ([], [[(-0.7, -0.75), (0.05, 0.0), (-0.7, 0.75)], [(0.0, -0.75), (0.75, 0.0), (0.0, 0.75)]],
+                  (0.4, 1.0, 0.7)),
+    "magnet": ([], [[(-0.7, -0.85), (-0.7, 0.1), (-0.45, 0.6), (0.0, 0.8), (0.45, 0.6), (0.7, 0.1), (0.7, -0.85)],
+                    [(-0.95, -0.85), (-0.45, -0.85)], [(0.45, -0.85), (0.95, -0.85)]], (0.4, 0.8, 1.0)),
+    "overclock": ([regular(36, 0.85)], [[(0.0, -0.55), (0.0, 0.0), (0.42, 0.28)]], (1.0, 0.85, 0.3)),
+    "amplifier": ([[(0.0, -0.9), (0.75, -0.1), (0.3, -0.1), (0.3, 0.85), (-0.3, 0.85), (-0.3, -0.1), (-0.75, -0.1)]],
+                  [], (1.0, 0.45, 0.35)),
+    "lens": ([regular(32, 0.4)], [[(0.6, 0.0), (0.95, 0.0)], [(-0.6, 0.0), (-0.95, 0.0)], [(0.0, 0.6), (0.0, 0.95)],
+                                  [(0.0, -0.6), (0.0, -0.95)]], (0.6, 0.9, 1.0)),
+    "plating": ([[(0.0, -0.9), (0.75, -0.6), (0.65, 0.25), (0.0, 0.9), (-0.65, 0.25), (-0.75, -0.6)]], [],
+                (0.6, 0.75, 1.0)),
+    "fortune": ([star(5, 0.95, 0.42, -math.pi / 2)], [], (1.0, 0.85, 0.35)),
+    "scholar": ([GEM, [(0.0, -0.45), (0.3, 0.0), (0.0, 0.45), (-0.3, 0.0)]], [], (0.5, 1.0, 0.65)),
+    "renewal": ([regular(36, 0.85)], [[(0.0, -0.45), (0.0, 0.45)], [(-0.45, 0.0), (0.45, 0.0)]], (0.4, 1.0, 0.55)),
+    "heal": ([[(-0.25, -0.85), (0.25, -0.85), (0.25, -0.25), (0.85, -0.25), (0.85, 0.25), (0.25, 0.25),
+               (0.25, 0.85), (-0.25, 0.85), (-0.25, 0.25), (-0.85, 0.25), (-0.85, -0.25), (-0.25, -0.25)]], [],
+             (0.4, 1.0, 0.6)),
+    "flux": ([GEM], [], (1.0, 0.5, 1.0)),
+    # Forge (permanent upgrades)
+    "hull": ([[(0.0, -0.9), (0.75, -0.6), (0.65, 0.25), (0.0, 0.9), (-0.65, 0.25), (-0.75, -0.6)]],
+             [[(-0.35, 0.0), (0.35, 0.0)], [(0.0, -0.35), (0.0, 0.35)]], (1.0, 0.4, 0.5)),
+    "power": ([[(0.15, -0.95), (-0.55, 0.12), (-0.02, 0.12), (-0.15, 0.95), (0.55, -0.12), (0.02, -0.12)]], [],
+              (1.0, 0.75, 0.3)),
+    "engine": ([SHIP], [], (0.35, 0.95, 1.0)),
+    "greed": ([GEM, regular(28, 0.95)], [], (1.0, 0.5, 1.0)),
+    "revive": ([], [[(math.cos(a) * 0.75, math.sin(a) * 0.75) for a in np.linspace(-2.6, 2.3, 18)],
+                    [(0.48, 0.4), (0.5, 0.75), (0.85, 0.66)]], (0.4, 1.0, 0.7)),
+    "reroll": ([], [[(math.cos(a) * 0.7, math.sin(a) * 0.7) for a in np.linspace(-0.4, 2.6, 14)],
+                    [(math.cos(a) * 0.7, math.sin(a) * 0.7) for a in np.linspace(2.75, 5.75, 14)],
+                    [(0.45, 0.35), (0.7, -0.05), (0.95, 0.35)]], (0.7, 0.6, 1.0)),
+}
+
+
+def icons():
+    for name, (shapes, lines, col) in ICONS.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.6, glow=6.5, fill=0.3, lines=lines), "i_" + name)
+
 
 def app_icon():
-    os.makedirs(APPICON, exist_ok=True)
-    size = 432
-    n = size * SS
-    ys, xs = np.mgrid[0:n, 0:n].astype(np.float64) + 0.5
-    u, v = xs / n, ys / n
-    # Background: deep indigo with an aurora glow.
-    top = hex_rgb("1a1146")
-    bot = hex_rgb("07061a")
-    bg = top[None, None, :] * (1 - v[..., None]) + bot[None, None, :] * v[..., None]
-    glow = np.exp(-(((u - 0.5) / 0.45) ** 2 + ((v - 0.42) / 0.38) ** 2))
-    bg = bg + np.array([0.35, 0.22, 0.75])[None, None, :] * glow[..., None] * 0.55
-    bg_rgba = np.concatenate([np.clip(bg, 0, 1), np.ones((n, n, 1))], axis=-1)
-    bg_small = downsample(bg_rgba, SS)
-    save(bg_small, os.path.join(APPICON, "icon_bg_432.png"))
+    def bg(size):
+        px, py = grid(size)
+        r = np.sqrt(px * px + py * py) / (size * 0.5)
+        top = np.array([0.08, 0.04, 0.18])
+        mid = np.array([0.02, 0.01, 0.06])
+        t = np.clip(r, 0, 1)[..., None]
+        rgb = top * (1 - t) + mid * t
+        # faint grid
+        g = ((np.abs((px % (size / 8.0)) - size / 16.0) < size / 400.0 + 0.6) |
+             (np.abs((py % (size / 8.0)) - size / 16.0) < size / 400.0 + 0.6))
+        rgb = rgb + g[..., None] * np.array([0.05, 0.1, 0.2]) * (1 - t)
+        return rgb
 
-    # Foreground: a 2x2 cluster of gems + one floating gem, inside the
-    # adaptive-icon safe zone (centre 66%).
-    fg = np.zeros((size, size, 4))
-    tile = 112
-    layout = [(0, 0, 0), (1, 0, 3), (0, 1, 4), (1, 1, 5)]
-    ox = size // 2 - tile
-    oy = size // 2 - tile + 18
-    for gx, gy, ci in layout:
-        t = gem_tile(GEMS[ci], tile)
-        _blit(fg, t, ox + gx * tile, oy + gy * tile)
-    t = gem_tile(GEMS[1], 72)
-    _blit(fg, t, ox + 2 * tile - 24, oy - 72 + 6)
-    # soft glow behind
-    save(fg, os.path.join(APPICON, "icon_fg_432.png"))
+    def fg(size, scale):
+        rot = [(-y, -x) for x, y in SHIP]  # point up
+        return neon([rot], (0.35, 0.95, 1.0), size=size, radius=size * scale, line=size * 0.035,
+                    glow=size * 0.06, fill=0.4, core_white=0.75)
 
-    # Legacy square icon = bg + fg composited with rounded corners.
-    comp = _over(bg_small.copy(), fg)
-    for out, name in ((192, "icon_192.png"), (512, "icon_512.png")):
-        img = Image.fromarray((np.clip(comp, 0, 1) * 255).astype(np.uint8), "RGBA").resize((out, out), Image.LANCZOS)
-        img.save(os.path.join(APPICON, name), optimize=True)
-
-
-def _blit(dst, src, x, y):
-    h, w, _ = src.shape
-    region = dst[y:y + h, x:x + w]
-    a = src[..., 3:4]
-    out_a = a + region[..., 3:4] * (1 - a)
-    out_rgb = (src[..., :3] * a + region[..., :3] * region[..., 3:4] * (1 - a)) / np.maximum(out_a, 1e-6)
-    dst[y:y + h, x:x + w] = np.concatenate([out_rgb, out_a], axis=-1)
-
-
-def _over(dst, src):
-    _blit(dst, src, 0, 0)
-    return dst
-
-
-def main():
-    os.makedirs(TILES, exist_ok=True)
-    for i, c in enumerate(GEMS):
-        save(gem_tile(c), os.path.join(TILES, "gem_%d.png" % (i + 1)))
-    save(white_tile(), os.path.join(TILES, "white.png"))
-    save(ghost_tile(), os.path.join(TILES, "ghost.png"))
-    save(slot_tile(), os.path.join(TILES, "slot.png"))
-    save(radial(128, lambda x, y: np.exp(-(x * x + y * y) / (2 * 0.33 ** 2)) * (1 - smoothstep(0.85, 1, np.sqrt(x * x + y * y)))),
-         os.path.join(TILES, "glow.png"))
-    save(radial(128, lambda x, y: np.clip(np.exp(-np.abs(x) / 0.035) * np.exp(-(y / 0.6) ** 2)
-                                          + np.exp(-np.abs(y) / 0.035) * np.exp(-(x / 0.6) ** 2)
-                                          + np.exp(-(x * x + y * y) / 0.012), 0, 1)),
-         os.path.join(TILES, "spark.png"))
-    save(radial(256, lambda x, y: np.exp(-((np.sqrt(x * x + y * y) - 0.82) / 0.07) ** 2)),
-         os.path.join(TILES, "ring.png"))
-    save(beam(), os.path.join(TILES, "beam.png"))
-    draw_icons()
-    app_icon()
-    print("art generated")
+    os.makedirs(ICO, exist_ok=True)
+    for size, name in ((192, "icon_192"), (512, "icon_512")):
+        b = bg(size)
+        f = np.asarray(fg(size, 0.3)).astype(np.float64) / 255.0
+        a = f[..., 3:4]
+        rgb = b * (1 - a) + f[..., :3] * a
+        to_img(rgb, np.ones((size, size))).save(os.path.join(ICO, name + ".png"))
+    to_img(bg(432), np.ones((432, 432))).save(os.path.join(ICO, "icon_bg_432.png"))
+    fg(432, 0.2).save(os.path.join(ICO, "icon_fg_432.png"))
 
 
 if __name__ == "__main__":
-    main()
+    enemy_sprites()
+    fx_sprites()
+    player_sprites()
+    icons()
+    app_icon()
+    print("art ok")

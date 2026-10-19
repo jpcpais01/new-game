@@ -1,156 +1,95 @@
 #!/usr/bin/env python3
-"""Synthesises every sound in Prisma: crystal SFX and the ambient music loop.
-Run from the repo root: python3 tools/gen_audio.py  (needs numpy + scipy,
-and ffmpeg for the .ogg music). Output goes to assets/audio/.
+"""Synthesises every sound and music loop in assets/audio (numpy + ffmpeg).
 
-Everything is generated from a fixed random seed, so the output is
-reproducible.
+Rerun after editing: python3 tools/gen_audio.py
 """
 import os
 import subprocess
 import wave
 
 import numpy as np
-from scipy.signal import butter, lfilter
 
 SR = 44100
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 OUT = os.path.join(ROOT, "assets", "audio")
-RNG = np.random.default_rng(1234)
+rng = np.random.default_rng(7)
 
 
 def t_axis(dur):
     return np.arange(int(dur * SR)) / SR
 
 
-def note(name):
-    names = {"C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5, "F#": 6, "G": 7,
-             "G#": 8, "A": 9, "A#": 10, "B": 11}
-    pitch, octave = name[:-1], int(name[-1])
-    midi = 12 * (octave + 1) + names[pitch]
-    return 440.0 * 2 ** ((midi - 69) / 12)
-
-
-def env(n, attack, decay, sustain_curve=None):
-    t = np.arange(n) / SR
-    a = np.clip(t / max(attack, 1e-4), 0, 1)
-    d = np.exp(-np.maximum(t - attack, 0) / decay)
-    return a * d
-
-
-def lowpass(x, cutoff, order=2):
-    b, a = butter(order, min(cutoff / (SR / 2), 0.99), btype="low")
-    return lfilter(b, a, x)
-
-
-def highpass(x, cutoff, order=2):
-    b, a = butter(order, min(cutoff / (SR / 2), 0.99), btype="high")
-    return lfilter(b, a, x)
-
-
-def bandpass(x, lo, hi, order=2):
-    b, a = butter(order, [lo / (SR / 2), min(hi / (SR / 2), 0.99)], btype="band")
-    return lfilter(b, a, x)
-
-
-def sine(freq, dur, phase=0.0):
-    t = t_axis(dur)
-    if np.ndim(freq) == 0:
-        return np.sin(2 * np.pi * freq * t + phase)
-    ph = 2 * np.pi * np.cumsum(freq) / SR
-    return np.sin(ph + phase)
-
-
-def bell(freq, dur, decay=0.9, bright=1.0):
-    """Glassy bell: inharmonic partials, higher ones die faster."""
-    t = t_axis(dur)
-    partials = [(1.0, 1.0), (2.0, 0.42 * bright), (2.76, 0.32 * bright), (4.07, 0.16 * bright),
-                (5.43, 0.09 * bright), (6.8, 0.05 * bright)]
-    out = np.zeros_like(t)
-    for ratio, amp in partials:
-        f = freq * ratio
-        if f > SR / 2.2:
-            continue
-        out += amp * np.sin(2 * np.pi * f * t + RNG.random() * 6.28) * np.exp(-t * ratio ** 0.7 / decay)
-    attack = np.clip(t / 0.002, 0, 1)
-    return out * attack
-
-
-def pluck(freq, dur, decay=0.35):
-    t = t_axis(dur)
-    x = np.sin(2 * np.pi * freq * t) + 0.35 * np.sin(4 * np.pi * freq * t) + 0.12 * np.sin(6 * np.pi * freq * t)
-    return x * np.exp(-t / decay) * np.clip(t / 0.004, 0, 1)
-
-
-def noise(dur):
-    return RNG.standard_normal(int(dur * SR))
-
-
-def reverb(x, wet=0.3, room=0.84, damp=3500):
-    """Small Schroeder reverb (4 combs + 2 allpasses)."""
-    n = len(x)
-    tail = int(SR * 1.8)
-    x = np.concatenate([x, np.zeros(tail)])
-    out = np.zeros_like(x)
-    for delay_ms, g in ((29.7, room), (37.1, room - 0.02), (41.1, room - 0.03), (43.7, room - 0.05)):
-        d = int(SR * delay_ms / 1000)
-        b = np.zeros(d + 1)
-        b[0] = 1.0
-        a = np.zeros(d + 1)
-        a[0] = 1.0
-        a[d] = -g
-        out += lfilter(b, a, lowpass(x, damp, 1))
-    out /= 4
-    for delay_ms, g in ((5.0, 0.7), (1.7, 0.7)):
-        d = int(SR * delay_ms / 1000)
-        b = np.zeros(d + 1)
-        b[0] = -g
-        b[d] = 1.0
-        a = np.zeros(d + 1)
-        a[0] = 1.0
-        a[d] = -g
-        out = lfilter(b, a, out)
-    return x * (1 - wet) + out * wet
-
-
-def mix(*parts):
-    n = max(len(p) for _, p in parts)
+def env(n, a=0.005, d=0.1, s=0.0, r=0.05, hold=0.0):
+    """ADSR over n samples (seconds for a/d/r/hold)."""
     out = np.zeros(n)
-    for offset, p in parts:
-        o = int(offset * SR)
-        end = min(n, o + len(p))
-        if o < n:
-            out[o:end] += p[:end - o]
+    ai, di, hi, ri = int(a * SR), int(d * SR), int(hold * SR), int(r * SR)
+    i = 0
+    seg = min(ai, n - i)
+    out[i:i + seg] = np.linspace(0, 1, max(ai, 1))[:seg]
+    i += seg
+    seg = min(di, n - i)
+    out[i:i + seg] = np.linspace(1, s, max(di, 1))[:seg]
+    i += seg
+    seg = min(hi, n - i)
+    out[i:i + seg] = s
+    i += seg
+    seg = min(ri, n - i)
+    out[i:i + seg] = np.linspace(s, 0, max(ri, 1))[:seg]
     return out
 
 
-def place_at(total, offset, sig):
-    o = int(offset * SR)
-    if o >= len(total):
-        return
-    end = min(len(total), o + len(sig))
-    total[o:end] += sig[:end - o]
+def expdecay(n, k):
+    return np.exp(-np.arange(n) / SR * k)
 
 
-def trim(x, thresh=1e-4):
-    idx = np.where(np.abs(x) > thresh)[0]
-    if len(idx) == 0:
-        return x
-    x = x[:idx[-1] + 1]
-    fade = min(len(x), int(0.01 * SR))
-    x[-fade:] *= np.linspace(1, 0, fade)
-    return x
+def sweep_phase(f0, f1, n, curve=1.0):
+    f = f0 + (f1 - f0) * (np.linspace(0, 1, n) ** curve)
+    return 2 * np.pi * np.cumsum(f) / SR
 
 
-def normalize(x, peak=0.89):
+def saw_from_phase(ph, harmonics=12):
+    out = np.zeros_like(ph)
+    for h in range(1, harmonics + 1):
+        out += np.sin(ph * h) / h * (-1) ** (h + 1)
+    return out * 0.6
+
+
+def square_from_phase(ph, harmonics=9):
+    out = np.zeros_like(ph)
+    for h in range(1, harmonics * 2, 2):
+        out += np.sin(ph * h) / h
+    return out * 0.8
+
+
+def lowpass(x, cutoff):
+    X = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / SR)
+    X *= 1.0 / np.sqrt(1.0 + (f / cutoff) ** 4)
+    return np.fft.irfft(X, len(x))
+
+
+def highpass(x, cutoff):
+    X = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / SR)
+    X *= 1.0 / np.sqrt(1.0 + (cutoff / np.maximum(f, 1.0)) ** 4)
+    return np.fft.irfft(X, len(x))
+
+
+def noise(n):
+    return rng.uniform(-1, 1, n)
+
+
+def norm(x, peak=0.9):
     m = np.max(np.abs(x)) + 1e-9
     return x / m * peak
 
 
-def write_wav(name, x, peak=0.89):
-    x = normalize(trim(x), peak)
-    data = (np.clip(x, -1, 1) * 32767).astype(np.int16)
+def write_wav(name, x, peak=0.9):
     os.makedirs(OUT, exist_ok=True)
+    x = norm(x, peak)
+    fade = min(len(x), 200)
+    x[-fade:] *= np.linspace(1, 0, fade)
+    data = (np.clip(x, -1, 1) * 32767).astype(np.int16)
     with wave.open(os.path.join(OUT, name + ".wav"), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
@@ -158,220 +97,303 @@ def write_wav(name, x, peak=0.89):
         w.writeframes(data.tobytes())
 
 
-# ------------------------------------------------------------------ SFX ----
-
-def sfx_pick():
-    dur = 0.11
-    f = np.linspace(560, 980, int(dur * SR))
-    x = sine(f, dur) * env(int(dur * SR), 0.004, 0.035)
-    x += 0.25 * bell(1960, dur, 0.05)
-    return x
-
-
-def sfx_place():
-    dur = 0.35
-    n = int(dur * SR)
-    f = np.linspace(170, 85, n)
-    thump = sine(f, dur) * env(n, 0.002, 0.05)
-    click = lowpass(noise(dur), 1800) * env(n, 0.001, 0.008) * 0.8
-    tink = (bell(2490, dur, 0.06) * 0.22 + bell(3720, dur, 0.04) * 0.1)
-    return reverb(thump + click + tink, 0.12)
-
-
-def sfx_drop_bad():
-    a = lowpass(pluck(330, 0.18, 0.06) + 0.4 * sine(165, 0.18) * env(int(0.18 * SR), 0.003, 0.05), 1400)
-    b = lowpass(pluck(247, 0.22, 0.07) + 0.4 * sine(123, 0.22) * env(int(0.22 * SR), 0.003, 0.06), 1200)
-    return mix((0, a), (0.09, b)) * 0.8
-
-
-def sfx_clear():
-    base = note("E5")
-    x = mix((0, bell(base, 1.6, 0.55)), (0, 0.55 * bell(base * 1.5, 1.6, 0.4)), (0, 0.3 * bell(base * 2, 1.6, 0.3)))
-    sh = highpass(noise(0.6), 6000) * env(int(0.6 * SR), 0.01, 0.12) * 0.12
-    whoosh = bandpass(noise(0.3), 1200, 5000) * env(int(0.3 * SR), 0.02, 0.06) * 0.25
-    return reverb(mix((0, x * 0.6), (0, sh), (0, whoosh)), 0.3)
-
-
-def sfx_prism():
-    notes = ["C6", "D6", "E6", "G6", "A6", "C7", "E7"]
-    total = np.zeros(int(2.4 * SR))
-    for i, nn in enumerate(notes):
-        place_at(total, i * 0.055, bell(note(nn), 1.5, 0.45) * (0.7 - i * 0.04))
-    place_at(total, 0, highpass(noise(1.2), 7000) * env(int(1.2 * SR), 0.15, 0.35) * 0.18)
-    pad = sum(sine(note(n), 1.6) for n in ("C5", "E5", "G5", "B5")) * env(int(1.6 * SR), 0.15, 0.6) * 0.12
-    place_at(total, 0.05, pad)
-    return reverb(total, 0.38)
-
-
-def sfx_perfect():
-    total = np.zeros(int(3.4 * SR))
-    chord = ["C4", "G4", "D5", "E5", "B5"]
-    for n in chord:
-        f = note(n)
-        v = (sine(f, 2.8) + 0.3 * sine(f * 2.003, 2.8)) * env(int(2.8 * SR), 0.25, 1.0)
-        place_at(total, 0.0, v * 0.14)
-    for i, n in enumerate(["C6", "E6", "G6", "B6", "D7", "G7"]):
-        place_at(total, 0.12 + i * 0.07, bell(note(n), 1.8, 0.6) * 0.45)
-    swell = bandpass(noise(1.0), 800, 7000) * np.linspace(0, 1, int(1.0 * SR)) ** 2 * 0.15
-    place_at(total, 0.0, swell * env(len(swell), 0.8, 0.15))
-    return reverb(total, 0.42)
-
-
-def sfx_deal():
-    total = np.zeros(int(0.5 * SR))
-    for i in range(3):
-        d = 0.09
-        fw = bandpass(noise(d), 900 + i * 400, 4500 + i * 600) * env(int(d * SR), 0.01, 0.025) * 0.35
-        pop = sine(np.linspace(380 + i * 90, 640 + i * 120, int(d * SR)), d) * env(int(d * SR), 0.003, 0.03) * 0.5
-        place_at(total, i * 0.065, fw + pop)
-    return total
-
-
-def sfx_gameover():
-    total = np.zeros(int(3.0 * SR))
-    for i, n in enumerate(["A5", "F5", "D5", "A4"]):
-        place_at(total, i * 0.18, bell(note(n), 1.6, 0.6) * 0.5)
-    pad = sum(sine(note(n), 2.4) for n in ("D3", "A3", "F4")) * env(int(2.4 * SR), 0.3, 0.9) * 0.15
-    place_at(total, 0.1, lowpass(pad, 1200))
-    return reverb(total, 0.4)
-
-
-def sfx_newbest():
-    total = np.zeros(int(2.8 * SR))
-    for i, n in enumerate(["C5", "E5", "G5", "C6", "E6", "G6"]):
-        place_at(total, i * 0.075, bell(note(n), 1.4, 0.5) * 0.5)
-    for n in ("C4", "G4", "C5", "E5"):
-        f = note(n)
-        v = (sine(f, 1.8) + 0.25 * sine(f * 3, 1.8)) * env(int(1.8 * SR), 0.05, 0.7) * 0.12
-        place_at(total, 0.42, v)
-    return reverb(total, 0.35)
-
-
-def sfx_click():
-    d = 0.06
-    n = int(d * SR)
-    x = sine(np.linspace(1800, 1200, n), d) * env(n, 0.001, 0.012) * 0.6
-    x += sine(np.linspace(260, 160, n), d) * env(n, 0.001, 0.02) * 0.5
-    return x
-
-
-def sfx_land():
-    d = 0.12
-    n = int(d * SR)
-    x = bell(1320, d, 0.03) * 0.5 + sine(np.linspace(300, 200, n), d) * env(n, 0.001, 0.02) * 0.4
-    return x
-
-
-def sfx_combo():
-    d = 0.5
-    n = int(d * SR)
-    f = np.geomspace(220, 880, n)
-    ph = 2 * np.pi * np.cumsum(f) / SR
-    saw = 2 * ((ph / (2 * np.pi)) % 1.0) - 1
-    x = lowpass(saw, 2600) * env(n, 0.02, 0.18) * 0.4
-    x += bell(1318, d, 0.25) * 0.3
-    return reverb(x, 0.25)
-
-
-def sfx_whoosh():
-    d = 0.5
-    n = int(d * SR)
-    x = noise(d)
-    # sweep a band upwards
-    out = np.zeros(n)
-    seg = n // 10
-    for i in range(10):
-        lo = 300 * 1.35 ** i
-        part = bandpass(x[i * seg:(i + 1) * seg + 2000], lo, lo * 3)[: seg]
-        out[i * seg:i * seg + len(part)] += part
-    return out * np.sin(np.linspace(0, np.pi, n)) ** 2 * 0.6
-
-
-# ---------------------------------------------------------------- music ----
-
-def music():
-    bpm = 84
-    beat = 60 / bpm
-    bar = beat * 4
-    chords = [
-        ["D3", "A3", "E4", "F#4", "C#5"],     # Dmaj9
-        ["B2", "F#3", "D4", "A4", "C#5"],     # Bm9
-        ["G2", "D3", "B3", "F#4", "A4"],      # Gmaj9
-        ["A2", "E3", "C#4", "G4", "B4"],      # A9-ish
-    ]
-    bars_per_chord = 2
-    loop = bar * bars_per_chord * len(chords)
-    loops = 3
-    total = np.zeros(int(loop * loops * SR) + SR * 4)
-    rng = np.random.default_rng(7)
-    arp_pattern = [0, 2, 3, 4, 3, 2, 4, 1]
-    for L in range(loops):
-        for ci, chord in enumerate(chords):
-            start = L * loop + ci * bar * bars_per_chord
-            dur = bar * bars_per_chord + 1.2
-            n = int(dur * SR)
-            t = np.arange(n) / SR
-            amp = np.clip(t / 1.4, 0, 1) * np.clip((dur - t) / 1.4, 0, 1)
-            pad = np.zeros(n)
-            for nn in chord:
-                f = note(nn)
-                for det in (-0.004, 0.0, 0.0045):
-                    pad += np.sin(2 * np.pi * f * (1 + det) * t + rng.random() * 6.28)
-                pad += 0.18 * np.sin(2 * np.pi * f * 2 * t)
-            lfo = 0.75 + 0.25 * np.sin(2 * np.pi * 0.11 * t + ci)
-            place_at(total, start, lowpass(pad * amp * lfo, 1800) * 0.05)
-            # Sub bass
-            root = note(chord[0]) / 2
-            sub = np.sin(2 * np.pi * root * t) * amp * 0.09
-            place_at(total, start, sub)
-            # Arpeggio: eighth notes, a little sparse and humanised.
-            steps = bars_per_chord * 8
-            for s in range(steps):
-                if rng.random() < 0.22 and s % 4 != 0:
-                    continue
-                idx = arp_pattern[s % len(arp_pattern)]
-                f = note(chord[idx]) * (2 if s % 8 >= 4 else 1)
-                vel = 0.10 + 0.05 * (s % 4 == 0) + rng.random() * 0.03
-                place_at(total, start + s * beat / 2 + rng.random() * 0.008, pluck(f, 1.2, 0.42) * vel)
-            # Sparkle bells now and then
-            for k in range(2):
-                if rng.random() < 0.6:
-                    f = note(chord[rng.integers(2, 5)]) * 4
-                    place_at(total, start + rng.random() * bar * bars_per_chord, bell(f, 2.0, 0.7) * 0.035)
-    wet = reverb(total, 0.42, room=0.88, damp=4200)
-    a = int(loop * SR)
-    seg = wet[a:2 * a]  # the middle loop already contains the previous loop's tail
-    seg = normalize(seg, 0.8)
+def write_ogg(name, stereo):
     os.makedirs(OUT, exist_ok=True)
-    tmp = os.path.join(OUT, "_music.wav")
-    data = (np.clip(seg, -1, 1) * 32767).astype(np.int16)
+    tmp = os.path.join(OUT, name + "_tmp.wav")
+    data = (np.clip(stereo, -1, 1) * 32767).astype(np.int16)
     with wave.open(tmp, "wb") as w:
-        w.setnchannels(1)
+        w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(SR)
-        w.writeframes(data.tobytes())
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp, "-c:a", "libvorbis", "-q:a", "3",
-                    os.path.join(OUT, "music.ogg")], check=True)
+        w.writeframes(data.T.copy().tobytes())
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp, "-c:a", "libvorbis", "-q:a", "4",
+                    os.path.join(OUT, name + ".ogg")], check=True)
     os.remove(tmp)
 
 
-def main():
-    write_wav("pick", sfx_pick(), 0.5)
-    write_wav("place", sfx_place(), 0.8)
-    write_wav("drop_bad", sfx_drop_bad(), 0.55)
-    write_wav("clear", sfx_clear(), 0.75)
-    write_wav("prism", sfx_prism(), 0.8)
-    write_wav("perfect", sfx_perfect(), 0.85)
-    write_wav("deal", sfx_deal(), 0.45)
-    write_wav("gameover", sfx_gameover(), 0.7)
-    write_wav("newbest", sfx_newbest(), 0.8)
-    write_wav("click", sfx_click(), 0.5)
-    write_wav("land", sfx_land(), 0.35)
-    write_wav("combo", sfx_combo(), 0.6)
-    write_wav("whoosh", sfx_whoosh(), 0.4)
-    music()
-    print("audio generated")
+def mtof(m):
+    return 440.0 * 2 ** ((m - 69) / 12.0)
+
+
+# --- sound effects ---------------------------------------------------------------
+
+def sfx():
+    n = int(0.06 * SR)
+    ph = sweep_phase(2200, 1400, n)
+    write_wav("click", np.sin(ph) * expdecay(n, 70) + noise(n) * expdecay(n, 300) * 0.2, 0.6)
+
+    n = int(0.22 * SR)
+    x = highpass(noise(n), 1500) * env(n, 0.01, 0.2) * 0.5
+    ph = sweep_phase(500, 1500, n, 0.6)
+    x += np.sin(ph) * env(n, 0.005, 0.2) * 0.3
+    write_wav("card", x, 0.6)
+
+    n = int(0.35 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([76, 83, 88]):
+        st = int(k * 0.045 * SR)
+        seg = n - st
+        tt = np.arange(seg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * tt) + 0.3 * np.sin(4 * np.pi * mtof(m) * tt)) * expdecay(seg, 9)
+    write_wav("select", x, 0.75)
+
+    n = int(1.0 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([69, 73, 76, 81, 85, 88]):
+        st = int(k * 0.06 * SR)
+        seg = n - st
+        tt = np.arange(seg) / SR
+        tone = np.sin(2 * np.pi * mtof(m) * tt) + 0.4 * np.sin(2 * np.pi * mtof(m + 12) * tt + 0.3)
+        x[st:] += tone * expdecay(seg, 4.0) * (0.8 + 0.04 * k)
+    x += lowpass(noise(n), 6000) * env(n, 0.3, 0.6) * 0.08
+    write_wav("levelup", x, 0.8)
+
+    n = int(0.09 * SR)
+    ph = sweep_phase(1300, 380, n, 0.5)
+    x = square_from_phase(ph, 4) * expdecay(n, 45) * 0.5 + np.sin(ph * 0.5) * expdecay(n, 40) * 0.5
+    write_wav("shoot", lowpass(x, 5000), 0.5)
+
+    n = int(0.05 * SR)
+    x = highpass(noise(n), 2500) * expdecay(n, 120) + np.sin(sweep_phase(900, 500, n)) * expdecay(n, 90) * 0.5
+    write_wav("hit", x, 0.5)
+
+    n = int(0.22 * SR)
+    ph = sweep_phase(700, 120, n, 0.4)
+    x = np.sin(ph) * expdecay(n, 22) * 0.8
+    x += lowpass(noise(n), 4000) * expdecay(n, 30) * 0.7
+    x += np.sin(sweep_phase(2400, 1800, n)) * expdecay(n, 60) * 0.2
+    write_wav("kill", x, 0.7)
+
+    n = int(0.6 * SR)
+    ph = sweep_phase(160, 38, n, 0.5)
+    x = np.sin(ph) * expdecay(n, 7) * 1.0
+    x += lowpass(noise(n), 1800) * expdecay(n, 9) * 0.8
+    x += highpass(noise(n), 3000) * expdecay(n, 25) * 0.3
+    write_wav("kill_big", x, 0.85)
+
+    n = int(0.12 * SR)
+    tt = np.arange(n) / SR
+    x = (np.sin(2 * np.pi * 1568 * tt) + 0.5 * np.sin(2 * np.pi * 2352 * tt)) * expdecay(n, 28)
+    write_wav("gem", x, 0.5)
+
+    n = int(0.4 * SR)
+    ph = sweep_phase(300, 60, n, 0.6)
+    x = saw_from_phase(ph, 10) * expdecay(n, 9)
+    x += lowpass(noise(n), 2500) * expdecay(n, 14) * 0.9
+    write_wav("hurt", lowpass(x, 3000), 0.85)
+
+    n = int(0.8 * SR)
+    x = lowpass(noise(n), 1200) * env(n, 0.02, 0.75) * 1.0
+    x += np.sin(sweep_phase(80, 40, n)) * expdecay(n, 5) * 0.9
+    x += highpass(noise(n), 5000) * env(n, 0.005, 0.3) * 0.25
+    write_wav("nova", x, 0.85)
+
+    n = int(0.28 * SR)
+    sq = np.sign(np.sin(sweep_phase(90, 140, n))) * 0.5
+    crackle = noise(n) * (rng.uniform(0, 1, n) > 0.7)
+    x = (sq * 0.4 + highpass(crackle, 1500) * 0.8) * expdecay(n, 12)
+    write_wav("zap", x, 0.6)
+
+    n = int(0.55 * SR)
+    ph = sweep_phase(1800, 220, n, 0.3)
+    x = saw_from_phase(ph, 8) * expdecay(n, 6) * 0.6
+    x += np.sin(sweep_phase(110, 55, n)) * expdecay(n, 5) * 0.8
+    write_wav("lance", lowpass(x, 6000), 0.8)
+
+    n = int(0.25 * SR)
+    x = highpass(noise(n), 1200) * env(n, 0.03, 0.22) * 0.6
+    x += np.sin(sweep_phase(300, 700, n)) * env(n, 0.01, 0.22) * 0.3
+    write_wav("missile", x, 0.5)
+
+    n = int(0.7 * SR)
+    x = np.sin(sweep_phase(120, 35, n, 0.4)) * expdecay(n, 6)
+    x += lowpass(noise(n), 1500) * expdecay(n, 7) * 1.1
+    write_wav("boom", x, 0.85)
+
+    n = int(1.6 * SR)
+    tt = np.arange(n) / SR
+    f = np.where((tt * 2.5) % 1.0 < 0.5, 660.0, 520.0)
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    x = square_from_phase(ph, 5) * env(n, 0.02, 0.1, 0.8, 0.3, 1.1) * 0.5
+    x += np.sin(sweep_phase(55, 50, n)) * env(n, 0.1, 0.1, 0.9, 0.4, 1.0) * 0.6
+    write_wav("alarm", lowpass(x, 4000), 0.75)
+
+    n = int(2.4 * SR)
+    x = np.sin(sweep_phase(90, 25, n, 0.5)) * expdecay(n, 1.8) * 1.0
+    x += lowpass(noise(n), 900) * expdecay(n, 2.2) * 1.2
+    x += highpass(noise(n), 2500) * expdecay(n, 6) * 0.3
+    for m in [57, 64, 69, 76]:
+        tt = np.arange(n) / SR
+        x += np.sin(2 * np.pi * mtof(m) * tt) * env(n, 0.4, 0.2, 0.6, 1.5, 0.2) * 0.12
+    write_wav("boss_down", x, 0.9)
+
+    n = int(0.45 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([84, 88, 91, 96]):
+        st = int(k * 0.035 * SR)
+        tt = np.arange(n - st) / SR
+        x[st:] += np.sin(2 * np.pi * mtof(m) * tt) * expdecay(n - st, 10)
+    write_wav("pickup", x, 0.6)
+
+    n = int(1.8 * SR)
+    x = np.zeros(n)
+    tt = np.arange(n) / SR
+    for m in [57, 64, 69, 73, 76]:
+        x += np.sin(2 * np.pi * mtof(m) * tt) * env(n, 0.3, 0.2, 0.7, 1.0, 0.3)
+    x += highpass(noise(n), 4000) * env(n, 0.6, 0.6) * 0.3
+    x += np.sin(sweep_phase(60, 120, n)) * env(n, 0.5, 1.2) * 0.4
+    write_wav("revive", x, 0.85)
+
+    n = int(3.0 * SR)
+    x = np.zeros(n)
+    for k, chord in enumerate([[57, 64, 69, 72], [53, 60, 65, 69], [55, 62, 67, 71], [57, 64, 69, 73, 76]]):
+        st = int(k * 0.5 * SR)
+        seg = n - st
+        tt = np.arange(seg) / SR
+        dur = 0.6 if k < 3 else 2.4
+        e = env(seg, 0.02, 0.1, 0.7, 0.6 if k == 3 else 0.15, dur - 0.2)
+        for m in chord:
+            x[st:] += saw_from_phase(2 * np.pi * mtof(m) * tt, 6) * e * 0.25
+    write_wav("win", lowpass(x, 3500), 0.85)
+
+    n = int(2.2 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([69, 65, 62, 57]):
+        st = int(k * 0.32 * SR)
+        seg = n - st
+        tt = np.arange(seg) / SR
+        x[st:] += saw_from_phase(2 * np.pi * mtof(m) * tt, 6) * expdecay(seg, 2.5) * 0.4
+    x += np.sin(sweep_phase(110, 30, n)) * expdecay(n, 1.5) * 0.6
+    write_wav("lose", lowpass(x, 2200), 0.85)
+
+    n = int(0.9 * SR)
+    x = highpass(noise(n), 600) * env(n, 0.5, 0.35) * 0.5
+    x += np.sin(sweep_phase(200, 900, n, 1.5)) * env(n, 0.4, 0.45) * 0.4
+    write_wav("wave", x, 0.7)
+
+    n = int(0.4 * SR)
+    x = highpass(noise(n), 2000) * env(n, 0.25, 0.12) * 0.6
+    x += np.sin(sweep_phase(400, 1200, n, 2.0)) * env(n, 0.3, 0.1) * 0.3
+    write_wav("dash", x, 0.55)
+
+    n = int(0.5 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([72, 79, 84, 91]):
+        st = int(k * 0.05 * SR)
+        tt = np.arange(n - st) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * tt) + 0.3 * np.sin(2 * np.pi * mtof(m) * 3 * tt)) * expdecay(n - st, 8)
+    write_wav("buy", x, 0.7)
+
+
+# --- music -----------------------------------------------------------------------
+
+def place(buf, x, start):
+    start = int(start)
+    end = start + x.shape[-1]
+    if end <= buf.shape[-1]:
+        buf[..., start:end] += x
+    else:
+        cut = buf.shape[-1] - start
+        buf[..., start:] += x[..., :cut]
+        buf[..., :end - buf.shape[-1]] += x[..., cut:]  # wrap the tail for a seamless loop
+
+
+def pan(x, p):
+    return np.stack([x * (1 - p) ** 0.5, x * (1 + p) ** 0.5]) * 0.7071
+
+
+def kick():
+    n = int(0.35 * SR)
+    return np.sin(sweep_phase(150, 42, n, 0.25)) * expdecay(n, 9) + noise(n) * expdecay(n, 200) * 0.15
+
+
+def snare():
+    n = int(0.25 * SR)
+    return highpass(noise(n), 1200) * expdecay(n, 16) * 0.8 + np.sin(sweep_phase(260, 180, n)) * expdecay(n, 25) * 0.4
+
+
+def hat(open_=False):
+    n = int((0.22 if open_ else 0.05) * SR)
+    return highpass(noise(n), 7000) * expdecay(n, 14 if open_ else 80)
+
+
+def pluck(m, dur, bright=3500.0):
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    ph = 2 * np.pi * mtof(m) * tt
+    x = saw_from_phase(ph, 14) + 0.5 * saw_from_phase(ph * 1.005, 14)
+    return lowpass(x * expdecay(n, 7), bright)
+
+
+def pad(chord, dur):
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for m in chord:
+        for det in (-0.12, 0.0, 0.12):
+            f = mtof(m + det)
+            x += saw_from_phase(2 * np.pi * f * tt + rng.uniform(0, 6), 8)
+    x = lowpass(x, 1400) * env(n, dur * 0.25, 0.1, 1.0, dur * 0.35, dur * 0.3)
+    return x / len(chord)
+
+
+def bass(m, dur):
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(2 * np.pi * mtof(m) * tt) + 0.35 * saw_from_phase(2 * np.pi * mtof(m) * tt, 5)
+    return lowpass(x, 700) * env(n, 0.005, 0.08, 0.7, 0.05, dur - 0.15)
+
+
+def music():
+    bpm = 128.0
+    beat = 60.0 / bpm
+    bars = 16
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    drive = np.zeros((2, n))
+    prog = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]  # Am F C G
+    roots = [45, 41, 48, 43]
+    arps = [[69, 72, 76, 81], [65, 69, 72, 77], [67, 72, 76, 79], [67, 71, 74, 79]]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        if bar % 2 == 0:
+            place(base, pan(pad(prog[c], 8 * beat), 0.0) * 0.32, t0 * SR)
+        for e in range(8):
+            place(base, pan(bass(roots[c] if e % 2 == 0 else roots[c] + 12, beat * 0.5), 0.0) * 0.38,
+                  (t0 + e * beat * 0.5) * SR)
+        for e in range(8):
+            place(base, pan(hat(), 0.3) * 0.08, (t0 + e * beat * 0.5 + beat * 0.25) * SR)
+        for b in range(4):
+            place(drive, pan(kick(), 0.0) * 0.7, (t0 + b * beat) * SR)
+            if b % 2 == 1:
+                place(drive, pan(snare(), -0.1) * 0.42, (t0 + b * beat) * SR)
+            place(drive, pan(hat(True), 0.25) * 0.12, (t0 + b * beat + beat * 0.5) * SR)
+        for s in range(16):
+            m = arps[c][(s * 3 + bar) % 4] + (12 if s % 8 == 7 else 0)
+            place(drive, pan(pluck(m, beat * 0.5, 2500 + 1500 * (s % 4 == 0)), 0.35 if s % 2 else -0.35) * 0.14,
+                  (t0 + s * beat * 0.25) * SR)
+    write_ogg("music_run", norm(base, 0.7))
+    write_ogg("music_drive", norm(drive, 0.75))
+
+    # Menu: slow, wide, shimmering.
+    bar_d = 4.0
+    bars = 8
+    n = int(bars * bar_d * SR)
+    menu = np.zeros((2, n))
+    prog = [[57, 64, 69, 72], [53, 60, 65, 69], [48, 55, 60, 64], [52, 59, 64, 67]]
+    for bar in range(bars):
+        c = bar % 4
+        t0 = bar * bar_d
+        place(menu, pan(pad(prog[c], bar_d * 1.6), 0.0) * 0.4, t0 * SR)
+        place(menu, pan(bass(prog[c][0] - 12, bar_d), 0.0) * 0.25, t0 * SR)
+        for s in range(8):
+            m = prog[c][(s * 5 + bar) % 4] + 12
+            place(menu, pan(pluck(m, 1.2, 2000), 0.6 if s % 2 else -0.6) * 0.07, (t0 + s * bar_d / 8) * SR)
+    write_ogg("music_menu", norm(menu, 0.65))
 
 
 if __name__ == "__main__":
-    main()
+    sfx()
+    music()
+    print("audio ok")

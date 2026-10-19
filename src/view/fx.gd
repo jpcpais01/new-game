@@ -1,248 +1,254 @@
 class_name Fx
 extends Node2D
-## Particle and text effects: shards, sparks, glows, shock rings, light beams,
-## floating score text, banners and confetti. Visual only.
-##
-## Two canvases: one additive (light) and one normal-blended (solid things
-## and text), so glows add up like real light while text stays crisp.
+## Cosmetic effects in world space, drawn additively: particles, shockwave
+## rings, flashes, beams, lightning, dash warnings. Damage numbers live on a
+## child with normal blending. View-only: free to use randf().
 
-var _add_items: Array = []
-var _norm_items: Array = []
-var _add: Node2D
-var _norm: Node2D
-var _font: Font
+const MAXP := 2200
+const MAX_NUMBERS := 70
+
+var pn := 0
+var p_x := PackedFloat32Array()
+var p_y := PackedFloat32Array()
+var p_vx := PackedFloat32Array()
+var p_vy := PackedFloat32Array()
+var p_life := PackedFloat32Array()
+var p_max := PackedFloat32Array()
+var p_size := PackedFloat32Array()
+var p_drag := PackedFloat32Array()
+var p_col := PackedColorArray()
+var p_kind := PackedByteArray()  # 0 dot, 1 streak
+
+var rings: Array = []
+var flashes: Array = []
+var beams: Array = []
+var arcs: Array = []
+var warns: Array = []
+var numbers: Array = []
+
+var _spark: Texture2D
+var _streak: Texture2D
+var _ring: Texture2D
+var _glow: Texture2D
+var _beam: Texture2D
+var _disc: Texture2D
+var _text_layer: Node2D
 
 
 func _ready() -> void:
-	_font = Art.font_bold()
-	_norm = _FxCanvas.new()
-	_norm.owner_fx = self
-	_norm.additive = false
-	add_child(_norm)
-	_add = _FxCanvas.new()
-	_add.owner_fx = self
-	_add.additive = true
 	var mat := CanvasItemMaterial.new()
 	mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
-	_add.material = mat
-	add_child(_add)
+	material = mat
+	p_x.resize(MAXP); p_y.resize(MAXP); p_vx.resize(MAXP); p_vy.resize(MAXP); p_life.resize(MAXP)
+	p_max.resize(MAXP); p_size.resize(MAXP); p_drag.resize(MAXP); p_col.resize(MAXP); p_kind.resize(MAXP)
+	_spark = Art.tex("spark")
+	_streak = Art.tex("streak")
+	_ring = Art.tex("ring")
+	_glow = Art.tex("glow")
+	_beam = Art.tex("beam")
+	_disc = Art.tex("disc")
+	_text_layer = Node2D.new()
+	_text_layer.z_index = 5
+	_text_layer.draw.connect(_draw_numbers)
+	add_child(_text_layer)
 
 
-func clear_all() -> void:
-	_add_items.clear()
-	_norm_items.clear()
+func clear() -> void:
+	pn = 0
+	rings.clear()
+	flashes.clear()
+	beams.clear()
+	arcs.clear()
+	warns.clear()
+	numbers.clear()
 
 
-# ------------------------------------------------------------------ emit --
+# --- emitters ---------------------------------------------------------------------
 
-func shards(pos: Vector2, color: int, count: int, power := 1.0, cell := 100.0) -> void:
-	for i in count:
-		var ang := randf() * TAU
-		var spd := randf_range(250.0, 820.0) * power
-		_norm_items.append({
-			"type": "shard", "pos": pos + Vector2(randf_range(-0.3, 0.3), randf_range(-0.3, 0.3)) * cell,
-			"vel": Vector2(cos(ang), sin(ang)) * spd + Vector2(0, -380.0 * power),
-			"rot": randf() * TAU, "rv": randf_range(-9.0, 9.0),
-			"size": cell * randf_range(0.16, 0.32), "color": color,
-			"life": 0.0, "max": randf_range(0.55, 0.95),
-		})
-
-
-func sparks(pos: Vector2, col: Color, count: int, power := 1.0) -> void:
-	for i in count:
-		var ang := randf() * TAU
-		var spd := randf_range(120.0, 640.0) * power
-		_add_items.append({
-			"type": "spark", "pos": pos, "vel": Vector2(cos(ang), sin(ang)) * spd,
-			"size": randf_range(26.0, 70.0) * power, "color": col,
-			"life": 0.0, "max": randf_range(0.35, 0.8), "rot": randf() * TAU,
-		})
-
-
-func glow(pos: Vector2, col: Color, size: float, life := 0.5) -> void:
-	_add_items.append({"type": "glow", "pos": pos, "size": size, "color": col, "life": 0.0, "max": life})
-
-
-func ring(pos: Vector2, col: Color, r0: float, r1: float, life := 0.55) -> void:
-	_add_items.append({"type": "ring", "pos": pos, "r0": r0, "r1": r1, "color": col, "life": 0.0, "max": life})
-
-
-func beam(center: Vector2, horizontal: bool, length: float, thickness: float, col: Color, delay := 0.0, rainbow := false) -> void:
-	_add_items.append({"type": "beam", "pos": center, "h": horizontal, "len": length, "th": thickness,
-			"color": col, "life": -delay, "max": 0.55, "rainbow": rainbow})
-
-
-func text(pos: Vector2, msg: String, size: int, col: Color, kind := "pop", life := 1.0, delay := 0.0) -> void:
-	_norm_items.append({"type": "text", "pos": pos, "text": msg, "size": size, "color": col,
-			"kind": kind, "life": -delay, "max": life})
-
-
-func confetti(origin: Vector2, count: int, spread := 900.0) -> void:
-	for i in count:
-		var ang := randf_range(-PI * 0.92, -PI * 0.08)
-		var spd := randf_range(700.0, 1700.0)
-		_norm_items.append({
-			"type": "confetti", "pos": origin + Vector2(randf_range(-spread, spread) * 0.15, 0),
-			"vel": Vector2(cos(ang), sin(ang)) * spd, "rot": randf() * TAU, "rv": randf_range(-12.0, 12.0),
-			"size": Vector2(randf_range(14.0, 24.0), randf_range(26.0, 42.0)),
-			"color": PrismPalette.gem(1 + randi() % PrismPieces.COLORS).lightened(0.15),
-			"life": 0.0, "max": randf_range(1.6, 2.6), "phase": randf() * TAU,
-		})
-
-
-# ---------------------------------------------------------------- update --
-
-func _process(delta: float) -> void:
-	_step(_add_items, delta)
-	_step(_norm_items, delta)
-	_add.queue_redraw()
-	_norm.queue_redraw()
-
-
-func _step(items: Array, delta: float) -> void:
-	var i := items.size() - 1
-	while i >= 0:
-		var p: Dictionary = items[i]
-		p.life += delta
-		if p.life >= p.max:
-			items.remove_at(i)
-			i -= 1
-			continue
-		if p.life >= 0.0:
-			match p.type:
-				"shard":
-					p.vel.y += 2600.0 * delta
-					p.vel *= 1.0 - 0.6 * delta
-					p.pos += p.vel * delta
-					p.rot += p.rv * delta
-				"spark":
-					p.vel *= 1.0 - 3.2 * delta
-					p.pos += p.vel * delta
-				"confetti":
-					p.vel.y += 1500.0 * delta
-					p.vel *= 1.0 - 1.9 * delta
-					p.pos += p.vel * delta + Vector2(sin(p.life * 6.0 + p.phase) * 90.0 * delta, 0)
-					p.rot += p.rv * delta
-		i -= 1
-
-
-# ------------------------------------------------------------------ draw --
-
-func _draw_items(canvas: Node2D, additive: bool) -> void:
-	var items := _add_items if additive else _norm_items
-	for p in items:
-		if p.life < 0.0:
-			continue
-		var t: float = p.life / p.max
-		match p.type:
-			"shard":
-				var a := 1.0 - t * t
-				canvas.draw_set_transform(p.pos, p.rot, Vector2.ONE)
-				var s: float = p.size * (1.0 - t * 0.5)
-				canvas.draw_texture_rect(Art.gem(p.color), Rect2(-s / 2, -s / 2, s, s), false, Color(1, 1, 1, a))
-			"spark":
-				var c: Color = p.color
-				c.a = (1.0 - t) * 0.9
-				var s: float = p.size * (1.0 - t * 0.6)
-				canvas.draw_set_transform(p.pos, p.rot, Vector2.ONE)
-				canvas.draw_texture_rect(Art.spark(), Rect2(-s / 2, -s / 2, s, s), false, c)
-			"glow":
-				var c: Color = p.color
-				c.a = (1.0 - t) * (1.0 - t) * c.a
-				var s: float = p.size * (0.7 + t * 0.6)
-				canvas.draw_set_transform(p.pos, 0.0, Vector2.ONE)
-				canvas.draw_texture_rect(Art.glow(), Rect2(-s / 2, -s / 2, s, s), false, c)
-			"ring":
-				var c: Color = p.color
-				var e := 1.0 - pow(1.0 - t, 3.0)
-				c.a = (1.0 - t) * c.a
-				var r: float = lerpf(p.r0, p.r1, e)
-				canvas.draw_set_transform(p.pos, 0.0, Vector2.ONE)
-				canvas.draw_texture_rect(Art.ring(), Rect2(-r, -r, r * 2, r * 2), false, c)
-			"beam":
-				var c: Color = p.color
-				if p.rainbow:
-					c = PrismPalette.rainbow(t * 0.8 + p.pos.x * 0.001 + p.pos.y * 0.001, 0.55)
-				var fade := 1.0 - t
-				c.a = fade * fade
-				var th: float = p.th * (1.6 - t * 1.1)
-				var ln: float = p.len * (0.5 + 0.5 * minf(1.0, t * 5.0)) + 60.0
-				canvas.draw_set_transform(p.pos, 0.0 if p.h else PI / 2, Vector2.ONE)
-				canvas.draw_texture_rect(Art.beam(), Rect2(-ln / 2, -th / 2, ln, th), false, c)
-				canvas.draw_texture_rect(Art.beam(), Rect2(-ln / 2, -th / 6, ln, th / 3), false, Color(1, 1, 1, c.a))
-			"text":
-				_draw_text(canvas, p, t)
-			"confetti":
-				var c: Color = p.color
-				c.a = minf(1.0, (1.0 - t) * 3.0)
-				var flip := absf(sin(p.life * 9.0 + p.phase))
-				canvas.draw_set_transform(p.pos, p.rot, Vector2(1.0, 0.25 + flip * 0.75))
-				var sz: Vector2 = p.size
-				canvas.draw_rect(Rect2(-sz / 2, sz), c)
-	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-func _draw_text(canvas: Node2D, p: Dictionary, t: float) -> void:
-	var sc := 1.0
-	var alpha := 1.0
-	var offset := 0.0
-	match p.kind:
-		"pop":
-			sc = 0.6 + 0.5 * _back_out(minf(1.0, t * 5.0))
-			offset = -150.0 * _ease_out(t)
-			alpha = 1.0 - smoothstep(0.65, 1.0, t)
-		_:
-			sc = _elastic_out(minf(1.0, t * 2.4)) * (1.0 + 0.06 * t)
-			offset = -40.0 * t
-			alpha = 1.0 - smoothstep(0.78, 1.0, t)
-	if sc <= 0.01:
-		return
-	var size: int = p.size
-	var msg: String = p.text
-	var w := _font.get_string_size(msg, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	canvas.draw_set_transform(p.pos + Vector2(0, offset), 0.0, Vector2(sc, sc))
-	var base := Vector2(-w / 2.0, size * 0.36)
-	var outline := maxi(6, size / 7)
-	var oc := Color(0.05, 0.03, 0.14, 0.85 * alpha)
-	if p.kind == "rainbow":
-		var x := base.x
-		for i in msg.length():
-			var ch := msg.unicode_at(i)
-			var cw := _font.get_char_size(ch, size).x
-			var col := PrismPalette.rainbow(p.life * 1.4 + i * 0.09, 0.62)
-			col.a = alpha
-			canvas.draw_char_outline(_font, Vector2(x, base.y), msg[i], size, outline, oc)
-			canvas.draw_char(_font, Vector2(x, base.y), msg[i], size, col)
-			x += cw
+func particle(x: float, y: float, vx: float, vy: float, life: float, size: float, col: Color, kind := 0,
+		drag := 3.0) -> void:
+	var i := pn
+	if pn >= MAXP:
+		i = randi() % MAXP
 	else:
-		var col: Color = p.color
-		col.a *= alpha
-		canvas.draw_string_outline(_font, base, msg, HORIZONTAL_ALIGNMENT_LEFT, -1, size, outline, oc)
-		canvas.draw_string(_font, base, msg, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+		pn += 1
+	p_x[i] = x
+	p_y[i] = y
+	p_vx[i] = vx
+	p_vy[i] = vy
+	p_life[i] = life
+	p_max[i] = life
+	p_size[i] = size
+	p_drag[i] = drag
+	p_col[i] = col
+	p_kind[i] = kind
 
 
-static func _ease_out(t: float) -> float:
-	return 1.0 - pow(1.0 - t, 3.0)
+## Radial burst of streak sparks and soft dots.
+func burst(x: float, y: float, col: Color, n: int, speed: float, size := 1.0, life := 0.5) -> void:
+	for k in n:
+		var a := randf() * TAU
+		var s := speed * (0.35 + randf() * 0.9)
+		particle(x, y, cos(a) * s, sin(a) * s, life * (0.6 + randf() * 0.6), size * (0.7 + randf() * 0.6),
+				col, 1, 4.0)
+	for k in n / 2:
+		var a := randf() * TAU
+		var s := speed * 0.35 * randf()
+		particle(x, y, cos(a) * s, sin(a) * s, life * 1.4 * (0.6 + randf() * 0.5), size * (1.4 + randf()),
+				col, 0, 2.5)
 
 
-static func _back_out(t: float) -> float:
-	var c1 := 1.70158
-	var c3 := c1 + 1.0
-	return 1.0 + c3 * pow(t - 1.0, 3.0) + c1 * pow(t - 1.0, 2.0)
+## Sparks sprayed in a cone around `ang` (radians).
+func spray(x: float, y: float, col: Color, n: int, ang: float, spread: float, speed: float, size := 0.8,
+		life := 0.3) -> void:
+	for k in n:
+		var a := ang + (randf() - 0.5) * spread
+		var s := speed * (0.4 + randf() * 0.8)
+		particle(x, y, cos(a) * s, sin(a) * s, life * (0.6 + randf() * 0.6), size, col, 1, 5.0)
 
 
-static func _elastic_out(t: float) -> float:
-	if t <= 0.0:
-		return 0.0
-	if t >= 1.0:
-		return 1.0
-	return pow(2.0, -10.0 * t) * sin((t * 10.0 - 0.75) * (2.0 * PI / 3.0)) + 1.0
+func ring(x: float, y: float, r0: float, r1: float, dur: float, col: Color, width := 1.0) -> void:
+	rings.append({"x": x, "y": y, "r0": r0, "r1": r1, "t": 0.0, "d": dur, "c": col, "w": width})
 
 
-class _FxCanvas:
-	extends Node2D
-	var owner_fx: Fx
-	var additive := false
+func flash(x: float, y: float, r: float, dur: float, col: Color) -> void:
+	flashes.append({"x": x, "y": y, "r": r, "t": 0.0, "d": dur, "c": col})
 
-	func _draw() -> void:
-		owner_fx._draw_items(self, additive)
+
+func beam(a: Vector2, b: Vector2, w: float, col: Color, dur := 0.28) -> void:
+	beams.append({"a": a, "b": b, "w": w, "t": 0.0, "d": dur, "c": col})
+
+
+func arc(pts: PackedVector2Array, col: Color, dur := 0.22) -> void:
+	arcs.append({"p": pts, "t": 0.0, "d": dur, "c": col})
+
+
+func warn(x: float, y: float, ang: float, length: float, dur: float) -> void:
+	warns.append({"x": x, "y": y, "a": ang, "l": length, "t": 0.0, "d": dur})
+
+
+func number(x: float, y: float, value: float, crit: bool) -> void:
+	if numbers.size() >= MAX_NUMBERS:
+		numbers.pop_front()
+	numbers.append({"x": x + randf_range(-10, 10), "y": y - 10.0, "v": str(int(ceil(value))), "t": 0.0,
+		"d": 0.75 if crit else 0.55, "crit": crit, "vx": randf_range(-40, 40)})
+
+
+# --- update -----------------------------------------------------------------------
+
+func update_fx(delta: float) -> void:
+	var i := 0
+	while i < pn:
+		p_life[i] -= delta
+		if p_life[i] <= 0.0:
+			pn -= 1
+			p_x[i] = p_x[pn]; p_y[i] = p_y[pn]; p_vx[i] = p_vx[pn]; p_vy[i] = p_vy[pn]
+			p_life[i] = p_life[pn]; p_max[i] = p_max[pn]; p_size[i] = p_size[pn]; p_drag[i] = p_drag[pn]
+			p_col[i] = p_col[pn]; p_kind[i] = p_kind[pn]
+			continue
+		var k := maxf(0.0, 1.0 - p_drag[i] * delta)
+		p_vx[i] *= k
+		p_vy[i] *= k
+		p_x[i] += p_vx[i] * delta
+		p_y[i] += p_vy[i] * delta
+		i += 1
+	for list in [rings, flashes, beams, arcs, warns, numbers]:
+		var j: int = list.size() - 1
+		while j >= 0:
+			list[j].t += delta
+			if list[j].t >= list[j].d:
+				list.remove_at(j)
+			j -= 1
+	for n in numbers:
+		n.y -= 70.0 * delta
+		n.x += n.vx * delta
+	queue_redraw()
+	_text_layer.queue_redraw()
+
+
+# --- drawing ----------------------------------------------------------------------
+
+func _draw() -> void:
+	for f in flashes:
+		var k: float = f.t / f.d
+		var a := (1.0 - k) * (1.0 - k)
+		var r: float = f.r * (0.6 + 0.6 * k)
+		draw_texture_rect(_glow, Rect2(f.x - r, f.y - r, r * 2.0, r * 2.0), false, Color(f.c, a))
+	for g in rings:
+		var k: float = g.t / g.d
+		var e := 1.0 - pow(1.0 - k, 3.0)
+		var r: float = lerpf(g.r0, g.r1, e)
+		var s := r / 110.0 * 256.0
+		var a := (1.0 - k)
+		draw_texture_rect(_disc, Rect2(g.x - s * 0.5, g.y - s * 0.5, s, s), false, Color(g.c, a * 0.22 * g.w))
+		draw_texture_rect(_ring, Rect2(g.x - s * 0.5, g.y - s * 0.5, s, s), false, Color(g.c, a * g.w))
+	for b in beams:
+		var k: float = b.t / b.d
+		var a: Vector2 = b.a
+		var bb: Vector2 = b.b
+		var dir := (bb - a)
+		var length := dir.length()
+		var w: float = b.w * (1.0 + 2.2 * (1.0 - k)) * (1.0 - k * 0.5)
+		draw_set_transform(a, dir.angle(), Vector2.ONE)
+		var col: Color = b.c
+		draw_texture_rect(_beam, Rect2(0, -w * 1.6, length, w * 3.2), false, Color(col, (1.0 - k) * 0.7))
+		draw_texture_rect(_beam, Rect2(0, -w * 0.45, length, w * 0.9), false,
+				Color(1.6, 1.6, 1.6, (1.0 - k)))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	for a in arcs:
+		var k: float = a.t / a.d
+		var pts: PackedVector2Array = a.p
+		var jag := PackedVector2Array()
+		for s in pts.size() - 1:
+			var p0 := pts[s]
+			var p1 := pts[s + 1]
+			var n := (p1 - p0).orthogonal().normalized()
+			jag.append(p0)
+			for m in range(1, 6):
+				var tt := m / 6.0
+				jag.append(p0.lerp(p1, tt) + n * randf_range(-16.0, 16.0))
+		jag.append(pts[pts.size() - 1])
+		var col: Color = a.c
+		draw_polyline(jag, Color(col, (1.0 - k) * 0.45), 14.0)
+		draw_polyline(jag, Color(col * 1.6, 1.0 - k), 5.0)
+		draw_polyline(jag, Color(1.8, 1.8, 2.0, 1.0 - k), 2.0)
+	for w in warns:
+		var k: float = w.t / w.d
+		var blink := 0.45 + 0.55 * absf(sin(k * 18.0))
+		var dir := Vector2(cos(w.a), sin(w.a))
+		var p0 := Vector2(w.x, w.y)
+		var p1: Vector2 = p0 + dir * w.l
+		draw_line(p0, p1, Color(1.0, 0.25, 0.3, 0.16 * blink), 26.0)
+		draw_line(p0, p1, Color(1.0, 0.3, 0.35, 0.7 * blink), 3.0)
+		draw_circle(p1, 10.0, Color(1.0, 0.3, 0.35, 0.6 * blink))
+	for i in pn:
+		var life := p_life[i] / p_max[i]
+		var c := p_col[i]
+		c.a = life
+		var sz := p_size[i]
+		if p_kind[i] == 1:
+			var vx := p_vx[i]
+			var vy := p_vy[i]
+			var sp := sqrt(vx * vx + vy * vy)
+			var length := clampf(sp * 0.05, 6.0, 44.0) * sz
+			draw_set_transform(Vector2(p_x[i], p_y[i]), atan2(vy, vx), Vector2.ONE)
+			draw_texture_rect(_streak, Rect2(-length, -5.0 * sz, length, 10.0 * sz), false, c)
+		else:
+			var r := 14.0 * sz * (0.4 + 0.6 * life)
+			draw_set_transform(Vector2(p_x[i], p_y[i]), 0.0, Vector2.ONE)
+			draw_texture_rect(_spark, Rect2(-r, -r, r * 2.0, r * 2.0), false, c)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_numbers() -> void:
+	var font := UiKit.display()
+	for n in numbers:
+		var k: float = n.t / n.d
+		var pop := 1.0 + 0.6 * maxf(0.0, 1.0 - k * 6.0)
+		var size := int((40.0 if n.crit else 26.0) * pop)
+		var col := Color(1.0, 0.85, 0.3) if n.crit else Color(1, 1, 1)
+		col.a = 1.0 - k * k
+		var pos := Vector2(n.x - 60.0, n.y)
+		_text_layer.draw_string_outline(font, pos, n.v, HORIZONTAL_ALIGNMENT_CENTER, 120.0, size, 6,
+				Color(0.05, 0.0, 0.1, col.a * 0.85))
+		_text_layer.draw_string(font, pos, n.v, HORIZONTAL_ALIGNMENT_CENTER, 120.0, size, col)
