@@ -405,6 +405,60 @@ MOD_ICONS = {
 }
 
 
+# Round 6: the Ion Scythe, Photon Mines, their evolutions and the relics.
+def arc_pts(r, a0, a1, steps=16):
+    return [(r * math.cos(a), r * math.sin(a)) for a in np.linspace(a0, a1, steps)]
+
+
+ARSENAL_ICONS = {
+    "scythe": ([[(x * 0.95 + 0.05, y * 0.95) for x, y in crescent(0.95, 0.78, 0.38)]],
+               [[(-0.95, 0.75), (-0.25, 0.05)]], (0.5, 1.0, 0.8)),
+    "mine": ([regular(6, 0.62, math.pi / 6), regular(16, 0.2)], rays(6, 0.7, 0.98), (1.0, 0.45, 0.55)),
+}
+ARSENAL_EVO = {
+    "scythe_evo": ([crescent(0.95, 0.7, 0.36), [(-x, -y) for x, y in crescent(0.62, 0.44, 0.24)]], [],
+                   (0.6, 1.0, 0.9)),
+}
+STAR_PTS = [(-0.8, -0.55), (-0.15, -0.8), (0.55, -0.35), (0.3, 0.45), (-0.5, 0.7)]
+RELIC_ICONS = {
+    "halo": ([regular(36, 0.42)], [arc_pts(0.88, -2.7, -0.44, 18), [(0.0, -0.1), (0.0, 0.2)]],
+             (1.0, 0.92, 0.55)),
+    "wake": ([[(0.95, 0.0), (0.45, 0.32), (0.55, 0.0), (0.45, -0.32)]],
+             [[(0.3, 0.0), (-0.15, 0.25), (-0.5, -0.2), (-0.95, 0.15)],
+              [(0.25, 0.42), (-0.25, 0.62), (-0.7, 0.45)], [(0.25, -0.42), (-0.25, -0.62), (-0.7, -0.45)]],
+             (0.4, 0.95, 1.0)),
+    "starbreaker": ([star(4, 0.95, 0.22, -math.pi / 2)], rays(4, 0.35, 0.7, -math.pi / 4), (1.0, 0.5, 0.3)),
+    "supercrit": ([star(6, 0.95, 0.5, -math.pi / 2), star(6, 0.42, 0.22, -math.pi / 2)], [], (1.0, 0.85, 0.35)),
+    "overcharge": ([regular(36, 0.9)], [[(0.12, -0.62), (-0.3, 0.06), (0.06, 0.06), (-0.1, 0.62)]],
+                   (0.35, 0.95, 1.0)),
+    "phoenix": ([[(0.0, -0.95), (0.25, -0.3), (0.95, -0.55), (0.45, 0.15), (0.6, 0.85), (0.0, 0.45),
+                  (-0.6, 0.85), (-0.45, 0.15), (-0.95, -0.55), (-0.25, -0.3)]], [], (1.0, 0.45, 0.3)),
+    "midas": ([regular(32, 0.9), [(x * 0.5, y * 0.5) for x, y in GEM]], [], (1.0, 0.78, 0.3)),
+    "wrath": ([crescent(0.95, 0.74, 0.34)], [[(-0.15, -0.35), (0.05, 0.0), (-0.15, 0.35)]], (1.0, 0.3, 0.45)),
+}
+
+
+def arsenal_sprites():
+    for name, (shapes, lines, col) in ARSENAL_ICONS.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.6, glow=6.5, fill=0.3, lines=lines), "i_" + name)
+    for name, (shapes, lines, col) in ARSENAL_EVO.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.38, lines=lines, core_white=0.7),
+             "i_" + name)
+    # Constellation: a little star chart (dots on a path).
+    dots = [[(cx + x, cy + y) for x, y in regular(10, 0.13)] for cx, cy in STAR_PTS]
+    save(neon(dots, (1.0, 0.6, 0.4), size=96, radius=34, line=3.8, glow=8.0, fill=0.6, lines=[STAR_PTS],
+              core_white=0.7), "i_mine_evo")
+    for name, (shapes, lines, col) in RELIC_ICONS.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
+             "i_" + name)
+    # World sprite for a mine: white so the view can tint it (armed or not).
+    save(neon([regular(6, 0.9, math.pi / 6), regular(16, 0.3)], (1, 1, 1), size=64, radius=24, line=2.6, glow=5,
+              fill=0.4, core_white=1.0, lines=rays(6, 0.45, 0.7)), "mine")
+    # The first elite's cache: a violet cube holding a relic.
+    save(neon([CUBE, star(4, 0.4, 0.16, -math.pi / 2)], (0.75, 0.5, 1.0), size=96, radius=34, line=3.8, glow=9,
+              fill=0.5, lines=CUBE_LINES), "p_relicchest")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -475,6 +529,10 @@ if __name__ == "__main__":
         enemy_sprites()
         print("enemy sprites ok")
         sys.exit(0)
+    if "--arsenal" in sys.argv:
+        arsenal_sprites()
+        print("arsenal art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -485,5 +543,6 @@ if __name__ == "__main__":
     icons()
     ship_sprites()
     mod_icons()
+    arsenal_sprites()
     app_icon()
     print("art ok")

@@ -147,6 +147,12 @@ func _evolutions() -> void:
 		var fresh: bool = beat.has(w.id)
 		cell.add_child(UiKit.label("NEW" if fresh else "EVOLVED", 20, UiKit.GOLD if fresh else UiKit.DIM, UiKit.display()))
 		row.add_child(cell)
+	for id in sim.relics:
+		var rc := VBoxContainer.new()
+		rc.add_theme_constant_override("separation", 0)
+		rc.add_child(UiKit.icon_rect(id, 84))
+		rc.add_child(UiKit.label("RELIC", 18, Defs.RELICS[id].color, UiKit.display()))
+		row.add_child(rc)
 	if row.get_child_count() == 0:
 		row.free()
 		return

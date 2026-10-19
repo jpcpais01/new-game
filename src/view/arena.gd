@@ -16,6 +16,7 @@ signal chest_opened(rewards: Array, big: bool)
 signal overdrive_ready
 signal chain_milestone(count: int, title: String)
 signal chain_lost(count: int)
+signal relic_taken(id: String)
 
 const TICK := 1.0 / 60.0
 
@@ -53,6 +54,9 @@ var _end_timer := -1.0
 var _cam_pos := Vector2.ZERO
 var _danger := 0.0
 var _night := 0.0
+var _slash_spin := 1.0
+## 1 -> 0 over the opening second of a run: the ship warps in on a pillar of light.
+var warp := 0.0
 
 
 func _ready() -> void:
@@ -88,6 +92,26 @@ func start(new_sim: Sim, is_demo: bool) -> void:
 	_waves.clear()
 	_cam_pos = Vector2(sim.px, sim.py)
 	camera.position = _cam_pos
+	warp = 0.0
+	if not is_demo:
+		warp_in()
+
+
+## The run opens with the ship dropping in on a beam of light.
+func warp_in() -> void:
+	warp = 1.0
+	var col := ship_color
+	var t := create_tween()
+	t.tween_interval(0.45)
+	t.tween_callback(func():
+		for k in 3:
+			fx.ring(sim.px, sim.py, 20.0, 360.0 + 240.0 * k, 0.55 + 0.2 * k, col, 1.6)
+		fx.burst(sim.px, sim.py, col * 2.0, 60, 900.0, 1.3, 0.7)
+		fx.flash(sim.px, sim.py, 420.0, 0.5, col)
+		add_wave(sim.px, sim.py, 2.2, 1100.0)
+		shake(0.35)
+		Sfx.play("blink", 0.6)
+		Sfx.buzz(40))
 
 
 ## The run flies on past the dawn: the light inverts into the Afterdark.
@@ -224,6 +248,7 @@ func _update_view(delta: float) -> void:
 	if hp_ghost < sim.hp / sim.max_hp:
 		hp_ghost = sim.hp / sim.max_hp
 	_hurt = maxf(0.0, _hurt - delta * 1.8)
+	warp = maxf(0.0, warp - delta * 1.6)
 	_flash = maxf(0.0, _flash - delta * 2.5)
 	if _gem_t > 0.0:
 		_gem_t -= delta
@@ -521,11 +546,68 @@ func handle_events() -> void:
 					if int(e[1]) >= 25:
 						Sfx.play("chain_lost")
 					chain_lost.emit(e[1])
+			Sim.EV_SLASH:
+				_on_slash(e, loud)
+			Sim.EV_MINE:
+				fx.ring(e[1], e[2], 6.0, 70.0, 0.25, Color(1.0, 0.5, 0.6), 0.8)
+				if loud:
+					Sfx.play("mine", randf_range(0.95, 1.08))
+			Sim.EV_RELIC:
+				var info := Defs.card_info(e[1])
+				var col: Color = info.get("color", UiKit.GOLD)
+				for k in 3:
+					fx.ring(sim.px, sim.py, 20.0, 420.0 + 220.0 * k, 0.7 + 0.2 * k, col, 1.8)
+				fx.burst(sim.px, sim.py, col * 2.0, 80, 1100.0, 1.5, 1.0)
+				fx.flash(sim.px, sim.py, 600.0, 0.6, col)
+				add_wave(sim.px, sim.py, 2.4, 900.0)
+				_flash = 0.8
+				shake(0.4)
+				if loud:
+					Sfx.play("relic", 1.0)
+					Sfx.buzz(80)
+					banner.emit(String(info.get("name", "")).to_upper(), col)
+					relic_taken.emit(e[1])
+			Sim.EV_HALO:
+				var gold := Color(1.0, 0.85, 0.4)
+				fx.ring(e[1], e[2], 40.0, 260.0, 0.45, gold, 2.0)
+				fx.burst(e[1], e[2], gold * 2.0, 40, 700.0, 1.2, 0.6)
+				fx.flash(e[1], e[2], 260.0, 0.35, gold)
+				add_wave(e[1], e[2], 1.4, 1000.0)
+				shake(0.3)
+				if loud:
+					Sfx.play("halo")
+					Sfx.buzz(50)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
 					fx.spray(e[1], e[2], ship_color * 1.6, 6, randf() * TAU, TAU, 420.0, 0.8, 0.25)
 	sim.events.clear()
+
+
+## Ion Scythe: a crescent of light, alternating its swing. Lunar Reaper
+## sweeps the whole circle.
+func _on_slash(e: Array, loud: bool) -> void:
+	var ang := Trig.to_rad(e[3])
+	var r: float = e[4]
+	var evo: bool = e[6]
+	var col := Color(0.6, 1.0, 0.9) if evo else Color(0.5, 1.0, 0.8)
+	if int(e[7]) == 0:
+		_slash_spin = -_slash_spin
+	if int(e[5]) >= Trig.HALF:
+		fx.slash(e[1], e[2], ang, r, PI * 0.5, col, _slash_spin, 0.3)
+		fx.slash(e[1], e[2], ang + PI, r, PI * 0.5, col, _slash_spin, 0.3)
+		fx.ring(e[1], e[2], r * 0.4, r * 1.05, 0.28, col, 0.9)
+		add_wave(e[1], e[2], 0.6, 1000.0)
+	else:
+		var half := Trig.to_rad(e[5])
+		fx.slash(e[1], e[2], ang, r, half, col, _slash_spin)
+		for k in 6:
+			var a := ang + randf_range(-half, half)
+			fx.spray(e[1] + cos(a) * r * 0.9, e[2] + sin(a) * r * 0.9, col * 1.6, 1, a + PI * 0.5 * _slash_spin,
+					0.6, 320.0, 0.7, 0.2)
+	shake(0.06 if not evo else 0.1)
+	if loud:
+		Sfx.play("slash", randf_range(0.9, 1.12) * (0.85 if evo else 1.0))
 
 
 ## Lasers: a whine while they charge, then a searing flash along the line.

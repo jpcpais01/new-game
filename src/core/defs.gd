@@ -111,9 +111,37 @@ const WEAPONS := {
 				"text": "Six rainbow beams that sweep around you three times."},
 		],
 	},
+	"scythe": {
+		"name": "Ion Scythe", "color": Color(0.5, 1.0, 0.8),
+		"blurb": "A crescent of light that cleaves the swarm in front of you.",
+		"levels": [
+			{"cd": 72, "dmg": 20.0, "r": 175.0, "half": 150, "dirs": 1,
+				"text": "Sweeps a crescent blade through everything in front of you."},
+			{"cd": 72, "dmg": 20.0, "r": 200.0, "half": 170, "dirs": 1, "text": "Longer, wider sweep."},
+			{"cd": 64, "dmg": 32.0, "r": 200.0, "half": 170, "dirs": 1, "text": "+60% damage, faster."},
+			{"cd": 64, "dmg": 32.0, "r": 215.0, "half": 170, "dirs": 2, "text": "Sweeps behind you too."},
+			{"cd": 52, "dmg": 44.0, "r": 235.0, "half": 190, "dirs": 2, "text": "+35% damage, wider, faster."},
+			{"cd": 50, "dmg": 44.0, "r": 280.0, "half": 512, "dirs": 1, "sweeps": 2, "leech": 0.5, "evo": true,
+				"text": "Two full-circle crescents in quick succession. Every enemy they cut down heals you."},
+		],
+	},
+	"mine": {
+		"name": "Photon Mines", "color": Color(1.0, 0.45, 0.55),
+		"blurb": "Drops mines that detonate when the swarm steps on them.",
+		"levels": [
+			{"cd": 84, "dmg": 28.0, "blast": 100.0, "max": 3, "n": 1,
+				"text": "Drops a mine that detonates when an enemy comes close."},
+			{"cd": 76, "dmg": 28.0, "blast": 100.0, "max": 4, "n": 1, "text": "Faster, +1 mine on the field."},
+			{"cd": 76, "dmg": 50.0, "blast": 115.0, "max": 5, "n": 1, "text": "+50% damage, bigger blasts."},
+			{"cd": 70, "dmg": 50.0, "blast": 115.0, "max": 7, "n": 2, "text": "Drops two mines at a time."},
+			{"cd": 60, "dmg": 66.0, "blast": 130.0, "max": 8, "n": 2, "text": "+30% damage, faster, bigger blasts."},
+			{"cd": 50, "dmg": 76.0, "blast": 145.0, "max": 10, "n": 2, "link": 520.0, "link_dmg": 14.0,
+				"evo": true, "text": "Mines link into a constellation of burning tripwires and pull the swarm in."},
+		],
+	},
 }
 
-const WEAPON_ORDER := ["pulse", "orbit", "arc", "nova", "seeker", "lance"]
+const WEAPON_ORDER := ["pulse", "orbit", "arc", "nova", "seeker", "lance", "scythe", "mine"]
 
 ## Evolutions: a Lv5 weapon plus its catalyst system (any level) evolves when
 ## you open a Prism Cache. The evolved spec is the weapon's sixth level.
@@ -124,6 +152,8 @@ const EVOLUTIONS := {
 	"nova": {"name": "Singularity", "needs": "plating", "color": Color(0.7, 0.38, 1.0)},
 	"seeker": {"name": "Hydra Swarm", "needs": "fortune", "color": Color(0.45, 1.0, 0.5)},
 	"lance": {"name": "Spectrum", "needs": "thrusters", "color": Color(1.0, 0.6, 0.85)},
+	"scythe": {"name": "Lunar Reaper", "needs": "vitality", "color": Color(0.6, 1.0, 0.9)},
+	"mine": {"name": "Constellation", "needs": "magnet", "color": Color(1.0, 0.6, 0.4)},
 }
 const EVO_LEVEL := 6
 
@@ -152,6 +182,36 @@ const EXTRAS := {
 	"heal": {"name": "Repair", "color": Color(0.4, 1.0, 0.6), "text": "Restore 40% of your HP."},
 	"flux": {"name": "Flux Cache", "color": Color(1.0, 0.5, 1.0), "text": "+25 Flux for the Forge."},
 }
+
+## Relics: one of three is offered when you open the first elite's Prism Cache
+## and every boss's.
+## Each bends the rules for the rest of the run. Applied inside Sim.
+const RELICS := {
+	"halo": {"name": "Guardian Halo", "color": Color(1.0, 0.92, 0.55),
+		"text": "A halo blocks one hit every 15 seconds. A blocked hit never breaks your Chain."},
+	"wake": {"name": "Ion Wake", "color": Color(0.4, 0.95, 1.0),
+		"text": "Your ship leaves a trail of burning light behind it."},
+	"starbreaker": {"name": "Starbreaker", "color": Color(1.0, 0.5, 0.3),
+		"text": "+60% damage to elites and bosses."},
+	"supercrit": {"name": "Supercritical", "color": Color(1.0, 0.85, 0.35),
+		"text": "+10% critical chance, and critical hits strike one time harder."},
+	"overcharge": {"name": "Overcharge", "color": Color(0.35, 0.95, 1.0),
+		"text": "Overdrive charges 75% faster, and every Overdrive heals 25 HP."},
+	"phoenix": {"name": "Phoenix Plume", "color": Color(1.0, 0.45, 0.3),
+		"text": "Rise once more when you fall, in a blast that clears the swarm."},
+	"midas": {"name": "Midas Core", "color": Color(1.0, 0.78, 0.3),
+		"text": "+25% experience, +1 reroll, and every Prism Cache pays triple Flux."},
+	"wrath": {"name": "Wrath of Dawn", "color": Color(1.0, 0.3, 0.45),
+		"text": "Below half health you deal +50% damage and fly 15% faster."},
+}
+const RELIC_ORDER := ["halo", "wake", "starbreaker", "supercrit", "overcharge", "phoenix", "midas", "wrath"]
+const HALO_TICKS := 15 * 60
+const WAKE_TICKS := 80
+
+
+static func is_relic(id: String) -> bool:
+	return RELICS.has(id)
+
 
 ## The Forge: permanent upgrades bought with Flux between runs.
 const FORGE := [
@@ -182,6 +242,8 @@ static func card_info(id: String) -> Dictionary:
 		return WEAPONS[id]
 	if PASSIVES.has(id):
 		return PASSIVES[id]
+	if RELICS.has(id):
+		return RELICS[id]
 	return EXTRAS.get(id, {})
 
 
@@ -271,7 +333,7 @@ const MISSIONS := [
 		"kind": "untouched", "goal": 150, "flux": 150},
 	{"id": "twin_evo", "name": "Twin Stars", "text": "Evolve 2 weapons in one run.", "kind": "evolutions",
 		"goal": 2, "flux": 200},
-	{"id": "codex", "name": "Codex", "text": "Discover all 6 evolutions.", "kind": "codex", "goal": 6, "flux": 500},
+	{"id": "codex", "name": "Codex", "text": "Discover 6 evolutions.", "kind": "codex", "goal": 6, "flux": 500},
 	{"id": "veteran", "name": "Veteran", "text": "Destroy 25,000 enemies in total.", "kind": "total_kills",
 		"goal": 25000, "flux": 400},
 	{"id": "fleet", "name": "Fleet Admiral", "text": "Reach the dawn with 3 different ships.", "kind": "fleet",
@@ -294,6 +356,10 @@ const MISSIONS := [
 		"flux": 200},
 	{"id": "radiant", "name": "Radiant", "text": "Build a Chain of 1,000 kills.", "kind": "chain", "goal": 1000,
 		"flux": 450},
+	{"id": "relic_keeper", "name": "Reliquary", "text": "Hold 4 relics in one run.", "kind": "relics", "goal": 4,
+		"flux": 250},
+	{"id": "grand_codex", "name": "Grand Codex", "text": "Discover all 8 evolutions.", "kind": "codex", "goal": 8,
+		"flux": 700},
 ]
 
 

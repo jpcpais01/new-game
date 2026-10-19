@@ -1,7 +1,7 @@
 class_name CodexScreen
 extends Control
 ## The Codex: every evolution (silhouettes until discovered, recipes always
-## shown) and a bestiary of the swarm.
+## shown), the relics and a bestiary of the swarm.
 
 var main
 
@@ -63,6 +63,10 @@ func _ready() -> void:
 		grid.add_child(card)
 		UiKit.pop_in(card, 0.05 * k, 20)
 		k += 1
+	list.add_child(UiKit.label("RELICS  ·  FROM THE FIRST ELITE AND EVERY BOSS", 30, Color(0.78, 0.55, 1.0),
+			UiKit.display()))
+	for id in Defs.RELIC_ORDER:
+		list.add_child(_relic_row(id))
 	list.add_child(UiKit.label("THE SWARM", 34, UiKit.CYAN, UiKit.display()))
 	for i in LORE.size():
 		list.add_child(_enemy_row(i))
@@ -109,6 +113,33 @@ func _evo_card(w: String, found: bool) -> Control:
 	var l := UiKit.label(txt, 26, Color(0.9, 0.9, 1.0, 0.85) if found else UiKit.DIM)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size = Vector2(400, 0)
+	v.add_child(l)
+	return p
+
+
+func _relic_row(id: String) -> Control:
+	var r: Dictionary = Defs.RELICS[id]
+	var col: Color = r.color
+	var p := PanelContainer.new()
+	var sb := UiKit.box(Color(col, 0.4), Color(0.04, 0.03, 0.1, 0.85), 20, 2, 0)
+	sb.content_margin_left = 18
+	sb.content_margin_right = 18
+	sb.content_margin_top = 10
+	sb.content_margin_bottom = 10
+	p.add_theme_stylebox_override("panel", sb)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 18)
+	p.add_child(h)
+	h.add_child(UiKit.icon_rect(id, 84))
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 0)
+	h.add_child(v)
+	v.add_child(UiKit.label(String(r.name).to_upper(), 28, col.lerp(Color.WHITE, 0.3), UiKit.display(),
+			HORIZONTAL_ALIGNMENT_LEFT))
+	var l := UiKit.label(String(r.text), 26, Color(0.88, 0.88, 1.0, 0.85), UiKit.body(), HORIZONTAL_ALIGNMENT_LEFT)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(700, 0)
 	v.add_child(l)
 	return p
 

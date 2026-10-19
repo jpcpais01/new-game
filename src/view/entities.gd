@@ -135,8 +135,12 @@ func _draw_player() -> void:
 	var blink := s.iframes > 0 and int(arena.vtime * 20.0) % 2 == 0
 	var rot := arena.ship_angle
 	var tilt := 1.0 - 0.18 * absf(sin(arena.ship_bank))
-	draw_set_transform(Vector2(x, y), rot, Vector2(0.62, 0.62 * tilt))
-	draw_texture(Art.tex("ship_" + s.ship_id), Vector2(-64, -64), Color(1.5, 1.5, 1.5, 0.35 if blink else 1.0))
+	# Warp-in: the ship drops out of a pillar of light, big and white-hot.
+	var wk := arena.warp * arena.warp
+	var ws := 0.62 * (1.0 + 1.6 * wk)
+	var wc := Color(1.5 + 2.0 * wk, 1.5 + 2.0 * wk, 1.5 + 2.0 * wk, (0.35 if blink else 1.0) * (1.0 - 0.6 * wk))
+	draw_set_transform(Vector2(x, y), rot, Vector2(ws, ws * tilt))
+	draw_texture(Art.tex("ship_" + s.ship_id), Vector2(-64, -64), wc)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# Health bar under the ship.
 	var frac := clampf(s.hp / s.max_hp, 0.0, 1.0)
@@ -199,6 +203,8 @@ func _draw_glow() -> void:
 		draw_texture(glow, Vector2(-64, -64), Color(0.7, 0.3, 1.4, 0.9))
 		draw_set_transform(Vector2(w.x, w.y), -t * 6.0, Vector2(core_s, core_s) * 0.35)
 		draw_texture(Art.tex("i_nova_evo"), Vector2(-48, -48), Color(1.6, 1.2, 2.0))
+	_draw_wake(s, t)
+	_draw_mines(s, t)
 	# Pickups. Prism Caches stand under a pillar of light so you can find them.
 	for p in s.pickups:
 		var kind := String(p.k)
@@ -207,6 +213,9 @@ func _draw_glow() -> void:
 		if kind == "chest" or kind == "bigchest":
 			var big := kind == "bigchest"
 			var col := Color(1.0, 0.45, 0.95) if big else Color(1.0, 0.8, 0.35)
+			if p.get("relic", false):
+				col = Color(0.75, 0.5, 1.0)
+				tex = Art.tex("p_relicchest")
 			draw_set_transform(Vector2(p.x, p.y), -PI * 0.5, Vector2.ONE)
 			draw_texture_rect(Art.tex("beam"), Rect2(0, -26, 900, 52), false, Color(col, 0.35 + 0.1 * sin(t * 4.0)))
 			var rs := (1.15 if big else 0.85) * (1.0 + 0.06 * sin(t * 5.0))
@@ -287,6 +296,11 @@ func _draw_glow() -> void:
 		var x := lerpf(s.ppx, s.px, a)
 		var y := lerpf(s.ppy, s.py, a)
 		var sc := arena.ship_color
+		if arena.warp > 0.0:
+			var wk := arena.warp
+			draw_set_transform(Vector2(x, y), -PI * 0.5, Vector2.ONE)
+			draw_texture_rect(Art.tex("beam"), Rect2(0, -70.0 * wk, 2400, 140.0 * wk), false, Color(sc * 1.8, wk))
+			draw_texture_rect(Art.tex("beam"), Rect2(0, -18.0 * wk, 2400, 36.0 * wk), false, Color(2, 2, 2, wk))
 		draw_set_transform(Vector2(x, y), 0.0, Vector2(1.3, 1.3))
 		draw_texture(Art.tex("glow"), Vector2(-64, -64), Color(sc.r * 0.85, sc.g * 0.85, sc.b * 0.85, 0.35))
 		if s.shield > 0:
@@ -302,6 +316,61 @@ func _draw_glow() -> void:
 			var k := 0.5 + 0.5 * sin(t * 6.0)
 			draw_set_transform(Vector2(x, y), t * 1.5, Vector2(0.55, 0.55) * (1.0 + 0.08 * k))
 			draw_texture(ring, Vector2(-128, -128), Color(sc * 1.5, 0.35 + 0.35 * k))
+		# Guardian Halo: a gold crown of light that dims while it recharges.
+		var hf := s.halo_frac()
+		if hf >= 0.0:
+			var gold := Color(1.0, 0.85, 0.4)
+			draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE)
+			if hf >= 1.0:
+				var k2 := 0.5 + 0.5 * sin(t * 4.0)
+				draw_arc(Vector2.ZERO, 46.0, 0.0, TAU, 48, Color(gold * 1.6, 0.55 + 0.25 * k2), 3.0)
+				draw_arc(Vector2.ZERO, 52.0, 0.0, TAU, 48, Color(gold, 0.18), 8.0)
+			else:
+				draw_arc(Vector2.ZERO, 46.0, -PI * 0.5, -PI * 0.5 + TAU * hf, 40, Color(gold, 0.3), 2.0)
+
+
+## Ion Wake: a ribbon of light along the path the ship flew.
+func _draw_wake(s: Sim, t: float) -> void:
+	var n := s.trail.size()
+	if n < 2:
+		return
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	for k in range(1, n):
+		var p0: Array = s.trail[k - 1]
+		var p1: Array = s.trail[k]
+		var life := float(p1[2]) / float(Defs.WAKE_TICKS)
+		var a := Vector2(p0[0], p0[1])
+		var b := Vector2(p1[0], p1[1])
+		var flick := 0.85 + 0.15 * sin(t * 30.0 + float(k))
+		draw_line(a, b, Color(0.3, 0.8, 1.6, 0.22 * life * flick), Sim.WAKE_R * 2.0 * (0.6 + 0.4 * life))
+		draw_line(a, b, Color(0.6, 1.6, 2.0, 0.75 * life), 5.0 * life + 1.0)
+
+
+## Photon Mines: blinking cores that arm, and the Constellation's tripwires.
+func _draw_mines(s: Sim, t: float) -> void:
+	if s.mines.is_empty():
+		return
+	var tex := Art.tex("mine")
+	var glow := Art.tex("glow")
+	var evo := s.is_evolved("mine")
+	var col := Color(1.0, 0.6, 0.4) if evo else Color(1.0, 0.45, 0.55)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	for l in s.mine_links():
+		var a := Vector2(l[0], l[1])
+		var b := Vector2(l[2], l[3])
+		var flick := 0.8 + 0.2 * sin(t * 40.0 + a.x * 0.01)
+		draw_line(a, b, Color(col * 1.4, 0.25 * flick), 22.0)
+		draw_line(a, b, Color(1.8, 1.5, 1.2, 0.85 * flick), 3.0)
+	for m in s.mines:
+		var armed: bool = int(m.t) <= 0
+		var life := clampf(float(m.life) / 120.0, 0.0, 1.0)
+		var blink := 0.5 + 0.5 * sin(t * (10.0 if life > 0.99 else 28.0) + float(m.x) * 0.05)
+		var sc := 0.9 if armed else 0.6 + 0.3 * (1.0 - float(m.t) / float(Sim.MINE_ARM))
+		draw_set_transform(Vector2(m.x, m.y), t * 1.2, Vector2(sc, sc))
+		draw_texture(tex, Vector2(-32, -32), Color(col * (1.6 if armed else 0.9), 1.0))
+		draw_set_transform(Vector2(m.x, m.y), 0.0, Vector2(0.45, 0.45) * (0.8 + 0.4 * blink))
+		draw_texture(glow, Vector2(-64, -64), Color(col * 1.8, (0.5 if armed else 0.2) * (0.5 + 0.5 * blink)))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Bastion aegis, blink markers and lasers (warning lines, then beams).

@@ -516,6 +516,47 @@ def sfx_threats():
     write_wav("chain_lost", x, 0.7)
 
 
+def sfx_arsenal():
+    """Ion Scythe, Photon Mines, relics and the Guardian Halo (own RNG)."""
+    global rng
+    rng = np.random.default_rng(131)
+    # Scythe: an airy whoosh with a bright edge that rings out.
+    n = int(0.32 * SR)
+    sw = highpass(noise(n), 900)
+    sw = lowpass(sw, 6500) * env(n, 0.04, 0.0, 1.0, 0.24, 0.02) * 0.9
+    sw += np.sin(sweep_phase(1400, 2600, n, 0.6)) * env(n, 0.03, 0.2) * 0.25
+    write_wav("slash", sw, 0.7)
+    # Mine drop: a soft beep pair and a click.
+    n = int(0.22 * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(2 * np.pi * 1320 * tt) * env(n, 0.002, 0.06) * 0.5
+    st = int(0.07 * SR)
+    x[st:] += np.sin(2 * np.pi * 1760 * tt[:n - st]) * env(n - st, 0.002, 0.08) * 0.45
+    x += highpass(noise(n), 4000) * expdecay(n, 60) * 0.3
+    write_wav("mine", x, 0.6)
+    # Relic: a shimmering major chord that blooms.
+    n = int(1.6 * SR)
+    x = np.zeros(n)
+    tt = np.arange(n) / SR
+    for k, m in enumerate([67, 71, 74, 79, 83, 86]):
+        st = int(k * 0.06 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        vib = 1 + 0.004 * np.sin(2 * np.pi * 5.5 * t2)
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2 * vib) + 0.35 * np.sin(4 * np.pi * mtof(m) * t2)) * \
+            env(seg, 0.08, 0.5, 0.4, 0.6, 0.3) * 0.18
+    x += highpass(noise(n), 7000) * env(n, 0.3, 0.6) * 0.12
+    write_wav("relic", x, 0.85)
+    # Halo block: a struck glass bell over a soft thump.
+    n = int(0.9 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for f, a, k in [(1568, 0.5, 5.0), (2352, 0.3, 7.0), (3920, 0.2, 10.0), (4700, 0.12, 14.0)]:
+        x += np.sin(2 * np.pi * f * tt) * expdecay(n, k) * a
+    x += np.sin(sweep_phase(160, 60, n, 0.5)) * expdecay(n, 12) * 0.6
+    write_wav("halo", x, 0.8)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -526,6 +567,10 @@ if __name__ == "__main__":
         sfx_evolution()
         print("evolution audio ok")
         sys.exit(0)
+    if "--arsenal" in sys.argv:
+        sfx_arsenal()
+        print("arsenal audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -535,4 +580,5 @@ if __name__ == "__main__":
     sfx_evolution()
     sfx_overdrive()
     sfx_threats()
+    sfx_arsenal()
     print("audio ok")

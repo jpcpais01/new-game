@@ -24,6 +24,7 @@ var flashes: Array = []
 var beams: Array = []
 var arcs: Array = []
 var warns: Array = []
+var slashes: Array = []
 var numbers: Array = []
 
 var _spark: Texture2D
@@ -60,6 +61,7 @@ func clear() -> void:
 	beams.clear()
 	arcs.clear()
 	warns.clear()
+	slashes.clear()
 	numbers.clear()
 
 
@@ -127,6 +129,12 @@ func warn(x: float, y: float, ang: float, length: float, dur: float) -> void:
 	warns.append({"x": x, "y": y, "a": ang, "l": length, "t": 0.0, "d": dur})
 
 
+## A crescent sweep: the blade's edge races across the arc, then fades.
+## `ang` and `half` are radians; `spin` is +1 or -1.
+func slash(x: float, y: float, ang: float, r: float, half: float, col: Color, spin := 1.0, dur := 0.26) -> void:
+	slashes.append({"x": x, "y": y, "a": ang, "r": r, "h": half, "c": col, "s": spin, "t": 0.0, "d": dur})
+
+
 func number(x: float, y: float, value: float, crit: bool) -> void:
 	if numbers.size() >= MAX_NUMBERS:
 		numbers.pop_front()
@@ -152,7 +160,7 @@ func update_fx(delta: float) -> void:
 		p_x[i] += p_vx[i] * delta
 		p_y[i] += p_vy[i] * delta
 		i += 1
-	for list in [rings, flashes, beams, arcs, warns, numbers]:
+	for list in [rings, flashes, beams, arcs, warns, slashes, numbers]:
 		var j: int = list.size() - 1
 		while j >= 0:
 			list[j].t += delta
@@ -212,6 +220,8 @@ func _draw() -> void:
 		draw_polyline(jag, Color(col, (1.0 - k) * 0.45), 14.0)
 		draw_polyline(jag, Color(col * 1.6, 1.0 - k), 5.0)
 		draw_polyline(jag, Color(1.8, 1.8, 2.0, 1.0 - k), 2.0)
+	for sl in slashes:
+		_draw_slash(sl)
 	for w in warns:
 		var k: float = w.t / w.d
 		var blink := 0.45 + 0.55 * absf(sin(k * 18.0))
@@ -238,6 +248,41 @@ func _draw() -> void:
 			draw_set_transform(Vector2(p_x[i], p_y[i]), 0.0, Vector2.ONE)
 			draw_texture_rect(_spark, Rect2(-r, -r, r * 2.0, r * 2.0), false, c)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_slash(sl: Dictionary) -> void:
+	var k: float = sl.t / sl.d
+	var sweep := clampf(k / 0.4, 0.0, 1.0)
+	var fade := 1.0 - clampf((k - 0.3) / 0.7, 0.0, 1.0)
+	var half: float = sl.h
+	var spin: float = sl.s
+	var a0: float = sl.a - half * spin
+	var a1: float = a0 + 2.0 * half * spin * (1.0 - pow(1.0 - sweep, 3.0))
+	var r: float = sl.r * (0.92 + 0.08 * sweep)
+	var inner := r * 0.62
+	var col: Color = sl.c
+	var n := maxi(6, int(absf(a1 - a0) * 14.0))
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var edge := PackedVector2Array()
+	var c := Vector2(sl.x, sl.y)
+	for i in n + 1:
+		var t := float(i) / float(n)
+		var a := lerpf(a0, a1, t)
+		var dir := Vector2(cos(a), sin(a))
+		# The band is thickest at the leading edge, a tapering trail behind it.
+		var lead := t * t
+		var rr := lerpf(r, inner, 1.0 - 0.75 * lead)
+		pts.append(c + dir * r)
+		cols.append(Color(col * 1.6, 0.85 * fade * (0.3 + 0.7 * lead)))
+		edge.append(c + dir * r)
+		pts.insert(0, c + dir * rr)
+		cols.insert(0, Color(col, 0.0))
+	if pts.size() >= 3:
+		draw_polygon(pts, cols)
+	if edge.size() >= 2:
+		draw_polyline(edge, Color(col * 1.4, 0.5 * fade), 10.0)
+		draw_polyline(edge, Color(1.8, 1.9, 1.9, fade), 3.0)
 
 
 func _draw_numbers() -> void:

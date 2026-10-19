@@ -5,7 +5,8 @@ drag to steer a ship of light, your weapons fire on their own, every level-up
 offers three upgrade cards, and three bosses (the Warden, the Seraph and the
 Eclipse) stand between you and the dawn at 8:00. Kill without getting hit to
 build a Chain that multiplies your score. Elites and bosses drop Prism Caches: max a weapon, carry its catalyst
-system, and a cache evolves it into one of six evolved forms. Pick one of seven
+system, and a cache evolves it into one of eight evolved forms. The first elite and every boss also guard a
+relic: pick one of three rule-bending powers that last the whole run. Pick one of seven
 ships in the Hangar, each with its own starting weapon, quirk and an
 Overdrive you charge with kills and unleash with a tap. Missions unlock new
 ships and pay Flux, and every run earns Flux for permanent upgrades in the
@@ -28,7 +29,7 @@ publishes a new release automatically.
 | `src/ui/` | Screens: title (live autopilot demo behind it), game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex, Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |
 | `assets/` | Generated sprites/icons/audio (see `tools/`) and fonts (Orbitron, Rajdhani; OFL). |
-| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `shots.tscn` (screenshots). |
+| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `shots.tscn` (screenshots). |
 
 ```sh
 godot --headless --path . --import

@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 5
+const RULES_VERSION := 6
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -27,6 +27,11 @@ const SENTINEL_W := 12.0
 const SERAPH_ARM := 780.0
 const SERAPH_LANCE := 1300.0
 const BASTION_R := 230.0
+const MINE_ARM := 24
+const MINE_LIFE := 720
+const MINE_TRIGGER := 64.0
+const MINE_PULL := 190.0
+const WAKE_R := 34.0
 
 enum { RUNNING, CHOOSING, DEAD, WON }
 
@@ -64,6 +69,11 @@ const EV_LASER := 30      # x, y, angle, length, half width, phase (0 charging, 
 const EV_BLINK := 31      # x0, y0, x1, y1, type, phase (0 marked, 1 arrived)
 const EV_CHAIN := 32      # chain, tier name (a Chain milestone)
 const EV_CHAIN_LOST := 33 # chain, broken by a hit
+const EV_SLASH := 34      # x, y, angle, radius, half arc, evolved, sweep
+const EV_MINE := 35       # x, y (mines dropped)
+const EV_RELIC := 36      # relic id (taken)
+const EV_HALO := 37       # x, y (the Guardian Halo blocks a hit)
+const EV_RELIC_OFFER := 38
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -130,6 +140,7 @@ var novas: Array = []        # {x, y, r, max, step, dmg, hit: {uid: true}}
 var wells: Array = []        # {x, y, r, t, dmg} singularities
 var pickups: Array = []      # {k, x, y, mag, spd}
 var evolutions := 0
+var mines: Array = []        # {x, y, t (arming), life, dmg, blast} Photon Mines
 
 # --- ship and Overdrive ------------------------------------------------------------
 var ship_id := "lumen"
@@ -166,6 +177,20 @@ var chain_best := 0
 var chain_score := 0         # score earned on top by the Chain multiplier
 var seraph_down := false
 var _shielded := false       # any enemy currently under a Bastion's aegis
+
+# --- relics ---------------------------------------------------------------------------
+var relics: Array = []       # relic ids in the order taken
+var pending_relics := 0
+var relic_choice := false    # the open choice offers relics, not level-up cards
+var halo_t := 0              # ticks until the Guardian Halo is back
+var trail: Array = []        # Ion Wake: [x, y, ticks left]
+var r_halo := false
+var r_wake := false
+var r_star := false
+var r_supercrit := false
+var r_over := false
+var r_midas := false
+var r_wrath := false
 
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
@@ -327,20 +352,25 @@ func step(ix: int, iy: int, burst := false) -> void:
 	_separate()
 	_aegis_aura()
 	_update_chain()
+	_update_wake_trail()
 	if burst and od_ready():
 		_overdrive()
 	_update_overdrive()
 	_weapons()
 	_update_novas()
 	_update_wells()
+	_update_mines()
 	_update_bullets()
 	_update_orbs()
 	_contact()
 	_reap()
 	_update_gems()
 	_update_pickups()
-	if state == RUNNING and pending_levels > 0:
-		_start_choice()
+	if state == RUNNING:
+		if pending_relics > 0:
+			_start_relic()
+		elif pending_levels > 0:
+			_start_choice()
 
 
 ## Pick card k (0..2) while choosing.
@@ -351,12 +381,21 @@ func choose(k: int) -> void:
 	log_actions.append(tick)
 	log_actions.append(k)
 	var id: String = choices[k]
-	_apply_card(id)
-	pending_levels -= 1
-	if pending_levels > 0:
+	if relic_choice:
+		_take_relic(id)
+		pending_relics -= 1
+	else:
+		_apply_card(id)
+		pending_levels -= 1
+	if pending_relics > 0:
+		choices = _roll_relics()
+		events.append([EV_RELIC_OFFER])
+	elif pending_levels > 0:
+		relic_choice = false
 		choices = _roll_choices()
 		events.append([EV_LEVEL, level])
 	else:
+		relic_choice = false
 		choices = []
 		state = RUNNING
 
@@ -382,7 +421,7 @@ func reroll() -> void:
 	log_actions.append(tick)
 	log_actions.append(9)
 	rerolls -= 1
-	choices = _roll_choices()
+	choices = _roll_relics() if relic_choice else _roll_choices()
 
 
 func weapon_level(id: String) -> int:
@@ -425,6 +464,17 @@ func card_level(id: String) -> int:
 	if Defs.is_weapon(id):
 		return weapon_level(id)
 	return int(passives.get(id, 0))
+
+
+func has_relic(id: String) -> bool:
+	return relics.has(id)
+
+
+## Guardian Halo charge 0..1 (1 = ready to block), or -1 without the relic.
+func halo_frac() -> float:
+	if not r_halo:
+		return -1.0
+	return 1.0 - float(halo_t) / float(Defs.HALO_TICKS)
 
 
 ## Index of the living boss, or -1.
@@ -567,8 +617,11 @@ func _move_player(ix: int, iy: int) -> void:
 		l = 1.0
 	mvx = mx
 	mvy = my
-	px += mx * st_speed * DT
-	py += my * st_speed * DT
+	var spd := st_speed
+	if r_wrath and hp < max_hp * 0.5:
+		spd *= 1.15
+	px += mx * spd * DT
+	py += my * spd * DT
 	var d := sqrt(px * px + py * py)
 	var lim := ARENA_R - PLAYER_R
 	if d > lim:
@@ -1362,13 +1415,17 @@ func _weapons() -> void:
 				fired = _fire_seeker(spec)
 			"lance":
 				fired = _fire_lance(spec, w)
+			"scythe":
+				fired = _fire_scythe(spec, w)
+			"mine":
+				fired = _fire_mine(spec)
 		if fired:
 			var haste := st_haste
 			# Kestrel's slipstream: faster recharge while moving.
 			if ship_id == "kestrel" and mvx * mvx + mvy * mvy > 0.25:
 				haste *= 0.8
 			w.t = maxi(6, int(float(spec.cd) * haste))
-			# Spectrum sweeps: quick follow-up pulses before the real cooldown.
+			# Spectrum and Lunar Reaper: quick follow-ups before the real cooldown.
 			if spec.has("sweeps"):
 				w.k += 1
 				if w.k < int(spec.sweeps):
@@ -1667,6 +1724,227 @@ func _fire_lance(spec: Dictionary, w: Dictionary) -> bool:
 	return true
 
 
+## Ion Scythe: a crescent sweep towards the nearest enemy (behind you too at
+## Lv4). Lunar Reaper sweeps full circles and heals on every kill.
+func _fire_scythe(spec: Dictionary, w: Dictionary) -> bool:
+	var r: float = float(spec.r) * st_area
+	var a: int = w.a
+	if w.k == 0:
+		var t := _nearest(px, py, r * 1.5)
+		if t < 0:
+			return false
+		a = Trig.angle_of(e_x[t] - px, e_y[t] - py)
+		w.a = a
+	var half: int = spec.half
+	var full := half >= Trig.HALF
+	var cosh := Trig.cos_i(half)
+	var dirs: int = spec.dirs
+	var leech: float = spec.get("leech", 0.0)
+	var healed := 0.0
+	var evo: bool = spec.get("evo", false)
+	for k in dirs:
+		var da := a + k * Trig.STEPS / dirs
+		var ux := Trig.cos_i(da)
+		var uy := Trig.sin_i(da)
+		_query(px, py, r)
+		for q in _qn:
+			var i := _qbuf[q]
+			if e_hp[i] <= 0.0:
+				continue
+			var rx := e_x[i] - px
+			var ry := e_y[i] - py
+			var d := sqrt(rx * rx + ry * ry) + 0.001
+			if d > r + e_r[i]:
+				continue
+			if not full and rx * ux + ry * uy < d * cosh - e_r[i]:
+				continue
+			_damage(i, spec.dmg, rx / d * 380.0, ry / d * 380.0)
+			if leech > 0.0 and e_hp[i] <= 0.0 and healed < 4.0:
+				healed += leech
+				hp = minf(max_hp, hp + leech)
+		events.append([EV_SLASH, px, py, da, r, half, evo, int(w.k)])
+	return true
+
+
+## Photon Mines: dropped behind the ship, armed after a moment, triggered by
+## the swarm. The oldest mine detonates when the field is full.
+func _fire_mine(spec: Dictionary) -> bool:
+	if _nearest(px, py, 900.0) < 0:
+		return false
+	var n: int = spec.n
+	var bx := px - Trig.cos_i(facing) * 30.0
+	var by := py - Trig.sin_i(facing) * 30.0
+	var sx := -Trig.sin_i(facing)
+	var sy := Trig.cos_i(facing)
+	for k in n:
+		while mines.size() >= int(spec.max):
+			var old: Dictionary = mines.pop_front()
+			_explode(old.x, old.y, old.blast, old.dmg)
+		var off := 0.0 if n == 1 else (44.0 if k == 0 else -44.0)
+		mines.append({"x": bx + sx * off, "y": by + sy * off, "t": MINE_ARM, "life": MINE_LIFE,
+				"dmg": float(spec.dmg), "blast": float(spec.blast) * st_area})
+	events.append([EV_MINE, bx, by])
+	return true
+
+
+func mine_spec() -> Dictionary:
+	var l := weapon_level("mine")
+	if l == 0:
+		return {}
+	return Defs.WEAPONS.mine.levels[l - 1]
+
+
+## Constellation tripwires: consecutive armed mines close enough to link,
+## as [x0, y0, x1, y1] segments.
+func mine_links() -> Array:
+	var out: Array = []
+	var spec := mine_spec()
+	if not spec.has("link"):
+		return out
+	var lim: float = spec.link
+	for k in range(1, mines.size()):
+		var m0: Dictionary = mines[k - 1]
+		var m1: Dictionary = mines[k]
+		if int(m0.t) > 0 or int(m1.t) > 0:
+			continue
+		var dx: float = m1.x - m0.x
+		var dy: float = m1.y - m0.y
+		if dx * dx + dy * dy < lim * lim:
+			out.append([m0.x, m0.y, m1.x, m1.y])
+	return out
+
+
+func _update_mines() -> void:
+	if mines.is_empty():
+		return
+	var spec := mine_spec()
+	var evo := spec.has("link")
+	var k := mines.size() - 1
+	while k >= 0:
+		var m: Dictionary = mines[k]
+		m.life -= 1
+		if m.t > 0:
+			m.t -= 1
+		var boom: bool = m.life <= 0
+		if not boom and m.t <= 0 and (tick + k) % 2 == 0:
+			var mx: float = m.x
+			var my: float = m.y
+			_query(mx, my, MINE_PULL if evo else MINE_TRIGGER)
+			for q in _qn:
+				var i := _qbuf[q]
+				if e_hp[i] <= 0.0:
+					continue
+				var dx := mx - e_x[i]
+				var dy := my - e_y[i]
+				var d := sqrt(dx * dx + dy * dy) + 0.001
+				if d < MINE_TRIGGER + e_r[i]:
+					boom = true
+					break
+				if evo and d < MINE_PULL:
+					e_vx[i] += dx / d * 26.0 * e_kb[i]
+					e_vy[i] += dy / d * 26.0 * e_kb[i]
+		if boom:
+			mines.remove_at(k)
+			_explode(m.x, m.y, m.blast, m.dmg)
+		k -= 1
+	if evo and tick % 8 == 0:
+		var hw := 14.0
+		for l in mine_links():
+			var ax: float = l[0]
+			var ay: float = l[1]
+			var lx: float = l[2] - ax
+			var ly: float = l[3] - ay
+			var l2 := lx * lx + ly * ly + 0.001
+			for i in en:
+				if e_spawn[i] > 0 or e_hp[i] <= 0.0:
+					continue
+				var rx := e_x[i] - ax
+				var ry := e_y[i] - ay
+				var tt := clampf((rx * lx + ry * ly) / l2, 0.0, 1.0)
+				var qx := rx - lx * tt
+				var qy := ry - ly * tt
+				var rr := hw + e_r[i]
+				if qx * qx + qy * qy < rr * rr:
+					_damage(i, spec.link_dmg, 0.0, 0.0)
+
+
+# --- relics -------------------------------------------------------------------------
+
+func _start_relic() -> void:
+	state = CHOOSING
+	relic_choice = true
+	choices = _roll_relics()
+	events.append([EV_RELIC_OFFER])
+
+
+func _roll_relics() -> Array:
+	var pool: Array = []
+	for id in Defs.RELIC_ORDER:
+		if not relics.has(id):
+			pool.append(id)
+	var out: Array = []
+	while out.size() < 3 and not pool.is_empty():
+		var k := rng.range_i(pool.size())
+		out.append(pool[k])
+		pool.remove_at(k)
+	return out
+
+
+func _take_relic(id: String) -> void:
+	if relics.has(id) or not Defs.is_relic(id):
+		return
+	relics.append(id)
+	match id:
+		"phoenix":
+			revives += 1
+		"midas":
+			rerolls += 1
+		"halo":
+			halo_t = 0
+	r_halo = relics.has("halo")
+	r_wake = relics.has("wake")
+	r_star = relics.has("starbreaker")
+	r_supercrit = relics.has("supercrit")
+	r_over = relics.has("overcharge")
+	r_midas = relics.has("midas")
+	r_wrath = relics.has("wrath")
+	_recompute()
+	events.append([EV_RELIC, id])
+	events.append([EV_PICK, id, 1])
+
+
+## Ion Wake: the ship lays burning light that scorches whatever crosses it.
+func _update_wake_trail() -> void:
+	if r_halo and halo_t > 0:
+		halo_t -= 1
+	if not r_wake:
+		return
+	if tick % 4 == 0 and mvx * mvx + mvy * mvy > 0.04:
+		trail.append([px, py, Defs.WAKE_TICKS])
+	for p in trail:
+		p[2] -= 1
+	while not trail.is_empty() and int(trail[0][2]) <= 0:
+		trail.pop_front()
+	if tick % 10 != 0 or trail.is_empty():
+		return
+	var dmg := 6.0 * _od_scale()
+	var hit := {}
+	for p in trail:
+		var tx: float = p[0]
+		var ty: float = p[1]
+		_query(tx, ty, WAKE_R)
+		for q in _qn:
+			var i := _qbuf[q]
+			if e_hp[i] <= 0.0 or hit.has(e_uid[i]):
+				continue
+			var dx := e_x[i] - tx
+			var dy := e_y[i] - ty
+			var rr := WAKE_R + e_r[i]
+			if dx * dx + dy * dy < rr * rr:
+				hit[e_uid[i]] = true
+				_damage(i, dmg, 0.0, 0.0)
+
+
 # --- Overdrive --------------------------------------------------------------------
 
 ## Overdrive damage grows with the swarm's toughness so it never goes stale.
@@ -1681,6 +1959,8 @@ func _overdrive() -> void:
 	od_need = Defs.OD_BASE * (1.0 + Defs.OD_GROWTH * float(od_uses))
 	od_k = 0
 	iframes = maxi(iframes, 30)
+	if r_over:
+		hp = minf(max_hp, hp + 25.0)
 	var sc := _od_scale()
 	events.append([EV_OVERDRIVE, ship_id, px, py])
 	match ship_id:
@@ -1915,7 +2195,11 @@ func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 	var crit := rng.unit() < st_crit
 	var dd := dmg * st_might
 	if crit:
-		dd *= 3.0 if ship_id == "aurora" else 2.0
+		dd *= (3.0 if ship_id == "aurora" else 2.0) + (1.0 if r_supercrit else 0.0)
+	if r_star and (e_elite[i] == 1 or e_type[i] >= Defs.WARDEN):
+		dd *= 1.6
+	if r_wrath and hp < max_hp * 0.5:
+		dd *= 1.5
 	if freeze > 0:
 		dd *= 1.5
 	if e_shd[i] == 1:
@@ -1956,6 +2240,13 @@ func _contact() -> void:
 
 func _hurt(dmg: float) -> void:
 	if iframes > 0 or shield > 0 or state != RUNNING:
+		return
+	if r_halo and halo_t <= 0:
+		# Guardian Halo: the hit shatters the halo instead. The Chain holds.
+		halo_t = Defs.HALO_TICKS
+		iframes = 42
+		events.append([EV_HALO, px, py])
+		_shove(px, py, 170.0, 420.0)
 		return
 	var d := maxf(1.0, dmg - st_armor)
 	hp -= d
@@ -2057,6 +2348,8 @@ func _on_death(i: int) -> void:
 		var gain := 40.0 if type >= Defs.WARDEN else (12.0 if elite else 1.0)
 		if mods.has("overcharged"):
 			gain *= 2.0
+		if r_over:
+			gain *= 1.75
 		od = minf(od_need, od + gain)
 		if not was_ready and od >= od_need:
 			events.append([EV_OD_READY])
@@ -2110,6 +2403,9 @@ func _on_death(i: int) -> void:
 				events.append([EV_WIN])
 	if elite:
 		_drop_pickup("chest", x, y)
+		# The first elite of a run guards a relic.
+		if elite_kills == 1:
+			pickups[pickups.size() - 1].relic = true
 	elif type < Defs.WARDEN:
 		var roll := rng.unit()
 		if roll < 0.004:
@@ -2212,7 +2508,7 @@ func _update_pickups() -> void:
 					xp += xp_need - xp + 0.001
 					hp = minf(max_hp, hp + 15.0)
 				"chest", "bigchest":
-					_open_chest(p.k == "bigchest", p.x, p.y)
+					_open_chest(p.k == "bigchest", p.x, p.y, p.get("relic", false))
 			events.append([EV_PICKUP, p.k, p.x, p.y])
 			pickups.remove_at(k)
 		k -= 1
@@ -2224,8 +2520,9 @@ func _update_pickups() -> void:
 
 
 ## Prism Cache: evolves the first ready weapon, otherwise upgrades what you
-## own (one item, or three from a boss). Always some Flux on top.
-func _open_chest(big: bool, x: float, y: float) -> void:
+## own (one item, or three from a boss). Always some Flux on top, and a relic
+## choice from bosses and the first elite.
+func _open_chest(big: bool, x: float, y: float, relic := false) -> void:
 	caches_opened += 1
 	var rewards: Array = []
 	for w in weapons:
@@ -2257,6 +2554,11 @@ func _open_chest(big: bool, x: float, y: float) -> void:
 	var fl := 30 if big else 10
 	if mods.has("lucky"):
 		fl *= 2
+	if r_midas:
+		fl *= 3
+	# Boss caches (and the first elite's) also hold a relic.
+	if (big or relic) and relics.size() + pending_relics < Defs.RELIC_ORDER.size():
+		pending_relics += 1
 	flux_bonus += fl
 	rewards.append(["flux", fl])
 	events.append([EV_CHEST, rewards, big, x, y])
@@ -2279,8 +2581,9 @@ func _roll_choices() -> Array:
 			pool.append(id)
 			wts.append(3.0)
 		elif l == 0 and weapons.size() < Defs.MAX_WEAPONS:
+			# Eight weapons share the pool, so each new one is offered a little less.
 			pool.append(id)
-			wts.append(2.2)
+			wts.append(1.6)
 	for id in Defs.PASSIVE_ORDER:
 		if id == "renewal" and mods.has("bloodlight"):
 			continue
@@ -2363,5 +2666,7 @@ func _recompute() -> void:
 	st_crit = 0.05 + sh.call("crit", 0.0) + 0.07 * lv.call("fortune")
 	if mods.has("lucky"):
 		st_crit += 0.15
-	st_xp = 1.0 + sh.call("xp", 0.0) + 0.12 * lv.call("scholar")
+	if relics.has("supercrit"):
+		st_crit += 0.1
+	st_xp = 1.0 + sh.call("xp", 0.0) + 0.12 * lv.call("scholar") + (0.25 if relics.has("midas") else 0.0)
 	st_regen = 0.4 * lv.call("renewal")

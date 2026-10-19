@@ -19,6 +19,7 @@ var _score_shown := 0.0
 var _boss_name: Label
 var _banner: Label
 var _loadout: HBoxContainer
+var _relics: HBoxContainer
 var _pause: Button
 var _xp_shown := 0.0
 var _xp_flash := 0.0
@@ -68,6 +69,10 @@ func _ready() -> void:
 	_loadout.add_theme_constant_override("separation", 6)
 	_loadout.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_loadout)
+	_relics = HBoxContainer.new()
+	_relics.add_theme_constant_override("separation", 4)
+	_relics.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_relics)
 	_pause = Button.new()
 	_pause.text = "II"
 	_pause.focus_mode = Control.FOCUS_NONE
@@ -150,6 +155,12 @@ func _rebuild_loadout() -> void:
 		return
 	for c in _loadout.get_children():
 		c.queue_free()
+	for c in _relics.get_children():
+		c.queue_free()
+	for id in arena.sim.relics:
+		var ic := UiKit.icon_rect(id, 44)
+		ic.custom_minimum_size = Vector2(44, 44)
+		_relics.add_child(ic)
 	_icons.clear()
 	var ids: Array = []
 	for w in arena.sim.weapons:
@@ -225,6 +236,7 @@ func _process(delta: float) -> void:
 			_boss_shown = 1.0
 	_boss_name.modulate.a = _boss_alpha
 	_loadout.position.y = top + (104.0 + 80.0 * _boss_alpha)
+	_relics.position = Vector2(24, _loadout.position.y + 70.0)
 	_update_chain(s, delta)
 	queue_redraw()
 

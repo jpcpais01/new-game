@@ -27,6 +27,10 @@ func _ready() -> void:
 		await _threat_shots()
 		get_tree().quit()
 		return
+	if args.has("arsenal"):
+		await _arsenal_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -72,7 +76,12 @@ func _ready() -> void:
 	await _shot("2c_cache")
 	gs._chest.visible = false
 	gs._on_chest_closed()
-	await _wait(0.5)
+	await _wait(0.8)
+	# The boss cache also holds a relic.
+	if s.relic_choice:
+		await _shot("2e_relic")
+		gs._cards._pick(0)
+		await _wait(0.8)
 	s.xp = s.xp_need
 	main.arena.demo = false
 	await _wait(1.2)
@@ -232,6 +241,68 @@ func _threat_shots() -> void:
 		sc[0].scroll_vertical = 2400
 	await _wait(0.5)
 	await _shot("t4_codex")
+
+
+## The warp-in, the Ion Scythe and Photon Mines, their evolutions, a relic
+## offer and the relics in the pause menu and the Codex.
+func _arsenal_shots() -> void:
+	Save.data.tutorial_done = true
+	main.start_run()
+	await _wait(0.3)
+	await _shot("a0_warp")
+	await _wait(0.7)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	while s.seconds() < 140.0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y)
+		s.events.clear()
+	s.hp = s.max_hp
+	s.weapons = [
+		{"id": "pulse", "lvl": 4, "t": 5, "k": 0, "a": 0},
+		{"id": "scythe", "lvl": 5, "t": 5, "k": 0, "a": 0},
+		{"id": "mine", "lvl": 5, "t": 5, "k": 0, "a": 0},
+	]
+	for id in ["wake", "halo"]:
+		s._take_relic(id)
+	s.events.clear()
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(2.0)
+	main.arena.demo = false
+	await _shot("a1_arsenal")
+	s.weapons[1].lvl = Defs.EVO_LEVEL
+	s.weapons[2].lvl = Defs.EVO_LEVEL
+	main.arena.demo = true
+	await _wait(2.4)
+	main.arena.demo = false
+	await _shot("a2_evolved")
+	s.pickups.append({"k": "chest", "x": s.px, "y": s.py, "mag": true, "spd": 0.0, "relic": true})
+	main.arena.demo = false
+	await _wait(3.4)
+	gs._chest.visible = false
+	gs._on_chest_closed()
+	await _wait(1.0)
+	await _shot("a3_relic")
+	gs._cards._pick(0)
+	await _wait(0.8)
+	gs.open_pause()
+	await _wait(0.7)
+	await _shot("a4_pause")
+	gs._pause.close()
+	gs._resume()
+	main.go_codex()
+	await _wait(1.2)
+	var sc: Array = main.screen.find_children("*", "ScrollContainer", true, false)
+	if not sc.is_empty():
+		sc[0].scroll_vertical = 1500
+	await _wait(0.5)
+	await _shot("a5_codex")
 
 
 func _wait(t: float) -> void:

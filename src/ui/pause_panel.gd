@@ -43,6 +43,18 @@ func build() -> void:
 	var cc := CenterContainer.new()
 	cc.add_child(grid)
 	body.add_child(cc)
+	# Relics carried this run.
+	for id in sim.relics:
+		var r: Dictionary = Defs.RELICS[id]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		row.add_child(UiKit.icon_rect(id, 56))
+		var rl := UiKit.label("%s  ·  %s" % [String(r.name).to_upper(), r.text], 22, r.color, UiKit.body(),
+				HORIZONTAL_ALIGNMENT_LEFT)
+		rl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		rl.custom_minimum_size = Vector2(680, 0)
+		row.add_child(rl)
+		body.add_child(row)
 	# Evolution recipes for the weapons you carry.
 	var lines: Array = []
 	for w in sim.weapons:

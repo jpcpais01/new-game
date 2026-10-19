@@ -3,8 +3,12 @@ extends RefCounted
 ## A simple kiting pilot used by the title demo and the tests: flees nearby threats, drifts towards
 ## gems when safe, stays off the arena wall, and picks cards by preference.
 
-const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "amplifier", "vitality", "overclock",
-		"magnet", "thrusters", "plating", "lens", "renewal", "fortune", "scholar", "heal", "flux"]
+const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "scythe", "mine", "amplifier", "vitality",
+		"overclock", "magnet", "thrusters", "plating", "lens", "renewal", "fortune", "scholar", "halo", "phoenix",
+		"wake", "starbreaker", "wrath", "supercrit", "overcharge", "midas", "heal", "flux"]
+
+## Cards the pilot takes before anything in PREF (balance probes set this).
+static var favor: Array = []
 
 
 static func move(s: Sim) -> Vector2i:
@@ -123,7 +127,8 @@ static func pick(s: Sim) -> int:
 	var best := 0
 	var bi := 999
 	for k in s.choices.size():
-		var p := PREF.find(s.choices[k])
+		var p := favor.find(s.choices[k])
+		p = p if p >= 0 else (PREF.find(s.choices[k]) + favor.size() if PREF.has(s.choices[k]) else -1)
 		if p >= 0 and p < bi:
 			bi = p
 			best = k

@@ -1,6 +1,6 @@
 extends SceneTree
 ## Balance probe (not run in CI): prints a per-30s timeline of bot runs.
-## godot --headless --path . -s tests/tune.gd -- [seeds] [loadout-json]
+## godot --headless --path . -s tests/tune.gd -- [seeds] [loadout-json] [favoured,card,ids]
 
 
 func _init() -> void:
@@ -11,6 +11,8 @@ func _init() -> void:
 		seeds = int(args[0])
 	if args.size() > 1:
 		loadout = JSON.parse_string(args[1])
+	if args.size() > 2:
+		Autopilot.favor = Array(args[2].split(","))
 	for sd in seeds:
 		var s := Sim.new(100 + sd, loadout)
 		var hurt := 0.0
@@ -33,12 +35,14 @@ func _init() -> void:
 					line += " [cache @%ds]" % int(s.seconds())
 				elif e[0] == Sim.EV_OVERDRIVE:
 					line += " [OD @%ds]" % int(s.seconds())
+				elif e[0] == Sim.EV_RELIC:
+					line += " [RELIC %s @%ds]" % [e[1], int(s.seconds())]
 			max_en = maxi(max_en, s.en)
 			if s.tick % (30 * Sim.TPS) == 0:
 				var b := s.boss_index()
 				line += "\n  %3ds lvl%2d en%3d hp%4.0f/%4.0f hurt%5.0f kills%5d%s" % [int(s.seconds()), s.level, s.en, s.hp, s.max_hp, hurt, s.kills,
 					(" boss %.0f%%" % (100.0 * s.e_hp[b] / s.e_maxhp[b])) if b >= 0 else ""]
 		print("seed %d -> state %d at %ds, lvl %d, kills %d, max_en %d, flux %d %s" % [100 + sd, s.state, int(s.seconds()), s.level, s.kills, max_en, s.flux_earned(),
-			str(s.weapons.map(func(w): return "%s%d" % [w.id, w.lvl])) + str(s.passives)])
+			str(s.weapons.map(func(w): return "%s%d" % [w.id, w.lvl])) + str(s.passives) + str(s.relics)])
 		print(line)
 	quit()
