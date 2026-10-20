@@ -16,6 +16,13 @@ uniform vec3 tint = vec3(0.35, 0.95, 1.0);
 uniform float t = 0.0;
 uniform float night = 0.0;
 uniform float gauntlet = 0.0;
+// Sectors: the Abyss (black holes) and Corona (a sun at the centre).
+uniform float abyss = 0.0;
+uniform float corona = 0.0;
+uniform vec4 maws[3];          // x, y, grip (0..1.5), unused
+uniform float maw_core = 70.0;
+uniform float sun_r = 120.0;
+uniform float sun_heat = 0.0;  // a flare building, 0..1
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -61,6 +68,28 @@ void fragment() {
 		g -= d / max(dist, 1.0) * band * wv.w * 42.0;
 		band_glow += band * wv.w;
 	}
+	// The Abyss: black holes bend the grid towards them like lenses.
+	float shadow = 1.0;
+	vec3 disk = vec3(0.0);
+	for (int i = 0; i < 3; i++) {
+		vec4 m = maws[i];
+		if (m.z <= 0.0) {
+			continue;
+		}
+		vec2 d = w - m.xy;
+		float dist = max(length(d), 1.0);
+		float grip = min(m.z, 1.5);
+		g += d / dist * grip * 9000.0 / (dist + 90.0) * smoothstep(900.0, 200.0, dist);
+		float core = maw_core * (0.6 + 0.4 * min(grip, 1.0));
+		shadow *= smoothstep(core * 0.75, core * 1.25, dist);
+		// Accretion disk: a spiral of gold into violet, and a thin photon ring.
+		float ang = atan(d.y, d.x);
+		float spiral = pow(0.5 + 0.5 * sin(ang * 3.0 - log(dist) * 7.0 + t * 2.6), 3.0);
+		float diskm = smoothstep(core * 0.9, core * 1.6, dist) * exp(-(dist - core) / (150.0 * grip + 1.0));
+		vec3 dc = mix(vec3(1.0, 0.72, 0.36), vec3(0.62, 0.32, 1.0), smoothstep(core, core * 3.5, dist));
+		disk += dc * spiral * diskm * 0.9 * min(grip, 1.0);
+		disk += vec3(0.9, 0.75, 1.0) * exp(-abs(dist - core * 1.18) / 5.0) * 1.3 * min(grip, 1.0);
+	}
 	vec2 pd = w - player;
 	float pdist = length(pd);
 	g += pd / max(pdist, 1.0) * 26.0 * exp(-pdist / 150.0);
@@ -99,7 +128,16 @@ void fragment() {
 	st += step(0.997, hash(floor(s2) + 7.0)) * smoothstep(0.5, 0.0, length(fract(s2) - 0.5)) * 0.7;
 	col += vec3(0.7, 0.8, 1.0) * st * (0.5 + 0.5 * sin(t * 2.0 + hash(floor(s1)) * 40.0));
 
+	// The Abyss: a deep indigo sea with teal currents.
+	col = mix(col, vec3(0.008, 0.008, 0.03) + vec3(0.08, 0.04, 0.26) * pow(n1, 2.8) * 1.8
+			+ vec3(0.0, 0.14, 0.18) * pow(n2, 3.0) * 1.5, abyss * (1.0 - night));
+	// Corona: an ember sky around a dying sun.
+	col = mix(col, vec3(0.03, 0.008, 0.006) + vec3(0.34, 0.07, 0.02) * pow(n1, 2.7) * 1.7
+			+ vec3(0.2, 0.02, 0.08) * pow(n2, 3.0) * 1.3, corona * (1.0 - night));
+
 	vec3 gridc = mix(tint, vec3(1.0, 0.18, 0.42), clamp(danger, 0.0, 1.0));
+	gridc = mix(gridc, vec3(0.7, 0.55, 1.0), abyss * 0.55);
+	gridc = mix(gridc, vec3(1.0, 0.5, 0.2), corona * 0.6);
 	gridc = mix(gridc, vec3(1.0, 0.22, 0.55), night * 0.75);
 	gridc = mix(gridc, vec3(1.0, 0.66, 0.26), gauntlet * 0.6);
 	float near = exp(-pdist / 650.0);
@@ -107,12 +145,31 @@ void fragment() {
 	col += gridc * lines * (0.3 + 1.1 * near + band_glow * 1.6);
 	col += gridc * band_glow * 0.06;
 
+	// Black holes swallow the light (and the grid) at their cores.
+	col = col * shadow + disk;
+
+	// The sun: a white-hot core, a turbulent corona that flares when it swells.
+	if (corona > 0.0) {
+		float sd = length(w);
+		float sa = atan(w.y, w.x);
+		float flame = fbm(vec2(sa * 3.0 + 7.0, sd * 0.012 - t * 0.9)) + 0.5 * fbm(vec2(sa * 7.0, sd * 0.03 - t * 1.7));
+		float rim = sun_r * (1.0 + 0.08 * sun_heat + 0.03 * sin(t * 2.0));
+		float body = smoothstep(rim + 3.0, rim - 3.0, sd);
+		vec3 sunc = mix(vec3(1.0, 0.55, 0.18), vec3(1.25, 1.1, 0.85), smoothstep(rim, rim * 0.2, sd));
+		float halo = exp(-max(sd - rim, 0.0) / (70.0 + 120.0 * sun_heat)) * (0.5 + 0.9 * flame);
+		vec3 sun = sunc * body * (1.1 + 0.4 * sun_heat) + vec3(1.0, 0.42, 0.12) * halo * (0.55 + 0.75 * sun_heat);
+		sun += vec3(1.0, 0.3, 0.1) * exp(-max(sd - rim, 0.0) / 600.0) * 0.12;
+		col = col * (1.0 - body * corona) + sun * corona;
+	}
+
 	// Arena wall.
 	float r = length(w);
 	float edge = abs(r - arena_r);
 	float pulse = 0.75 + 0.25 * sin(t * 3.0 + atan(w.y, w.x) * 12.0);
 	vec3 wallc = mix(vec3(1.0, 0.28, 0.65), vec3(1.0, 0.7, 0.3), night);
 	wallc = mix(wallc, vec3(1.0, 0.78, 0.35), gauntlet);
+	wallc = mix(wallc, vec3(0.6, 0.45, 1.0), abyss * (1.0 - night));
+	wallc = mix(wallc, vec3(1.0, 0.45, 0.2), corona * (1.0 - night));
 	if (r > arena_r) {
 		col *= 0.3;
 		float stripe = step(0.5, fract((w.x + w.y) / 70.0 - t * 0.4));

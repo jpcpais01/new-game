@@ -103,6 +103,22 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = int(Missions.gauntlet_rec(data).get("best_felled", 0))
 			if run != null and run.gauntlet:
 				v = maxi(v, run.bosses_killed)
+		"maw":
+			if run != null:
+				v = run.maw_best
+				for mw in run.maws:
+					v = maxi(v, int(mw.eaten))
+		"flares":
+			v = run.flares_passed if run != null else 0
+		"sectors":
+			var sb = data.get("sector_best", {})
+			for k in Defs.SECTORS.size():
+				var rec = sb.get(String(Defs.SECTORS[k].id), {}) if sb is Dictionary else {}
+				var won: bool = rec is Dictionary and bool(rec.get("dawn", false))
+				if not won and run != null and run.dawn and run.sector == k and not run.loadout.has("daily"):
+					won = true
+				if won:
+					v += 1
 		"untouched":
 			if run != null:
 				var clean := run.tick if run.first_hurt < 0 else run.first_hurt

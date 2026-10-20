@@ -611,6 +611,32 @@ def gauntlet_icons():
               core_white=0.75), "i_gauntlet")
 
 
+# Round 12: sector icons. The Neon Grid (a square lattice in a ring), the Abyss
+# (a black hole with a spiral disk) and Corona (a sun with flame rays and gaps).
+def sector_icons():
+    ring = [(math.cos(a) * 0.95, math.sin(a) * 0.95) for a in np.linspace(0, 2 * math.pi, 49)]
+    lattice = []
+    for v in (-0.45, 0.0, 0.45):
+        h = math.sqrt(max(0.0, 0.95 ** 2 - v * v)) * 0.92
+        lattice.append([(v, -h), (v, h)])
+        lattice.append([(-h, v), (h, v)])
+    save(neon([], (0.35, 0.95, 1.0), size=96, radius=34, line=3.4, glow=8.0, fill=0.0, lines=[ring] + lattice,
+              core_white=0.7), "i_sector_grid")
+    save(neon([regular(32, 0.3)], (0.62, 0.45, 1.0), size=96, radius=34, line=3.6, glow=9.0, fill=0.05,
+              lines=spiral(3, 0.42, 0.98, 0.45) + [[(math.cos(a) * 0.38, math.sin(a) * 0.38)
+                                                   for a in np.linspace(0, 2 * math.pi, 33)]],
+              core_white=0.75), "i_sector_abyss")
+    flames = []
+    for k in range(12):
+        if k % 4 == 0:
+            continue
+        a = 2 * math.pi * k / 12
+        flames.append([(math.cos(a) * 0.55, math.sin(a) * 0.55), (math.cos(a + 0.12) * 0.78, math.sin(a + 0.12) * 0.78),
+                       (math.cos(a) * 0.98, math.sin(a) * 0.98)])
+    save(neon([regular(32, 0.42)], (1.0, 0.55, 0.22), size=96, radius=34, line=3.8, glow=9.0, fill=0.6,
+              lines=flames, core_white=0.8), "i_sector_corona")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -705,6 +731,10 @@ if __name__ == "__main__":
         gauntlet_icons()
         print("gauntlet art ok")
         sys.exit(0)
+    if "--sectors" in sys.argv:
+        sector_icons()
+        print("sector art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -721,5 +751,6 @@ if __name__ == "__main__":
     ricochet_sprites()
     leviathan_sprites()
     gauntlet_icons()
+    sector_icons()
     app_icon()
     print("art ok")

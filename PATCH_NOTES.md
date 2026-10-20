@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 13:00 UTC
+
+- **Sectors: two new arenas.** Pick where you fly in the Hangar. Each sector has its own sky, its own hazard and its own swarm, and pays a bigger score and more Flux. The Neon Grid is the arena you know.
+- **The Abyss.** A deep indigo sea where black holes open and drift after you, bending the grid around them like lenses. They drag in the swarm, your loose gems and you. Whatever reaches a core is crushed (and counts as your kill), and when a black hole collapses it bursts with every bit of light it ate. Feed one 150 of the swarm and it leaves a Prism Cache. Keep clear of the core: it burns. Score x1.2, Flux x1.15, unlocked by defeating the Warden.
+- **Corona.** An ember sky around a dying sun that burns at the heart of the arena and blocks your way. Every few seconds it swells and erupts: a wall of fire races outwards with three gaps in it, shown as cool lanes while the sun builds. Be inside a lane when the front reaches you. Everything else burns, the swarm included, and from 4:00 the gaps turn as the fire flies. Score x1.35, Flux x1.25, unlocked by reaching the dawn.
+- **Three new missions.** Sated (feed 150 to one black hole), Sunrunner (slip through 15 flares in one run) and Cartographer (reach the dawn in all three sectors), worth 1,400 Flux together. Each sector keeps its own best time and score.
+- **Everywhere else.** The title screen's demo now flies through all three sectors, the Codex describes them, run intros and the pause menu name the sector, and new sounds rumble as black holes open and collapse and the sun erupts.
+
 ## Oct 20, 2026 · 10:00 UTC
 
 - **New mode: the Gauntlet.** Every boss, back to back. Draft five upgrade cards, then the Leviathan, the Warden, the Seraph and the Eclipse come for you one after another, each 16 seconds after the last one falls, in an arena that burns amber and gold. Clear all four and the cycle starts again, stronger, until you fall. Your ship and Forge fly with you; there are no rifts and no elites, only bosses and the swarm between them. It unlocks once you have defeated the Warden, right under the Daily Run on the title screen.

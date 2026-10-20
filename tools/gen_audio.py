@@ -771,6 +771,64 @@ def sfx_gauntlet():
     write_wav("gauntlet_clear", x, 0.9)
 
 
+def sfx_sectors():
+    """Sectors: a black hole opening, eating and collapsing; the sun swelling, a flare, a clean pass (own RNG)."""
+    global rng
+    rng = np.random.default_rng(389)
+    # Maw opens: a sub drop with a reversed whoosh sucking inwards.
+    n = int(1.6 * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(sweep_phase(120, 32, n, 0.6)) * env(n, 0.05, 1.2, 0.2, 0.3) * 0.8
+    suck = lowpass(highpass(noise(n), 300), 2400) * np.linspace(0, 1, n) ** 2.5 * 0.45
+    x += suck[::-1]
+    x += np.sin(2 * np.pi * 55 * tt * (1 + 0.01 * np.sin(2 * np.pi * 0.7 * tt))) * env(n, 0.3, 1.0) * 0.25
+    write_wav("maw_open", x, 0.85)
+    # Maw eats: a short, soft, falling blip.
+    n = int(0.18 * SR)
+    x = np.sin(sweep_phase(900, 260, n, 0.5)) * expdecay(n, 22) * 0.5
+    write_wav("maw_eat", x, 0.6)
+    # Collapse: an inward rush, a deep boom, then a glitter of chimes as the light pours out.
+    n = int(2.2 * SR)
+    x = np.zeros(n)
+    pre = int(0.45 * SR)
+    x[:pre] += lowpass(highpass(noise(pre), 400), 3000) * np.linspace(0, 1, pre) ** 3 * 0.6
+    x[:pre] += np.sin(sweep_phase(60, 240, pre, 2.0)) * np.linspace(0, 1, pre) ** 2 * 0.4
+    seg = n - pre
+    x[pre:] += np.sin(sweep_phase(80, 28, seg, 0.4)) * expdecay(seg, 2.6) * 0.95
+    x[pre:] += lowpass(noise(seg), 700) * expdecay(seg, 6) * 0.6
+    for k, m in enumerate([84, 88, 91, 96, 100, 103]):
+        st = pre + int((0.05 + 0.06 * k) * SR)
+        sg = n - st
+        t2 = np.arange(sg) / SR
+        x[st:] += np.sin(2 * np.pi * mtof(m) * t2) * expdecay(sg, 7) * 0.08
+    write_wav("maw_collapse", x, 0.9)
+    # The sun swells: a rumbling, rising roar.
+    n = int(1.7 * SR)
+    tt = np.arange(n) / SR
+    rise = np.linspace(0, 1, n) ** 1.6
+    x = lowpass(noise(n), 500) * rise * 0.7
+    x += np.sin(sweep_phase(45, 110, n, 1.5)) * rise * 0.5
+    x += lowpass(highpass(noise(n), 900), 4000) * rise ** 3 * 0.25
+    write_wav("flare_warn", x, 0.8)
+    # The flare: a roaring burst of fire with a crackle.
+    n = int(1.5 * SR)
+    x = lowpass(highpass(noise(n), 150), 3500) * env(n, 0.01, 0.0, 1.0, 1.2, 0.15) * 0.8
+    x += np.sin(sweep_phase(110, 40, n, 0.5)) * expdecay(n, 3) * 0.7
+    crackle = (rng.random(n) < 0.004).astype(float) * rng.uniform(-1, 1, n)
+    x += highpass(crackle, 2000) * env(n, 0.05, 1.0) * 0.6
+    write_wav("flare", x, 0.9)
+    # Slipped through: a quick, cool rising chime.
+    n = int(0.5 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([86, 93]):
+        st = int(0.05 * k * SR)
+        sg = n - st
+        t2 = np.arange(sg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2) + 0.25 * np.sin(2 * np.pi * mtof(m) * 2.0 * t2)) * \
+            expdecay(sg, 9) * 0.3
+    write_wav("flare_pass", x, 0.7)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -805,6 +863,10 @@ if __name__ == "__main__":
         sfx_gauntlet()
         print("gauntlet audio ok")
         sys.exit(0)
+    if "--sectors" in sys.argv:
+        sfx_sectors()
+        print("sector audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -820,4 +882,5 @@ if __name__ == "__main__":
     sfx_ricochet()
     sfx_leviathan()
     sfx_gauntlet()
+    sfx_sectors()
     print("audio ok")

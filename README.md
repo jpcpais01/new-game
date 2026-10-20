@@ -23,6 +23,9 @@ Starfall of meteors or win an Umbral Trial for an Umbral relic, power at a price
 light trail that grows from an ember to a prismatic ribbon as you master it. Felled the Warden? The Gauntlet
 throws all four bosses at you back to back, then again, stronger, and times every
 fight: race your best splits, clear it under four minutes, see how many cycles you last.
+Three sectors to fly: the Neon Grid, the Abyss (black holes that drag in the swarm, your
+gems and you, then burst with everything they ate) and Corona (a sun at the centre whose
+flares race outwards as walls of fire with gaps to slip through).
 Built with Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
@@ -33,7 +36,7 @@ publishes a new release automatically.
 
 | Path | What lives there |
 | --- | --- |
-| `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions, the Chain), `missions.gd` (mission progress), `daily.gd` (the day's seed, ship and mutators), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). |
+| `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions, the Chain), `missions.gd` (mission progress), `daily.gd` (the day's seed, ship and mutators), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). Sector hazards (the Abyss's black holes, Corona's sun and flares) live in `sim.gd` too. |
 | `src/view/` | Drawing only: `arena.gd` (runs the sim in real time, camera, shake, slow-mo, events → effects/sound), `entities.gd`, `fx.gd` (particles, rings, beams, lightning, damage numbers), `background.gdshader` (warping grid). |
 | `src/ui/` | Screens: title (live autopilot demo behind it), the Gauntlet, game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex, Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |

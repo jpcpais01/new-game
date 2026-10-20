@@ -74,6 +74,13 @@ func _ready() -> void:
 	list.add_child(UiKit.label("RIFTS  ·  ONE OPENS EVERY MINUTE OR SO", 30, Defs.RIFTS[0].color, UiKit.display()))
 	for r in Defs.RIFTS:
 		list.add_child(_info_row("rift_" + String(r.id), String(r.name), String(r.text), r.color))
+	list.add_child(UiKit.label("SECTORS  ·  CHOSEN IN THE HANGAR", 30, Defs.SECTORS[1].color, UiKit.display()))
+	for sk in Defs.SECTORS.size():
+		var sd: Dictionary = Defs.SECTORS[sk]
+		var text := String(sd.text)
+		if not Save.sector_unlocked(sk):
+			text = String(sd.lock) + " " + text
+		list.add_child(_info_row("sector_" + String(sd.id), String(sd.name), text, sd.color))
 	list.add_child(UiKit.label("THE SWARM", 34, UiKit.CYAN, UiKit.display()))
 	for i in LORE.size():
 		list.add_child(_enemy_row(i))

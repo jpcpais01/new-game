@@ -62,6 +62,7 @@ var _end_timer := -1.0
 var _cam_pos := Vector2.ZERO
 var _danger := 0.0
 var _night := 0.0
+var _sun_heat := 0.0
 var _gold := 0.0
 var _slash_spin := 1.0
 ## 1 -> 0 over the opening second of a run: the ship warps in on a pillar of light.
@@ -266,6 +267,7 @@ func _update_view(delta: float) -> void:
 					1.1, Color(0.9, 0.5, 1.8), 0, 4.0)
 	if not paused and sim.state == Sim.RUNNING:
 		_rift_particles(p)
+		_sector_particles()
 	_update_trail(p)
 	# Camera: follow with a little look-ahead, plus trauma shake.
 	var look := mv * 70.0
@@ -376,6 +378,32 @@ func _update_bg(delta: float, p: Vector2) -> void:
 	_gold = move_toward(_gold, 1.0 if sim.gauntlet else 0.0, delta * 0.5)
 	bg_mat.set_shader_parameter("gauntlet", _gold)
 	bg_mat.set_shader_parameter("arena_r", Sim.ARENA_R)
+	bg_mat.set_shader_parameter("abyss", 1.0 if sim.sector == Defs.SECTOR_ABYSS else 0.0)
+	bg_mat.set_shader_parameter("corona", 1.0 if sim.sector == Defs.SECTOR_CORONA else 0.0)
+	var ms := PackedVector4Array()
+	for m in sim.maws:
+		if ms.size() < 3:
+			ms.append(Vector4(lerpf(m.ox, m.x, alpha), lerpf(m.oy, m.y, alpha), _maw_grip(m), 0.0))
+	while ms.size() < 3:
+		ms.append(Vector4.ZERO)
+	bg_mat.set_shader_parameter("maws", ms)
+	bg_mat.set_shader_parameter("maw_core", Defs.MAW_CORE)
+	bg_mat.set_shader_parameter("sun_r", Defs.SUN_R)
+	var heat := sim.flare_warn()
+	if not sim.flare.is_empty() and int(sim.flare.t) >= Defs.FLARE_WARN:
+		heat = maxf(0.0, 1.0 - float(int(sim.flare.t) - Defs.FLARE_WARN) / 40.0)
+	_sun_heat = lerpf(_sun_heat, heat, clampf(delta * 10.0, 0.0, 1.0))
+	bg_mat.set_shader_parameter("sun_heat", _sun_heat)
+
+
+## A black hole's grip as drawn: it swells open, and in its last second it
+## shudders before collapsing.
+func _maw_grip(m: Dictionary) -> float:
+	var g := Sim.maw_strength(m)
+	var left := int(m.life) - int(m.t)
+	if left < 60:
+		g = 1.0 + 0.5 * float(left) / 60.0 + 0.15 * sin(vtime * 50.0)
+	return g
 
 
 # --- events -----------------------------------------------------------------------
@@ -691,6 +719,10 @@ func handle_events() -> void:
 				_on_levi(e, loud)
 			Sim.EV_GAUNTLET:
 				_on_gauntlet(e, loud)
+			Sim.EV_MAW:
+				_on_maw(e, loud)
+			Sim.EV_FLARE:
+				_on_flare(e, loud)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
@@ -852,6 +884,125 @@ func _on_rift(e: Array, loud: bool) -> void:
 					var lost := ["BEACON LOST", "WISP ESCAPED", "TRIAL FAILED", "STRUCK BY A STAR"]
 					banner.emit(lost[kind], UiKit.RED)
 				Sfx.play("blink", 0.5)
+
+
+## The Abyss: a black hole opens with an inward rush, eats with a streak of
+## light, burns you at its core and collapses in a burst of light.
+func _on_maw(e: Array, loud: bool) -> void:
+	var x: float = e[1]
+	var y: float = e[2]
+	var violet := Color(0.7, 0.45, 1.0)
+	match int(e[3]):
+		0:
+			fx.ring(x, y, Defs.MAW_PULL, 30.0, 0.9, violet, 1.6)
+			fx.ring(x, y, Defs.MAW_PULL * 0.6, 20.0, 0.7, Color(1.0, 0.75, 0.4), 1.2)
+			add_wave(x, y, 1.2, 700.0)
+			if loud:
+				coach.emit("maw")
+				banner.emit("A BLACK HOLE OPENS", violet)
+				Sfx.play("maw_open")
+				Sfx.buzz(40)
+		1:
+			var m := _nearest_maw(x, y)
+			if not m.is_empty():
+				var dx: float = float(m.x) - x
+				var dy: float = float(m.y) - y
+				fx.particle(x, y, dx * 3.0, dy * 3.0, 0.3, 1.0, Color(1.6, 1.1, 2.2), 0, 3.0)
+				fx.spray(x, y, Color(1.4, 0.9, 2.0), 3, atan2(dy, dx), 0.6, 300.0, 0.7, 0.25)
+			if loud and randf() < 0.5:
+				Sfx.play("maw_eat", randf_range(0.85, 1.25))
+		2:
+			var big := int(e[4]) >= Defs.MAW_SATED
+			for k in 4:
+				fx.ring(x, y, 20.0, Defs.MAW_BLAST * (1.2 + 0.7 * k), 0.5 + 0.18 * k,
+						violet if k % 2 == 0 else Color(1.0, 0.75, 0.4), 1.8)
+			fx.burst(x, y, Color(1.8, 1.2, 2.4), 90, 1300.0, 1.5, 0.9)
+			fx.burst(x, y, Color(2.2, 1.7, 0.8), 40, 800.0, 1.1, 0.7)
+			fx.flash(x, y, 520.0, 0.5, violet)
+			add_wave(x, y, 2.6, 1000.0)
+			_zoom = maxf(_zoom, 0.35)
+			shake(0.45)
+			if loud:
+				Sfx.play("maw_collapse")
+				Sfx.buzz(90)
+				if big:
+					banner.emit("SATED · %d DEVOURED" % int(e[4]), Color(1.0, 0.8, 0.4))
+		3:
+			fx.burst(x, y, Color(1.6, 0.8, 2.2), 24, 600.0, 1.0, 0.4)
+
+
+func _nearest_maw(x: float, y: float) -> Dictionary:
+	var best := {}
+	var bd := INF
+	for m in sim.maws:
+		var d := Vector2(float(m.x) - x, float(m.y) - y).length_squared()
+		if d < bd:
+			bd = d
+			best = m
+	return best
+
+
+## Corona: the sun swells, erupts, burns, and a ping when you slip through.
+func _on_flare(e: Array, loud: bool) -> void:
+	var ember := Color(1.0, 0.5, 0.18)
+	match int(e[1]):
+		0:
+			fx.ring(0.0, 0.0, Defs.SUN_R * 3.0, Defs.SUN_R, 0.8, ember, 1.4)
+			if loud:
+				coach.emit("flare")
+				Sfx.play("flare_warn")
+		1:
+			for k in 3:
+				fx.ring(0.0, 0.0, Defs.SUN_R, Defs.SUN_R * (2.2 + k), 0.4 + 0.12 * k, Color(1.0, 0.75, 0.35), 2.0)
+			fx.burst(0.0, 0.0, Color(2.4, 1.3, 0.5), 70, 1200.0, 1.6, 0.8)
+			add_wave(0.0, 0.0, 2.4, Defs.FLARE_SPEED * 2.0)
+			shake(0.3)
+			if loud:
+				Sfx.play("flare")
+				Sfx.buzz(60)
+		2:
+			fx.burst(e[2], e[3], Color(2.4, 1.0, 0.3), 36, 700.0, 1.2, 0.5)
+			fx.flash(e[2], e[3], 200.0, 0.3, ember)
+		4:
+			fx.ring(e[2], e[3], 20.0, 140.0, 0.35, Color(0.55, 1.0, 1.0), 1.4)
+			fx.spray(e[2], e[3], Color(1.0, 2.0, 2.0), 12, randf() * TAU, TAU, 420.0, 0.8, 0.3)
+			if loud:
+				Sfx.play("flare_pass", 1.0 + 0.02 * float(mini(sim.flares_passed, 20)))
+
+
+## Sector ambience: light spiralling into black holes, embers off the sun and
+## the flare front.
+func _sector_particles() -> void:
+	if sim.sector == Defs.SECTOR_ABYSS:
+		for m in sim.maws:
+			var grip := minf(Sim.maw_strength(m), 1.0)
+			for k in 3:
+				if randf() > grip:
+					continue
+				var ang := randf() * TAU
+				var rr := Defs.MAW_PULL * randf_range(0.25, 0.9)
+				var sx: float = float(m.x) + cos(ang) * rr
+				var sy: float = float(m.y) + sin(ang) * rr
+				var tang := ang + PI * 0.5
+				var c := Color(1.6, 1.1, 0.6) if randf() < 0.35 else Color(1.0, 0.6, 2.0)
+				fx.particle(sx, sy, (float(m.x) - sx) * 1.6 + cos(tang) * 260.0, (float(m.y) - sy) * 1.6 + sin(tang) * 260.0,
+						0.55, 0.9, c, 1, 0.6)
+	elif sim.sector == Defs.SECTOR_CORONA:
+		if randf() < 0.7:
+			var ang2 := randf() * TAU
+			var r0 := Defs.SUN_R * randf_range(0.9, 1.15)
+			var sp := randf_range(80.0, 260.0) * (1.0 + 2.0 * _sun_heat)
+			fx.particle(cos(ang2) * r0, sin(ang2) * r0, cos(ang2) * sp, sin(ang2) * sp, randf_range(0.6, 1.4), 1.0,
+					Color(2.2, 1.0, 0.3), 0, 1.5)
+		if not sim.flare.is_empty() and int(sim.flare.t) >= Defs.FLARE_WARN:
+			var fr: float = sim.flare.r
+			for k in 6:
+				var ang3 := randf() * TAU
+				if sim.flare_gap(int(ang3 / TAU * float(Trig.STEPS)) & Trig.MASK):
+					continue
+				var v := randf_range(100.0, 380.0)
+				fx.particle(cos(ang3) * fr, sin(ang3) * fr, cos(ang3) * v, sin(ang3) * v, 0.5, 1.2,
+						Color(2.4, 1.2, 0.35), 0, 2.0)
 
 
 ## Sparks that make each rift read at a glance.

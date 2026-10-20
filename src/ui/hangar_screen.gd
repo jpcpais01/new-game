@@ -16,6 +16,11 @@ var _swipe_from := -1.0
 var _rad_name: Label
 var _rad_text: Label
 var _rad_icon: TextureRect
+var _sec := 0
+var _sec_box: StyleBoxFlat
+var _sec_icon: TextureRect
+var _sec_name: Label
+var _sec_text: Label
 
 
 func _ready() -> void:
@@ -61,6 +66,7 @@ func _ready() -> void:
 	_title = UiKit.label("", 34, UiKit.DIM, UiKit.display_light())
 	col.add_child(_title)
 	col.add_child(_radiance_row())
+	col.add_child(_sector_row())
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -175,6 +181,7 @@ func _show(i: int, dir: int) -> void:
 		_info.add_child(_section("OVERDRIVE", "od_" + String(sd.id), String(sd.od), String(sd.od_text), col))
 		_launch.disabled = true
 		_launch.text = "LOCKED"
+	_sector_lock()
 	UiKit.pop_in(_info, 0.0, 16)
 
 
@@ -268,6 +275,91 @@ func _sync_radiance() -> void:
 				Defs.radiance_score(r), Defs.radiance_flux(r), "" if r == 1 else " Keeps every rule below."]
 	_rad_name.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.2))
 	_rad_name.add_theme_color_override("font_shadow_color", Color(col, 0.55))
+
+
+## Sectors: which arena to fly. Locked ones are shown with what opens them.
+func _sector_row() -> Control:
+	var p := PanelContainer.new()
+	_sec_box = UiKit.box(Color(0.5, 0.5, 0.6, 0.5), Color(0.03, 0.03, 0.08, 0.85), 24, 2, 8)
+	_sec_box.content_margin_left = 8
+	_sec_box.content_margin_right = 8
+	_sec_box.content_margin_top = 6
+	_sec_box.content_margin_bottom = 10
+	p.add_theme_stylebox_override("panel", _sec_box)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 6)
+	p.add_child(h)
+	var minus := _arrow("‹")
+	minus.custom_minimum_size = Vector2(90, 0)
+	minus.add_theme_font_size_override("font_size", 80)
+	minus.pressed.connect(func(): _step_sector(-1))
+	h.add_child(minus)
+	_sec_icon = UiKit.icon_rect("sector_grid", 84)
+	_sec_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(_sec_icon)
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 0)
+	_sec_name = UiKit.glow_label("", 38, Color.WHITE, UiKit.display())
+	v.add_child(_sec_name)
+	_sec_text = UiKit.label("", 28, Color(0.9, 0.9, 1.0, 0.85), UiKit.body())
+	_sec_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_sec_text.custom_minimum_size = Vector2(560, 0)
+	v.add_child(_sec_text)
+	h.add_child(v)
+	var plus := _arrow("›")
+	plus.custom_minimum_size = Vector2(90, 0)
+	plus.add_theme_font_size_override("font_size", 80)
+	plus.pressed.connect(func(): _step_sector(1))
+	h.add_child(plus)
+	_sec = Save.current_sector()
+	_sync_sector()
+	return p
+
+
+func _step_sector(d: int) -> void:
+	_sec = posmod(_sec + d, Defs.SECTORS.size())
+	Save.set_sector(_sec)
+	var open := Save.sector_unlocked(_sec)
+	Sfx.play("select" if open else "click", 0.9 + 0.08 * _sec)
+	Sfx.buzz(20)
+	_sync_sector()
+	_sec_name.pivot_offset = _sec_name.size * 0.5
+	_sec_name.scale = Vector2(1.2, 1.2)
+	create_tween().tween_property(_sec_name, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK) \
+			.set_ease(Tween.EASE_OUT)
+	_show(_index, 0)
+
+
+func _sync_sector() -> void:
+	var sd := Defs.sector(_sec)
+	var col: Color = sd.color
+	var open := Save.sector_unlocked(_sec)
+	_sec_icon.texture = Art.icon("sector_" + String(sd.id))
+	_sec_icon.modulate = Color(1.3, 1.3, 1.3) if open else Color(0.4, 0.4, 0.5, 0.8)
+	_sec_box.border_color = Color(col, 0.6 if open else 0.25)
+	_sec_name.text = "SECTOR  ·  %s%s" % [String(sd.name).to_upper(), "" if open else "  ·  LOCKED"]
+	_sec_name.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.25) if open else Color(0.6, 0.6, 0.7))
+	_sec_name.add_theme_color_override("font_shadow_color", Color(col, 0.55 if open else 0.1))
+	if not open:
+		_sec_text.text = String(sd.lock) + " " + String(sd.text)
+		return
+	var text := String(sd.text)
+	if _sec > 0:
+		text += "  Score x%.2f, Flux x%.2f." % [float(sd.score), float(sd.flux)]
+	var rec := Save.sector_rec(_sec)
+	if not rec.is_empty():
+		text += "  Best %s · %s%s" % [UiKit.fmt_time(float(rec.time)), UiKit.fmt_int(int(rec.score)),
+				" · dawn ✓" if bool(rec.get("dawn", false)) else ""]
+	_sec_text.text = text
+
+
+## A locked sector cannot be launched into.
+func _sector_lock() -> void:
+	if _sec_name == null or Save.sector_unlocked(_sec) or _launch.disabled:
+		return
+	_launch.disabled = true
+	_launch.text = "SECTOR LOCKED"
 
 
 func _section(head: String, icon: String, name: String, text: String, col: Color) -> Control:
