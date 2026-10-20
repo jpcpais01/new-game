@@ -412,6 +412,26 @@ const SHIPS := [
 		"stats": {"hp": -10.0}},
 ]
 
+## Light trails: every ship streams one, and it grows with the ship's mastery
+## (the highest Radiance it has carried to the dawn, -1 before its first).
+## [mastery needed, name, how to earn it]
+const TRAILS := [
+	[-1, "Ember", "A thin stream of light."],
+	[0, "Comet", "Reach the dawn with this ship."],
+	[3, "Starwake", "Reach the dawn at Radiance 3 with this ship."],
+	[6, "Helix", "Reach the dawn at Radiance 6 with this ship."],
+	[10, "Prism", "Reach the dawn at Radiance 10 with this ship."],
+]
+
+
+static func trail_tier(mastery: int) -> int:
+	var tier := 0
+	for k in TRAILS.size():
+		if mastery >= int(TRAILS[k][0]):
+			tier = k
+	return tier
+
+
 ## Overdrive: kills charge the meter; each use makes the next one costlier.
 const OD_BASE := 140.0
 const OD_GROWTH := 0.3

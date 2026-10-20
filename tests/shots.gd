@@ -495,6 +495,11 @@ func _ricochet_shots() -> void:
 
 
 func _levi_shots() -> void:
+	Save.data.ship_best["strix"] = {"time": 500.0, "score": 90000, "dawn": true, "radiance": 6}
+	main.go_hangar()
+	await _wait(1.2)
+	await _shot("l0_hangar_helix")
+	Save.data.ship_best["strix"].radiance = 10
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen

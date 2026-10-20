@@ -311,6 +311,9 @@ func _draw_glow() -> void:
 		var x := lerpf(s.ppx, s.px, a)
 		var y := lerpf(s.ppy, s.py, a)
 		var sc := arena.ship_color
+		if arena.warp <= 0.0:
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			TrailArt.draw(self, arena.trail_pts, sc, arena.trail_tier, t)
 		if arena.warp > 0.0:
 			var wk := arena.warp
 			draw_set_transform(Vector2(x, y), -PI * 0.5, Vector2.ONE)

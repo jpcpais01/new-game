@@ -62,6 +62,11 @@ var _slash_spin := 1.0
 var warp := 0.0
 var _aberr := 0.0
 var _zoom := 0.0
+## The ship's light trail: recent positions [Vector2], their times, and the
+## style its mastery has earned (Defs.TRAILS).
+var trail_pts := PackedVector2Array()
+var _trail_t := PackedFloat32Array()
+var trail_tier := 0
 
 
 func _ready() -> void:
@@ -87,6 +92,9 @@ func start(new_sim: Sim, is_demo: bool) -> void:
 	paused = false
 	burst_request = false
 	ship_color = Defs.ship(sim.ship_id).color
+	trail_tier = Defs.trail_tier(Save.ship_radiance(sim.ship_id))
+	trail_pts.clear()
+	_trail_t.clear()
 	_acc = 0.0
 	_slow = 1.0
 	_hitstop = 0.0
@@ -251,6 +259,7 @@ func _update_view(delta: float) -> void:
 					1.1, Color(0.9, 0.5, 1.8), 0, 4.0)
 	if not paused and sim.state == Sim.RUNNING:
 		_rift_particles(p)
+	_update_trail(p)
 	# Camera: follow with a little look-ahead, plus trauma shake.
 	var look := mv * 70.0
 	_cam_pos = _cam_pos.lerp(p + look, clampf(delta * 6.0, 0.0, 1.0))
@@ -282,6 +291,29 @@ func _update_view(delta: float) -> void:
 		Sfx.set_intensity(clampf(float(sim.en) / 160.0 + (0.6 if sim.boss_index() >= 0 else 0.0), 0.0, 1.0))
 	fx.update_fx(delta * (_slow if _hitstop <= 0.0 else 0.15))
 	_update_bg(delta, p)
+
+
+## Samples the ship's path for its light trail; Starwake and Prism shed stars.
+func _update_trail(p: Vector2) -> void:
+	if sim.state == Sim.DEAD:
+		trail_pts.clear()
+		_trail_t.clear()
+		return
+	var n := trail_pts.size()
+	if n == 0 or trail_pts[n - 1].distance_squared_to(p) > 9.0:
+		trail_pts.append(p)
+		_trail_t.append(vtime)
+	elif n > 0:
+		trail_pts[n - 1] = p
+	var life := 0.35 if trail_tier == 0 else 0.6
+	while _trail_t.size() > 0 and vtime - _trail_t[0] > life:
+		trail_pts.remove_at(0)
+		_trail_t.remove_at(0)
+	if trail_tier >= 2 and not paused and trail_pts.size() > 4 and randf() < 0.5:
+		var q := trail_pts[randi() % (trail_pts.size() - 2)]
+		var sc := ship_color if trail_tier < 4 else Color.from_hsv(randf(), 0.5, 1.0)
+		fx.particle(q.x + randf_range(-8, 8), q.y + randf_range(-8, 8), randf_range(-30, 30), randf_range(-30, 30),
+				0.5, 0.7, sc * 1.8, 0, 2.5)
 
 
 ## The impact pass costs a full-screen read, so it only runs while a hit or an
