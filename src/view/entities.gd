@@ -262,6 +262,8 @@ func _draw_glow() -> void:
 				var hydra := s.b_pierce[i] > 0
 				draw_set_transform(Vector2(x, y), ang, Vector2(1.25, 1.25) if hydra else Vector2(1.1, 1.1))
 				draw_texture(missile, Vector2(-32, -32), Color(0.9, 2.2, 1.0) if hydra else Color(2.0, 1.5, 0.8))
+			4, 5, 6:
+				_draw_glaive(s, i, x, y, t, glow)
 			_:
 				draw_set_transform(Vector2(x, y), ang, Vector2(0.75, 0.75))
 				draw_texture(missile, Vector2(-32, -32), Color(0.7, 2.0, 0.9))
@@ -328,6 +330,39 @@ func _draw_glow() -> void:
 				draw_arc(Vector2.ZERO, 52.0, 0.0, TAU, 48, Color(gold, 0.18), 8.0)
 			else:
 				draw_arc(Vector2.ZERO, 46.0, -PI * 0.5, -PI * 0.5 + TAU * hf, 40, Color(gold, 0.3), 2.0)
+
+
+## Ricochet Glaive: a spinning disc with a short smear of afterimages.
+## Ouroboros glaives burn gold-lime and brighten with every ricochet.
+func _draw_glaive(s: Sim, i: int, x: float, y: float, t: float, glow: Texture2D) -> void:
+	var kind := s.b_kind[i]
+	var evo := s.is_evolved("glaive") and kind != 6
+	var col := Color(1.35, 1.5, 0.45) if evo else Color(0.9, 1.5, 0.55)
+	if kind == 6:
+		col = Color(1.1, 1.5, 0.7)
+	var spec := s.glaive_spec()
+	var heat := 0.0
+	if evo and not spec.is_empty():
+		heat = clampf((s.b_dmg[i] / float(spec.dmg) - 1.0) / 2.0, 0.0, 1.0)
+		col = col.lerp(Color(1.8, 1.5, 0.9), heat)
+	var sc := s.b_r[i] / 16.0 * (0.7 if kind == 6 else 1.0)
+	var spin := t * (26.0 if kind == 5 else 20.0) + float(i)
+	var tex := Art.tex("glaive_evo" if evo else "glaive")
+	var vx := s.b_vx[i]
+	var vy := s.b_vy[i]
+	var sp := sqrt(vx * vx + vy * vy) + 0.001
+	for k in range(3, 0, -1):
+		var back := float(k) * 0.022
+		draw_set_transform(Vector2(x - vx * back, y - vy * back), spin - float(k) * 0.5, Vector2(sc, sc))
+		draw_texture(tex, Vector2(-32, -32), Color(col, 0.09 * float(4 - k)))
+	draw_set_transform(Vector2(x, y), 0.0, Vector2(sc, sc) * (0.5 + 0.2 * heat))
+	draw_texture(glow, Vector2(-64, -64), Color(col * 0.5, 0.16 + 0.14 * heat))
+	draw_set_transform(Vector2(x, y), spin, Vector2(sc, sc))
+	draw_texture(tex, Vector2(-32, -32), col)
+	if kind == 5 and sp > 900.0:
+		# Flying home: a thin streak back towards the ship.
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_line(Vector2(x, y), Vector2(x - vx * 0.05, y - vy * 0.05), Color(col, 0.35), 4.0 * sc)
 
 
 ## Rifts: a beacon's ring and pillar, the fleeing Prism Wisp, the Umbral vortex
@@ -407,7 +442,63 @@ func _draw_rift(s: Sim, t: float, a: float) -> void:
 				var pulse2 := 0.75 + 0.25 * sin(t * (14.0 if warn else 5.0))
 				draw_arc(Vector2.ZERO, 92.0, -PI * 0.5, -PI * 0.5 + TAU * tl, 64, Color(tc * 1.6, 0.85 * pulse2), 5.0)
 				draw_arc(Vector2.ZERO, 80.0, -PI * 0.5, -PI * 0.5 + TAU * kf, 64, Color(1.6, 1.2, 2.0, 0.9), 4.0)
+		Defs.RIFT_STARFALL:
+			_draw_starfall(s, x, y, col, t, fade)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Starfall: a wide ring of cold light with a star at its heart. Once it is
+## called down, every meteor shows where it will land: a shrinking target
+## and the comet itself, falling in from high above.
+func _draw_starfall(s: Sim, x: float, y: float, col: Color, t: float, fade: float) -> void:
+	var on: bool = s.rift.on
+	var k := s.rift_frac()
+	var rr := Defs.STARFALL_R
+	var glow := Art.tex("glow")
+	var ring := Art.tex("ring")
+	draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE)
+	var segs := 24
+	for i in segs:
+		var a0 := -t * 0.35 + TAU * float(i) / float(segs)
+		draw_arc(Vector2.ZERO, rr, a0, a0 + TAU / float(segs) * 0.5, 6, Color(col * 1.4, (0.5 + 0.3 * k) * fade), 4.0)
+	draw_arc(Vector2.ZERO, rr + 16.0, 0.0, TAU, 72, Color(col, 0.1 * fade), 12.0)
+	if on:
+		draw_arc(Vector2.ZERO, rr - 16.0, -PI * 0.5, -PI * 0.5 + TAU * k, 72, Color(col * 2.0, 0.95), 9.0)
+		draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE * (rr * 2.2 / 128.0))
+		draw_texture(glow, Vector2(-64, -64), Color(col, 0.08 + 0.1 * k))
+	else:
+		var pulse := fmod(t * 0.7, 1.0)
+		draw_arc(Vector2.ZERO, rr * (0.3 + 0.7 * pulse), 0.0, TAU, 64, Color(col * 1.3, 0.35 * (1.0 - pulse) * fade), 3.0)
+	var cs := 0.85 + 0.08 * sin(t * 4.0)
+	draw_set_transform(Vector2(x, y), t * (0.4 if not on else 2.0), Vector2(cs, cs))
+	draw_texture(Art.tex("i_rift_starfall"), Vector2(-48, -48), Color(1.6, 1.6, 1.8, fade))
+	if not s.rift.has("mets"):
+		return
+	var comet := Art.tex("comet")
+	for m in s.rift.mets:
+		var mx: float = m[0]
+		var my: float = m[1]
+		var left := clampf(float(m[2]) / float(Defs.METEOR_FALL), 0.0, 1.0)
+		var near := 1.0 - left
+		var mr := Defs.METEOR_R
+		# The mark: a target ring closing in, red-hot just before impact.
+		var hot := Color(1.0, 0.45, 0.35) if left < 0.3 else col
+		draw_set_transform(Vector2(mx, my), 0.0, Vector2.ONE)
+		draw_circle(Vector2.ZERO, mr, Color(hot, 0.05 + 0.12 * near))
+		draw_arc(Vector2.ZERO, mr, 0.0, TAU, 40, Color(hot * 1.5, 0.35 + 0.5 * near), 2.5)
+		draw_arc(Vector2.ZERO, mr * (0.25 + 0.75 * left), 0.0, TAU, 32, Color(hot * 1.8, 0.4 + 0.5 * near), 3.0)
+		# The comet: falls along a steep diagonal and lands on the mark.
+		var ox := -260.0 * left
+		var oy := -900.0 * left
+		var cx := mx + ox
+		var cy := my + oy
+		var dir := atan2(900.0, 260.0)
+		draw_set_transform(Vector2(cx, cy), dir, Vector2(1.0, 1.0) * (0.7 + 0.5 * near))
+		draw_texture(comet, Vector2(-224, -32), Color(col * 1.8, 0.3 + 0.7 * near))
+		draw_set_transform(Vector2(cx, cy), 0.0, Vector2.ONE * (0.4 + 0.4 * near))
+		draw_texture(glow, Vector2(-64, -64), Color(1.8, 1.8, 2.2, 0.5 + 0.5 * near))
+		draw_set_transform(Vector2(mx, my), t * 3.0, Vector2.ONE * (mr / 110.0) * (0.6 + 0.4 * left))
+		draw_texture(ring, Vector2(-128, -128), Color(hot * 1.3, 0.25 * near))
 
 
 ## Ion Wake: a ribbon of light along the path the ship flew.

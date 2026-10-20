@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 05:00 UTC
+
+- **New weapon: the Ricochet Glaive.** Throw a spinning glaive that leaps from enemy to enemy with a bright ricochet, then flies home through everything in its way. It is thrown again only once it is back in your hand, so fighting close to the swarm means faster throws. Levels add ricochets and more glaives, up to three at once.
+- **New evolution: Ouroboros.** A maxed Ricochet Glaive with Renewal becomes four golden serpent glaives that grow 20% stronger with every ricochet (up to triple damage) and leap straight back out the moment they return. Nine evolutions now fill the Codex.
+- **New ship: Echo, the resonance.** Starts with the Ricochet Glaive. Its Chain fades twice as slowly, and every 25 kills in it add 4% damage, up to 40%. Its Overdrive, Encore, throws a ring of glaives, and for six seconds every kill throws another and no hit can break your Chain. Unlocked by the Unbroken mission (a 300 Chain); if you already earned it, Echo is waiting in the Hangar.
+- **New rift: Starfall.** From 1:30, a ring of cold light can open in the arena. Step inside and meteors start to fall, each marked by a closing target and a comet streaking in from above. Stay in the ring for 12 seconds without being struck and the last star falls as a Star Core (an instant level), with gems and repairs. The meteors crush the swarm too.
+- **Two new missions.** Stargazer (weather a Starfall) and Ricochet (land 40 ricochets with one throw, which takes an Ouroboros). Grand Codex now asks for all nine evolutions.
+
 ## Oct 20, 2026 · 01:00 UTC
 
 - **Rifts.** About once a minute a rift tears open somewhere in the arena, with an arrow pointing the way and a tracker under your loadout. Each one waits only so long, so you decide whether the detour is worth it. Every rift you complete adds 750 to your score.

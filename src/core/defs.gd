@@ -139,9 +139,23 @@ const WEAPONS := {
 				"evo": true, "text": "Mines link into a constellation of burning tripwires and pull the swarm in."},
 		],
 	},
+	"glaive": {
+		"name": "Ricochet Glaive", "color": Color(0.72, 1.0, 0.4),
+		"blurb": "A spinning glaive that ricochets through the swarm and flies home.",
+		"levels": [
+			{"cd": 60, "dmg": 10.0, "n": 1, "bounce": 2, "r": 16.0,
+				"text": "Throws a glaive that ricochets between enemies, then returns to you."},
+			{"cd": 60, "dmg": 10.0, "n": 1, "bounce": 4, "r": 16.0, "text": "+2 ricochets."},
+			{"cd": 54, "dmg": 17.0, "n": 1, "bounce": 4, "r": 18.0, "text": "+70% damage, faster."},
+			{"cd": 54, "dmg": 17.0, "n": 2, "bounce": 5, "r": 18.0, "text": "+1 glaive, +1 ricochet."},
+			{"cd": 46, "dmg": 24.0, "n": 3, "bounce": 7, "r": 20.0, "text": "+1 glaive, +2 ricochets, +40% damage."},
+			{"cd": 40, "dmg": 30.0, "n": 4, "bounce": 9, "r": 24.0, "grow": 0.2, "evo": true,
+				"text": "Four serpent glaives that grow stronger with every ricochet, and leap back out the moment they come home."},
+		],
+	},
 }
 
-const WEAPON_ORDER := ["pulse", "orbit", "arc", "nova", "seeker", "lance", "scythe", "mine"]
+const WEAPON_ORDER := ["pulse", "orbit", "arc", "nova", "seeker", "lance", "scythe", "mine", "glaive"]
 
 ## Evolutions: a Lv5 weapon plus its catalyst system (any level) evolves when
 ## you open a Prism Cache. The evolved spec is the weapon's sixth level.
@@ -154,6 +168,7 @@ const EVOLUTIONS := {
 	"lance": {"name": "Spectrum", "needs": "thrusters", "color": Color(1.0, 0.6, 0.85)},
 	"scythe": {"name": "Lunar Reaper", "needs": "vitality", "color": Color(0.6, 1.0, 0.9)},
 	"mine": {"name": "Constellation", "needs": "magnet", "color": Color(1.0, 0.6, 0.4)},
+	"glaive": {"name": "Ouroboros", "needs": "renewal", "color": Color(0.9, 1.0, 0.3)},
 }
 const EVO_LEVEL := 6
 
@@ -235,7 +250,7 @@ static func is_umbral(id: String) -> bool:
 
 ## Rifts: every minute or so a rift opens somewhere in the arena with a
 ## challenge and a prize. Kinds are indices into RIFTS.
-enum { RIFT_BEACON, RIFT_WISP, RIFT_TRIAL }
+enum { RIFT_BEACON, RIFT_WISP, RIFT_TRIAL, RIFT_STARFALL }
 const RIFTS := [
 	{"id": "beacon", "name": "Light Beacon", "goal": "LIGHT THE BEACON", "color": Color(1.0, 0.82, 0.38),
 		"text": "Hold your ground inside its ring until it blazes, while the swarm closes in. Lit, it pays a Prism Cache."},
@@ -243,11 +258,13 @@ const RIFTS := [
 		"text": "A spark of pure light that flees and scatters gems as it runs. Catch it for a full Overdrive, repairs and a shower of light."},
 	{"id": "trial", "name": "Umbral Rift", "goal": "UMBRAL TRIAL", "color": Color(0.78, 0.32, 1.0),
 		"text": "Touch it to open a trial: destroy the swarm it releases before time runs out to claim an Umbral relic, power at a price."},
+	{"id": "starfall", "name": "Starfall", "goal": "WEATHER THE STARFALL", "color": Color(0.55, 0.78, 1.0),
+		"text": "Step into its ring to call down a meteor shower. Stay inside until it passes without being struck and the last star falls as a Star Core. The meteors crush the swarm too."},
 ]
 const RIFT_FIRST := 50         # seconds until the first rift (always a beacon)
 const RIFT_GAP := 55           # seconds between one rift closing and the next opening...
 const RIFT_GAP_RANGE := 30     # ...plus up to this many more
-const RIFT_LIFE := [40, 30, 35]  # seconds a rift waits to be taken, per kind
+const RIFT_LIFE := [40, 30, 35, 35]  # seconds a rift waits to be taken, per kind
 const TRIAL_FROM := 120        # Umbral Trials open from 2:00
 const BEACON_R := 160.0
 const BEACON_TICKS := 300      # ticks inside the ring to light a beacon
@@ -256,6 +273,13 @@ const WISP_SIGHT := 560.0      # the wisp bolts once you come this close
 const TRIAL_R := 100.0
 const TRIAL_TICKS := 15 * 60
 const RIFT_SCORE := 750
+const STARFALL_FROM := 90      # Starfalls open from 1:30
+const STARFALL_R := 300.0
+const STARFALL_TICKS := 12 * 60     # ticks inside the ring to weather the storm
+const STARFALL_WINDOW := 22 * 60    # ...within this long once it starts
+const METEOR_R := 95.0
+const METEOR_FALL := 60             # ticks from the warning mark to impact
+const METEOR_EVERY := 15
 
 
 ## The Forge: permanent upgrades bought with Flux between runs.
@@ -380,6 +404,11 @@ const SHIPS := [
 		"title": "The eclipse-born", "quirk": "The swarm has +40% HP. You gain +50% experience and +50% Flux.",
 		"od": "Eclipse", "od_text": "Stops time for five seconds. Frozen enemies are harmless and take +50% damage.",
 		"stats": {"xp": 0.5}},
+	{"id": "echo", "name": "Echo", "color": Color(0.72, 1.0, 0.4), "weapon": "glaive",
+		"title": "The resonance",
+		"quirk": "-10 max HP. Your Chain fades twice as slowly, and every 25 kills in it add +4% damage, up to +40%.",
+		"od": "Encore", "od_text": "Six seconds in which your Chain cannot break and every kill throws a ricochet glaive.",
+		"stats": {"hp": -10.0}},
 ]
 
 ## Overdrive: kills charge the meter; each use makes the next one costlier.
@@ -441,12 +470,12 @@ const MISSIONS := [
 	{"id": "seraphfall", "name": "Seraphfall", "text": "Defeat the Seraph.", "kind": "seraph", "goal": 1,
 		"flux": 180},
 	{"id": "unbroken", "name": "Unbroken", "text": "Build a Chain of 300 kills.", "kind": "chain", "goal": 300,
-		"flux": 200},
+		"flux": 200, "ship": "echo"},
 	{"id": "radiant", "name": "Radiant", "text": "Build a Chain of 1,000 kills.", "kind": "chain", "goal": 1000,
 		"flux": 450},
 	{"id": "relic_keeper", "name": "Reliquary", "text": "Hold 4 relics in one run.", "kind": "relics", "goal": 4,
 		"flux": 250},
-	{"id": "grand_codex", "name": "Grand Codex", "text": "Discover all 8 evolutions.", "kind": "codex", "goal": 8,
+	{"id": "grand_codex", "name": "Grand Codex", "text": "Discover all 9 evolutions.", "kind": "codex", "goal": 9,
 		"flux": 700},
 	{"id": "riftwalker", "name": "Riftwalker", "text": "Complete 3 rifts in one run.", "kind": "rifts", "goal": 3,
 		"flux": 150},
@@ -454,6 +483,10 @@ const MISSIONS := [
 		"goal": 40, "flux": 400},
 	{"id": "umbral_pact", "name": "Umbral Pact", "text": "Hold 2 Umbral relics in one run.", "kind": "umbrals",
 		"goal": 2, "flux": 300},
+	{"id": "stargazer", "name": "Stargazer", "text": "Weather a Starfall without being struck.", "kind": "starfalls",
+		"goal": 1, "flux": 150},
+	{"id": "ricochet", "name": "Ricochet", "text": "Land 40 ricochets with one throw of a glaive.",
+		"kind": "ricochet", "goal": 40, "flux": 250},
 	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
 		"flux": 300},
 	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,

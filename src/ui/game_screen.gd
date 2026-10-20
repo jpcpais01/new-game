@@ -254,8 +254,8 @@ const COACH := {
 	"laser": ["LASERS", "A thin line warns you before a beam fires. Step out of it."],
 	"chain": ["THE CHAIN", "Kills in a row build your Chain and multiply your score. A hit breaks it."],
 	"low_hp": ["LOW HULL", "The swarm sometimes drops hearts. Repair cards heal you too."],
-	"rift": ["RIFTS", "A rift has opened: follow its arrow. Light a Beacon, catch a Wisp or win an Umbral Trial " +
-			"for a prize, before it fades."],
+	"rift": ["RIFTS", "A rift has opened: follow its arrow. Light a Beacon, catch a Wisp, weather a Starfall or " +
+			"win an Umbral Trial for a prize, before it fades."],
 }
 
 

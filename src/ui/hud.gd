@@ -285,6 +285,13 @@ func _update_rift(s: Sim, delta: float) -> void:
 			else:
 				title = "UMBRAL RIFT"
 				sub = "TOUCH IT TO BEGIN  ·  " + left
+		Defs.RIFT_STARFALL:
+			if s.rift.on:
+				var secs := ceili(float(Defs.STARFALL_TICKS) * (1.0 - s.rift_frac()) / float(Sim.TPS))
+				title = "STARFALL  %ds" % secs if secs > 0 else "THE LAST STAR"
+				sub = "STAY IN THE RING, DODGE THE MARKS  ·  " + left
+			else:
+				sub = "STEP INTO THE RING  ·  " + left
 	_rift_title.text = title
 	_rift_sub.text = sub
 	var col: Color = info.color

@@ -61,6 +61,10 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = run.rifts_done if run != null else 0
 		"total_rifts":
 			v = int(data.get("total_rifts", 0))
+		"starfalls":
+			v = run.starfalls if run != null else 0
+		"ricochet":
+			v = run.ricochet_best if run != null else 0
 		"umbrals":
 			if run != null:
 				for id in run.relics:

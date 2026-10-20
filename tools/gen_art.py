@@ -515,6 +515,75 @@ def rift_sprites():
               lines=spiral(4, 0.16, 1.0, 0.6, steps=28)), "vortex")
 
 
+# Round 9: the Ricochet Glaive, Ouroboros, Echo and the Starfall rift.
+LIME = (0.72, 1.0, 0.4)
+
+
+def glaive_shape(blades=3, r1=0.95, r0=0.36, hook=0.55):
+    """A spinning disc with hooked blades (curving clockwise)."""
+    pts = []
+    for k in range(blades):
+        a = 2 * math.pi * k / blades
+        step = 2 * math.pi / blades
+        pts.append((r0 * math.cos(a), r0 * math.sin(a)))
+        pts.append((r1 * math.cos(a + hook * step * 0.45), r1 * math.sin(a + hook * step * 0.45)))
+        pts.append((r0 * 0.9 * math.cos(a + step * 0.62), r0 * 0.9 * math.sin(a + step * 0.62)))
+    return pts
+
+
+def serpent(r=0.78, steps=40, gap=0.5):
+    """Ouroboros: a ring that eats its own tail (an open arc and a head)."""
+    body = [(r * math.cos(a), r * math.sin(a)) for a in np.linspace(gap, 2 * math.pi - 0.15, steps)]
+    hx, hy = r * math.cos(gap * 0.35), r * math.sin(gap * 0.35)
+    head = [(hx + 0.2, hy - 0.02), (hx - 0.02, hy + 0.17), (hx - 0.1, hy - 0.12)]
+    return body, head
+
+
+ECHO_SHIP = [(1.0, 0.0), (-0.35, 0.5), (-0.1, 0.0), (-0.35, -0.5)]
+ECHO_LINES = [[(-0.5, 0.66), (-0.26, 0.0), (-0.5, -0.66)], [(-0.92, 0.84), (-0.64, 0.0), (-0.92, -0.84)]]
+
+
+def ricochet_sprites():
+    # Weapon icons.
+    save(neon([glaive_shape(3, 0.95, 0.34), regular(12, 0.14)], LIME, size=96, radius=34, line=3.6, glow=6.5,
+              fill=0.3, lines=[arc_pts(1.0, 2.2, 3.4, 10), arc_pts(1.0, 4.3, 5.5, 10)]), "i_glaive")
+    body, head = serpent()
+    save(neon([head, [(x * 0.32, y * 0.32) for x, y in glaive_shape(4, 0.95, 0.4)]], (0.9, 1.0, 0.3), size=96,
+              radius=34, line=3.8, glow=8.0, fill=0.38, lines=[body], core_white=0.7), "i_glaive_evo")
+    # World sprites: white so the view can tint them.
+    save(neon([glaive_shape(), regular(12, 0.18)], (1, 1, 1), size=64, radius=24, line=2.6, glow=5.0, fill=0.45,
+              core_white=1.0), "glaive")
+    save(neon([glaive_shape(4, 0.98, 0.42, 0.7), regular(12, 0.2)], (1, 1, 1), size=64, radius=25, line=2.8,
+              glow=6.0, fill=0.5, core_white=1.0, lines=[arc_pts(0.66, 0.0, 5.6, 20)]), "glaive_evo")
+    # Echo: an arrow trailed by its own echoes.
+    save(neon([ECHO_SHIP], LIME, radius=40, line=4.0, glow=10, fill=0.35, core_white=0.75, lines=ECHO_LINES),
+         "ship_echo")
+    save(neon([ECHO_SHIP], LIME, size=320, radius=110, line=8.0, glow=24, fill=0.32, core_white=0.75,
+              lines=ECHO_LINES), "ship_big_echo")
+    save(neon([ECHO_SHIP], LIME, size=96, radius=34, line=3.6, glow=6.5, fill=0.3, lines=ECHO_LINES), "i_ship_echo")
+    # Encore: a note of light ringing out in echoes.
+    save(neon([regular(16, 0.2)], LIME, size=96, radius=34, line=3.8, glow=8.0, fill=0.45, core_white=0.75,
+              lines=[arc_pts(r, -0.9, 0.9, 12) for r in (0.42, 0.66, 0.9)] +
+              [arc_pts(r, math.pi - 0.9, math.pi + 0.9, 12) for r in (0.42, 0.66, 0.9)]), "i_od_echo")
+    # Starfall: a falling star over a ring.
+    star_pts = [(x * 0.42 + 0.22, y * 0.42 - 0.22) for x, y in star(4, 1.0, 0.32, -math.pi / 2)]
+    save(neon([star_pts], (0.55, 0.78, 1.0), size=96, radius=34, line=3.8, glow=8.0, fill=0.4, core_white=0.75,
+              lines=[[(-0.05, 0.05), (-0.8, 0.8)], [(-0.12, 0.35), (-0.55, 0.78)], [(0.2, 0.12), (-0.3, 0.9)],
+                     arc_pts(0.9, 0.4, 1.9, 12)]), "i_rift_starfall")
+    # Comet: a white-hot head (x = 224) with a tapering tail to the left.
+    w, h = 256, 64
+    y, x = np.mgrid[0:h, 0:w].astype(np.float64)
+    cy = (h - 1) / 2
+    t = np.clip(x / 224.0, 0, 1)
+    width = 1.0 + 9.0 * t ** 1.5
+    d = np.abs(y - cy) / width
+    tail = np.exp(-d * d * 1.4) * t ** 1.8 * np.clip((240 - x) / 16.0, 0, 1)
+    hr = np.sqrt((x - 224) ** 2 + (y - cy) ** 2)
+    head = np.clip(1 - (hr - 7) / 2.0, 0, 1) + np.exp(-np.maximum(hr - 7, 0) / 6.0) * 0.7
+    a = np.clip(tail * 0.85 + head, 0, 1) * np.clip((w - 1 - x) / 6.0, 0, 1)
+    save(white_img(a), "comet")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -597,6 +666,10 @@ if __name__ == "__main__":
         rift_sprites()
         print("rift art ok")
         sys.exit(0)
+    if "--ricochet" in sys.argv:
+        ricochet_sprites()
+        print("ricochet art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -610,5 +683,6 @@ if __name__ == "__main__":
     arsenal_sprites()
     radiance_icons()
     rift_sprites()
+    ricochet_sprites()
     app_icon()
     print("art ok")

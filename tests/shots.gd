@@ -39,6 +39,10 @@ func _ready() -> void:
 		await _rift_shots()
 		get_tree().quit()
 		return
+	if args.has("ricochet"):
+		await _ricochet_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -436,6 +440,54 @@ func _rift_shots() -> void:
 		sc[0].scroll_vertical = 2600
 	await _wait(0.5)
 	await _shot("k9_codex")
+
+
+func _ricochet_shots() -> void:
+	Save.data.missions = ["alchemist", "exterminator", "first_flight", "unbroken"]
+	Save.data.ship = "echo"
+	main.go_hangar()
+	await _wait(1.2)
+	await _shot("r0_hangar_echo")
+	main.start_run()
+	await _wait(1.0)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	s.rift_next = 1 << 30
+	while s.seconds() < 120.0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y)
+		s.events.clear()
+	s.weapons[0].lvl = Defs.EVO_LEVEL
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(1.8)
+	main.arena.demo = false
+	await _shot("r1_ouroboros")
+	s.od = s.od_need
+	s.chain = 140
+	s.chain_t = 600
+	main.arena.burst_request = true
+	await _wait(0.6)
+	await _shot("r2_encore")
+	await _wait(1.0)
+	s.rift = {"kind": Defs.RIFT_STARFALL, "x": s.px + 60.0, "y": s.py - 40.0, "ox": s.px + 60.0, "oy": s.py - 40.0,
+			"life": 1500, "on": false, "prog": 0.0, "k0": 0, "goal": 0, "mets": []}
+	await _wait(0.4)
+	await _shot("r3_starfall_ring")
+	s.rift.prog = 240.0
+	main.arena.demo = true
+	await _wait(1.6)
+	main.arena.demo = false
+	await _shot("r4_starfall")
+	await _wait(0.5)
+	main.go_codex()
+	await _wait(1.0)
+	await _shot("r5_codex")
 
 
 func _wait(t: float) -> void:

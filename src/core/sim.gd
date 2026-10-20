@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 8
+const RULES_VERSION := 9
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -76,6 +76,8 @@ const EV_HALO := 37       # x, y (the Guardian Halo blocks a hit)
 const EV_RELIC_OFFER := 38
 const EV_BANISH := 39      # card id banished, slot, new card id
 const EV_RIFT := 40       # kind, x, y, phase (0 opened, 1 taken on, 2 completed, 3 faded untouched, 4 failed)
+const EV_METEOR := 41     # x, y, r, phase (0 marked, 1 impact)
+const EV_RICOCHET := 42   # x, y, evolved (a glaive bounces off an enemy)
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -213,6 +215,9 @@ var r_hunger := false
 var r_frenzy := false
 var r_gambit := false
 var r_crown := false
+var starfalls := 0            # Starfalls weathered this run
+var ricochet_best := 0        # most ricochets landed by one throw of a glaive
+var _encore_n := 0            # Encore glaives thrown this tick
 
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
@@ -264,8 +269,9 @@ var b_ty := PackedFloat64Array()
 var b_blast := PackedFloat64Array()
 var b_life := PackedInt32Array()
 var b_pierce := PackedInt32Array()
-var b_kind := PackedInt32Array()   # 0 bolt, 1 missile
+var b_kind := PackedInt32Array()   # 0 bolt, 1 missile, 2 hydra mini, 3 star-bolt, 4 glaive, 5 glaive flying home, 6 Encore glaive
 var b_last := PackedInt32Array()
+var b_n := PackedInt32Array()      # ricochets a glaive has landed
 
 # --- enemy projectiles ------------------------------------------------------------
 var qn := 0
@@ -345,6 +351,7 @@ func _alloc() -> void:
 	b_x.resize(MAX_B); b_y.resize(MAX_B); b_ox.resize(MAX_B); b_oy.resize(MAX_B); b_vx.resize(MAX_B)
 	b_vy.resize(MAX_B); b_dmg.resize(MAX_B); b_r.resize(MAX_B); b_tx.resize(MAX_B); b_ty.resize(MAX_B)
 	b_blast.resize(MAX_B); b_life.resize(MAX_B); b_pierce.resize(MAX_B); b_kind.resize(MAX_B); b_last.resize(MAX_B)
+	b_n.resize(MAX_B)
 	q_x.resize(MAX_Q); q_y.resize(MAX_Q); q_ox.resize(MAX_Q); q_oy.resize(MAX_Q); q_vx.resize(MAX_Q)
 	q_vy.resize(MAX_Q); q_dmg.resize(MAX_Q); q_life.resize(MAX_Q)
 	g_x.resize(MAX_G); g_y.resize(MAX_G); g_ox.resize(MAX_G); g_oy.resize(MAX_G); g_val.resize(MAX_G)
@@ -816,6 +823,8 @@ func _update_rift() -> void:
 			_wisp()
 		Defs.RIFT_TRIAL:
 			_trial()
+		Defs.RIFT_STARFALL:
+			_starfall()
 	if not rift.is_empty():
 		rift.life -= 1
 		if rift.life <= 0:
@@ -828,6 +837,8 @@ func _open_rift() -> void:
 		var pool: Array = []
 		for k in Defs.RIFTS.size():
 			if k == rift_last or (k == Defs.RIFT_TRIAL and tick < Defs.TRIAL_FROM * TPS):
+				continue
+			if k == Defs.RIFT_STARFALL and tick < Defs.STARFALL_FROM * TPS:
 				continue
 			pool.append(k)
 		kind = pool[rng.range_i(pool.size())]
@@ -845,7 +856,7 @@ func _open_rift() -> void:
 		x = x / d * lim
 		y = y / d * lim
 	rift = {"kind": kind, "x": x, "y": y, "ox": x, "oy": y, "life": int(Defs.RIFT_LIFE[kind]) * TPS, "on": false,
-			"prog": 0.0, "k0": 0, "goal": 0}
+			"prog": 0.0, "k0": 0, "goal": 0, "mets": []}
 	events.append([EV_RIFT, kind, x, y, 0])
 
 
@@ -987,6 +998,95 @@ func _trial() -> void:
 		_close_rift(true)
 
 
+## Starfall: step into the ring and meteors begin to fall, some aimed where
+## you are heading, the rest scattered through the ring. Stay inside without
+## being struck until the storm passes, and the last star falls as a Star Core.
+func _starfall() -> void:
+	if not rift.has("mets"):
+		rift.mets = []
+	var dx: float = px - rift.x
+	var dy: float = py - rift.y
+	var inside := dx * dx + dy * dy < Defs.STARFALL_R * Defs.STARFALL_R
+	if not rift.on:
+		if inside:
+			rift.on = true
+			rift.life = Defs.STARFALL_WINDOW
+			rift.k0 = 0
+			events.append([EV_RIFT, Defs.RIFT_STARFALL, rift.x, rift.y, 1])
+		return
+	if inside and rift.prog < float(Defs.STARFALL_TICKS):
+		rift.prog += 1.0
+	var mets: Array = rift.mets
+	var storm := float(rift.prog) / float(Defs.STARFALL_TICKS)
+	# The storm thickens as it goes, and it only falls while you are inside.
+	rift.k0 += 1
+	var every := Defs.METEOR_EVERY - int(6.0 * storm)
+	if storm < 1.0 and inside and int(rift.k0) % every == 0:
+		var mx := 0.0
+		var my := 0.0
+		if rng.unit() < 0.45:
+			mx = px + mvx * st_speed * 0.75 + rng.range_f(-40.0, 40.0)
+			my = py + mvy * st_speed * 0.75 + rng.range_f(-40.0, 40.0)
+		else:
+			var a := rng.range_i(Trig.STEPS)
+			var rr := sqrt(rng.unit()) * Defs.STARFALL_R
+			mx = rift.x + Trig.cos_i(a) * rr
+			my = rift.y + Trig.sin_i(a) * rr
+		var md := sqrt(mx * mx + my * my)
+		var lim := ARENA_R - 40.0
+		if md > lim:
+			mx = mx / md * lim
+			my = my / md * lim
+		mets.append([mx, my, Defs.METEOR_FALL])
+		events.append([EV_METEOR, mx, my, Defs.METEOR_R, 0])
+	var k := mets.size() - 1
+	while k >= 0:
+		var m: Array = mets[k]
+		m[2] -= 1
+		if int(m[2]) <= 0:
+			mets.remove_at(k)
+			if _meteor(m[0], m[1]):
+				_close_rift(false)
+				return
+		k -= 1
+	if storm >= 1.0 and mets.is_empty():
+		starfalls += 1
+		_drop_pickup("core", rift.x, rift.y)
+		var v := 2.0 + seconds() / 60.0
+		for g in 10:
+			var a2 := g * Trig.STEPS / 10
+			_drop_gem(rift.x + Trig.cos_i(a2) * 90.0, rift.y + Trig.sin_i(a2) * 90.0, v)
+		_heal(20.0)
+		_close_rift(true)
+
+
+## A meteor lands: it crushes the swarm around it. Returns true if it struck
+## the ship (a blocked hit does not count).
+func _meteor(x: float, y: float) -> bool:
+	var r := Defs.METEOR_R
+	events.append([EV_METEOR, x, y, r, 1])
+	var dmg := 45.0 * _od_scale()
+	# The grid is stale this early in the tick, so look at every enemy.
+	for i in en:
+		if e_spawn[i] > 0 or e_hp[i] <= 0.0:
+			continue
+		var ex := e_x[i] - x
+		var ey := e_y[i] - y
+		var rr := r + e_r[i]
+		var d2 := ex * ex + ey * ey
+		if d2 < rr * rr:
+			var d := sqrt(d2) + 0.001
+			_damage(i, dmg, ex / d * 520.0, ey / d * 520.0)
+	var dx := px - x
+	var dy := py - y
+	var hr := r + PLAYER_R * 0.6
+	if dx * dx + dy * dy < hr * hr:
+		var before := hp
+		_hurt(12.0 + 3.0 * seconds() / 60.0)
+		return hp < before
+	return false
+
+
 ## Kills an Umbral Trial asks for, started now.
 func trial_goal() -> int:
 	return 50 + int(16.0 * seconds() / 60.0)
@@ -1002,6 +1102,8 @@ func rift_frac() -> float:
 		Defs.RIFT_TRIAL:
 			if rift.on:
 				return clampf(float(kills - int(rift.k0)) / float(maxi(1, int(rift.goal))), 0.0, 1.0)
+		Defs.RIFT_STARFALL:
+			return clampf(float(rift.prog) / float(Defs.STARFALL_TICKS), 0.0, 1.0)
 	return 0.0
 
 
@@ -1763,6 +1865,8 @@ func _weapons() -> void:
 				fired = _fire_scythe(spec, w)
 			"mine":
 				fired = _fire_mine(spec)
+			"glaive":
+				fired = _fire_glaive(spec)
 		if fired:
 			var haste := st_haste
 			# Kestrel's slipstream: faster recharge while moving.
@@ -1839,6 +1943,7 @@ func _add_bullet(kind: int, x: float, y: float, a: int, speed: float, dmg: float
 	b_pierce[i] = pierce
 	b_life[i] = life
 	b_last[i] = 0
+	b_n[i] = 0
 	b_blast[i] = blast
 	b_tx[i] = x + b_vx[i]
 	b_ty[i] = y + b_vy[i]
@@ -1851,7 +1956,7 @@ func _b_remove(i: int) -> void:
 		b_kind[i] = b_kind[l]; b_x[i] = b_x[l]; b_y[i] = b_y[l]; b_ox[i] = b_ox[l]; b_oy[i] = b_oy[l]
 		b_vx[i] = b_vx[l]; b_vy[i] = b_vy[l]; b_dmg[i] = b_dmg[l]; b_r[i] = b_r[l]; b_pierce[i] = b_pierce[l]
 		b_life[i] = b_life[l]; b_last[i] = b_last[l]; b_blast[i] = b_blast[l]; b_tx[i] = b_tx[l]
-		b_ty[i] = b_ty[l]
+		b_ty[i] = b_ty[l]; b_n[i] = b_n[l]
 	bn = l
 
 
@@ -2212,6 +2317,181 @@ func _update_mines() -> void:
 					_damage(i, spec.link_dmg, 0.0, 0.0)
 
 
+# --- Ricochet Glaive ---------------------------------------------------------------
+
+const GLAIVE_SPEED := 1000.0
+const GLAIVE_REACH := 620.0     # throws at enemies this close
+const GLAIVE_HOP := 420.0       # ...and ricochets to the next one within this
+
+
+func glaive_spec() -> Dictionary:
+	var l := weapon_level("glaive")
+	if l == 0:
+		return {}
+	return Defs.WEAPONS.glaive.levels[l - 1]
+
+
+## Throws every glaive that is back in hand, each at a different enemy.
+func _fire_glaive(spec: Dictionary) -> bool:
+	var live := 0
+	for i in bn:
+		if b_kind[i] == 4 or b_kind[i] == 5:
+			live += 1
+	var free: int = int(spec.n) - live
+	if free <= 0:
+		return false
+	var first := _nearest(px, py, GLAIVE_REACH)
+	if first < 0:
+		return false
+	var skip := {}
+	for k in free:
+		var t := first if k == 0 else _nearest(px, py, GLAIVE_REACH, skip)
+		if t < 0:
+			t = first
+		skip[e_uid[t]] = true
+		_throw_glaive(4, px, py, t, float(spec.dmg), float(spec.r) * sqrt(st_area), int(spec.bounce))
+	events.append([EV_SHOT, "glaive", px, py, Trig.angle_of(e_x[first] - px, e_y[first] - py)])
+	return true
+
+
+func _throw_glaive(kind: int, x: float, y: float, t: int, dmg: float, r: float, bounces: int) -> int:
+	var a := Trig.angle_of(e_x[t] - x, e_y[t] - y)
+	var i := _add_bullet(kind, x, y, a, GLAIVE_SPEED, dmg, r, bounces, 150, 0.0)
+	if i >= 0:
+		b_tx[i] = e_x[t]
+		b_ty[i] = e_y[t]
+	return i
+
+
+## A glaive in flight: it chases its mark, ricochets from enemy to enemy and
+## then flies home through anything in its way (kind 5). Encore glaives
+## (kind 6) fade out instead. Returns true when the glaive is gone.
+func _update_glaive(i: int) -> bool:
+	b_life[i] -= 1
+	var kind := b_kind[i]
+	if kind == 5:
+		var dx := px - b_x[i]
+		var dy := py - b_y[i]
+		var d := sqrt(dx * dx + dy * dy) + 0.001
+		var sp := minf(1500.0, sqrt(b_vx[i] * b_vx[i] + b_vy[i] * b_vy[i]) + 45.0)
+		b_vx[i] += (dx / d * sp - b_vx[i]) * 0.3
+		b_vy[i] += (dy / d * sp - b_vy[i]) * 0.3
+		if d < 34.0 + sp * DT:
+			return _catch_glaive(i)
+		if b_life[i] <= 0:
+			return true
+	else:
+		if (tick + i) % 6 == 0:
+			var t := _nearest(b_tx[i], b_ty[i], 140.0, {b_last[i]: true})
+			if t >= 0:
+				b_tx[i] = e_x[t]
+				b_ty[i] = e_y[t]
+		var dx := b_tx[i] - b_x[i]
+		var dy := b_ty[i] - b_y[i]
+		var d := sqrt(dx * dx + dy * dy) + 0.001
+		b_vx[i] += (dx / d * GLAIVE_SPEED - b_vx[i]) * 0.2
+		b_vy[i] += (dy / d * GLAIVE_SPEED - b_vy[i]) * 0.2
+		if b_life[i] <= 0 or d < 8.0:
+			if kind == 6:
+				return true
+			_glaive_home(i)
+	b_x[i] += b_vx[i] * DT
+	b_y[i] += b_vy[i] * DT
+	var x := b_x[i]
+	var y := b_y[i]
+	if x * x + y * y > (ARENA_R + 100.0) * (ARENA_R + 100.0):
+		if kind == 6:
+			return true
+		if kind == 4:
+			_glaive_home(i)
+	var r := b_r[i]
+	_query(x, y, r)
+	for q in _qn:
+		var e := _qbuf[q]
+		if e_hp[e] <= 0.0 or e_uid[e] == b_last[i]:
+			continue
+		var dx2 := e_x[e] - x
+		var dy2 := e_y[e] - y
+		var rr := r + e_r[e]
+		if dx2 * dx2 + dy2 * dy2 >= rr * rr:
+			continue
+		var sp2 := sqrt(b_vx[i] * b_vx[i] + b_vy[i] * b_vy[i]) + 0.001
+		_damage(e, b_dmg[i], b_vx[i] / sp2 * 110.0, b_vy[i] / sp2 * 110.0)
+		b_last[i] = e_uid[e]
+		if kind == 5:
+			# Flying home it cuts through everything in the way.
+			continue
+		_ricochet(i, e)
+		break
+	return false
+
+
+## A glaive strikes enemy e: count the ricochet, then leap to the next mark.
+func _ricochet(i: int, e: int) -> void:
+	var kind := b_kind[i]
+	var spec := glaive_spec()
+	var grow: float = spec.get("grow", 0.0) if kind == 4 else 0.0
+	if kind == 4:
+		b_n[i] += 1
+		ricochet_best = maxi(ricochet_best, b_n[i])
+	if grow > 0.0:
+		b_dmg[i] = minf(b_dmg[i] * (1.0 + grow), float(spec.dmg) * 3.0)
+	events.append([EV_RICOCHET, e_x[e], e_y[e], grow > 0.0])
+	b_pierce[i] -= 1
+	# Never straight back to the enemy it just left (b_blast keeps that uid).
+	var prev := int(b_blast[i])
+	b_blast[i] = float(e_uid[e])
+	var nxt := -1 if b_pierce[i] < 0 else _nearest(e_x[e], e_y[e], GLAIVE_HOP, {e_uid[e]: true, prev: true})
+	if nxt < 0:
+		if kind == 6:
+			b_life[i] = 0
+			b_pierce[i] = -1
+			b_tx[i] = b_x[i]
+			b_ty[i] = b_y[i]
+		else:
+			_glaive_home(i)
+		return
+	b_tx[i] = e_x[nxt]
+	b_ty[i] = e_y[nxt]
+	b_life[i] = maxi(b_life[i], 90)
+	var dx := b_tx[i] - b_x[i]
+	var dy := b_ty[i] - b_y[i]
+	var d := sqrt(dx * dx + dy * dy) + 0.001
+	b_vx[i] = dx / d * GLAIVE_SPEED
+	b_vy[i] = dy / d * GLAIVE_SPEED
+
+
+func _glaive_home(i: int) -> void:
+	b_kind[i] = 5
+	b_life[i] = 240
+
+
+## A glaive comes home. Ouroboros throws it straight back out.
+func _catch_glaive(i: int) -> bool:
+	var spec := glaive_spec()
+	if spec.is_empty() or not spec.has("grow"):
+		return true
+	var t := _nearest(px, py, GLAIVE_REACH, {b_last[i]: true})
+	if t < 0:
+		return true
+	b_kind[i] = 4
+	b_x[i] = px
+	b_y[i] = py
+	b_ox[i] = px
+	b_oy[i] = py
+	b_dmg[i] = float(spec.dmg)
+	b_r[i] = float(spec.r) * sqrt(st_area)
+	b_pierce[i] = int(spec.bounce)
+	b_life[i] = 150
+	b_tx[i] = e_x[t]
+	b_ty[i] = e_y[t]
+	var a := Trig.angle_of(e_x[t] - px, e_y[t] - py)
+	b_vx[i] = Trig.cos_i(a) * GLAIVE_SPEED
+	b_vy[i] = Trig.sin_i(a) * GLAIVE_SPEED
+	events.append([EV_SHOT, "glaive_evo", px, py, a])
+	return false
+
+
 # --- relics -------------------------------------------------------------------------
 
 func _start_relic() -> void:
@@ -2365,6 +2645,15 @@ func _overdrive() -> void:
 		"nyx":
 			od_t = 300
 			freeze = 300
+		"echo":
+			# Encore opens with a ring of glaives; every kill throws another.
+			od_t = 360
+			for k in 10:
+				var a := k * Trig.STEPS / 10
+				var i := _add_bullet(6, px, py, a, GLAIVE_SPEED, 18.0 * sc, 18.0, 3, 60, 0.0)
+				if i >= 0:
+					b_tx[i] = px + Trig.cos_i(a) * 420.0
+					b_ty[i] = py + Trig.sin_i(a) * 420.0
 		_:
 			# Flare: scorch everything nearby and erase enemy fire.
 			od_t = 30
@@ -2388,6 +2677,7 @@ func _update_overdrive() -> void:
 		shield -= 1
 	if freeze > 0:
 		freeze -= 1
+	_encore_n = 0
 	if od_t <= 0:
 		return
 	od_t -= 1
@@ -2469,6 +2759,11 @@ func _update_overdrive() -> void:
 func _update_bullets() -> void:
 	var i := bn - 1
 	while i >= 0:
+		if b_kind[i] >= 4:
+			if _update_glaive(i):
+				_b_remove(i)
+			i -= 1
+			continue
 		b_life[i] -= 1
 		var kind := b_kind[i]
 		var homing := kind == 1 or kind == 2
@@ -2582,6 +2877,9 @@ func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 		dd *= 1.6
 	if r_wrath and hp < max_hp * 0.5:
 		dd *= 1.5
+	if ship_id == "echo":
+		# Resonance: the Chain sharpens every weapon.
+		dd *= 1.0 + minf(0.4, 0.04 * float(chain / Defs.CHAIN_STEP))
 	if freeze > 0:
 		dd *= 1.5
 	if e_shd[i] == 1:
@@ -2640,9 +2938,11 @@ func _hurt(dmg: float) -> void:
 	if first_hurt < 0:
 		first_hurt = tick
 	events.append([EV_HURT, d])
-	if chain >= 10:
-		events.append([EV_CHAIN_LOST, chain])
-	chain = 0
+	# Encore: the Chain holds through the hit.
+	if not (ship_id == "echo" and od_t > 0):
+		if chain >= 10:
+			events.append([EV_CHAIN_LOST, chain])
+		chain = 0
 	# Repulse: give the player room to breathe.
 	_shove(px, py, 170.0, 420.0)
 	# Vesper's bulwark answers every hit with a shockwave.
@@ -2722,7 +3022,7 @@ func _on_death(i: int) -> void:
 		elite_kills += 1
 	events.append([EV_KILL, x, y, type, elite, e_r[i]])
 	chain += 1
-	chain_t = Defs.CHAIN_TICKS
+	chain_t = Defs.CHAIN_TICKS * (2 if ship_id == "echo" else 1)
 	chain_best = maxi(chain_best, chain)
 	var worth := 10.0 + (250.0 if elite else 0.0) + (2500.0 if type >= Defs.WARDEN else 0.0)
 	chain_score += int(worth * (Defs.chain_mult(chain, r_crown) - 1.0) + 0.5)
@@ -2731,6 +3031,11 @@ func _on_death(i: int) -> void:
 			events.append([EV_CHAIN, chain, tier[1]])
 	if mods.has("bloodlight"):
 		_heal(0.25)
+	if ship_id == "echo" and od_t > 0 and _encore_n < 6:
+		var t := _nearest(x, y, GLAIVE_HOP)
+		if t >= 0:
+			_encore_n += 1
+			_throw_glaive(6, x, y, t, 18.0 * _od_scale(), 18.0, 2)
 	if mods.has("volatile") and type < Defs.WARDEN and rng.unit() < 0.25:
 		_blasts.append([x, y, 95.0, 16.0 * _od_scale()])
 	if od_t <= 0:
@@ -2978,9 +3283,9 @@ func _roll_cards(n: int, exclude: Array) -> Array:
 			pool.append(id)
 			wts.append(3.0)
 		elif l == 0 and weapons.size() < Defs.MAX_WEAPONS:
-			# Eight weapons share the pool, so each new one is offered a little less.
+			# Nine weapons share the pool, so each new one is offered a little less.
 			pool.append(id)
-			wts.append(1.6)
+			wts.append(1.45)
 	for id in Defs.PASSIVE_ORDER:
 		if id == "renewal" and mods.has("bloodlight"):
 			continue

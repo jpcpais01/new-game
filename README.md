@@ -5,8 +5,8 @@ drag to steer a ship of light, your weapons fire on their own, every level-up
 offers three upgrade cards, and three bosses (the Warden, the Seraph and the
 Eclipse) stand between you and the dawn at 8:00. Kill without getting hit to
 build a Chain that multiplies your score. Elites and bosses drop Prism Caches: max a weapon, carry its catalyst
-system, and a cache evolves it into one of eight evolved forms. The first elite and every boss also guard a
-relic: pick one of three rule-bending powers that last the whole run. Pick one of seven
+system, and a cache evolves it into one of nine evolved forms. The first elite and every boss also guard a
+relic: pick one of three rule-bending powers that last the whole run. Pick one of eight
 ships in the Hangar, each with its own starting weapon, quirk and an
 Overdrive you charge with kills and unleash with a tap. Missions unlock new
 ships and pay Flux, and every run earns Flux for permanent upgrades in the
@@ -17,8 +17,8 @@ every night and everything counts towards your score. Reach the dawn and
 Radiance unlocks: ten ascension levels, each adding a rule and raising the
 score, and every ship remembers the highest Radiance it has cleared. Any
 level-up card can be banished from the run. About once a minute a rift opens
-somewhere in the arena: light a Beacon, catch a fleeing Prism Wisp or win an
-Umbral Trial for an Umbral relic, power at a price. Built with
+somewhere in the arena: light a Beacon, catch a fleeing Prism Wisp, weather a
+Starfall of meteors or win an Umbral Trial for an Umbral relic, power at a price. Built with
 Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
