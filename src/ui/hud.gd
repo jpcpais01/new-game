@@ -6,6 +6,10 @@ signal pause_pressed
 
 const BOSS_NAMES := {Defs.WARDEN: "THE WARDEN", Defs.ECLIPSE: "ECLIPSE", Defs.SERAPH: "THE SERAPH",
 		Defs.LEVIATHAN: "THE LEVIATHAN"}
+const BOSS_EPITHETS := {Defs.WARDEN: "KEEPER OF THE FIRST GATE", Defs.ECLIPSE: "THE LAST DARK BEFORE DAWN",
+		Defs.SERAPH: "WHEEL OF BURNING LIGHT", Defs.LEVIATHAN: "SERPENT OF THE DEEP DARK"}
+## Seconds a boss's title card stays up.
+const INTRO_TIME := 2.8
 ## The Chain counter shows from this many kills in a row.
 const CHAIN_SHOW := 5
 
@@ -41,6 +45,11 @@ var _rift_alpha := 0.0
 var _rift_kind := 0
 var _rift_y := 0.0
 var _rift_box := UiKit.box(Color.WHITE, Color.BLACK, 22, 2, 0)
+var _intro_tag: Label
+var _intro_title: Label
+var _intro_sub: Label
+var _intro := 0.0
+var _intro_col := Color.WHITE
 
 
 func _ready() -> void:
@@ -78,6 +87,12 @@ func _ready() -> void:
 	_banner = UiKit.glow_label("", 76, UiKit.MAGENTA)
 	_banner.modulate.a = 0.0
 	add_child(_banner)
+	_intro_tag = UiKit.glow_label("", 34, UiKit.RED, UiKit.display_light())
+	_intro_title = UiKit.glow_label("", 92, Color.WHITE, UiKit.display())
+	_intro_sub = UiKit.label("", 30, Color(1, 1, 1, 0.75), UiKit.display_light())
+	for l in [_intro_tag, _intro_title, _intro_sub]:
+		l.modulate.a = 0.0
+		add_child(l)
 	_loadout = HBoxContainer.new()
 	_loadout.add_theme_constant_override("separation", 6)
 	_loadout.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -108,6 +123,8 @@ func bind(a: Arena) -> void:
 	a.banner.connect(show_banner)
 	a.boss_started.connect(func(type):
 		_boss_type = type
+		if not arena.demo:
+			_boss_intro(type)
 		_boss_name.text = BOSS_NAMES.get(type, "BOSS")
 		if arena.sim.endless:
 			_boss_name.text += "  ·  NIGHT %d" % arena.sim.night)
@@ -204,6 +221,37 @@ func _rebuild_loadout() -> void:
 		_loadout.modulate.a = 0.9
 
 
+## A boss arrives: letterbox bars slide in around a title card with its name.
+func _boss_intro(type: int) -> void:
+	_intro = INTRO_TIME
+	_intro_col = Defs.ENEMY_COLOR[type]
+	var s := arena.sim
+	_intro_tag.text = "NIGHT %d" % s.night if s.endless else "WARNING"
+	_intro_title.text = BOSS_NAMES.get(type, "BOSS")
+	_intro_title.add_theme_color_override("font_color", _intro_col.lerp(Color.WHITE, 0.6))
+	_intro_title.add_theme_color_override("font_shadow_color", Color(_intro_col, 0.7))
+	_intro_sub.text = BOSS_EPITHETS.get(type, "")
+	var w := size.x
+	var y := size.y * 0.34
+	_intro_tag.position = Vector2(0, y - 70)
+	_intro_title.position = Vector2(0, y)
+	_intro_sub.position = Vector2(0, y + 118)
+	for l in [_intro_tag, _intro_title, _intro_sub]:
+		l.size = Vector2(w, l.size.y)
+		l.pivot_offset = Vector2(w * 0.5, l.size.y * 0.5)
+	var tw := create_tween()
+	_intro_title.scale = Vector2(1.5, 1.5)
+	_intro_tag.modulate.a = 0.0
+	tw.tween_property(_intro_tag, "modulate:a", 1.0, 0.2)
+	tw.parallel().tween_property(_intro_title, "modulate:a", 1.0, 0.25).set_delay(0.12)
+	tw.parallel().tween_property(_intro_title, "scale", Vector2.ONE, 0.5).set_delay(0.12) \
+			.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(_intro_sub, "modulate:a", 1.0, 0.4).set_delay(0.45)
+	tw.tween_interval(INTRO_TIME - 1.2)
+	for l in [_intro_tag, _intro_title, _intro_sub]:
+		tw.parallel().tween_property(l, "modulate:a", 0.0, 0.5)
+
+
 func show_banner(text: String, color: Color, sub := "") -> void:
 	if text == "":
 		return
@@ -252,6 +300,7 @@ func _process(delta: float) -> void:
 	_relics.position = Vector2(24, _loadout.position.y + 70.0)
 	_update_rift(s, delta)
 	_update_chain(s, delta)
+	_intro = maxf(0.0, _intro - delta)
 	queue_redraw()
 
 
@@ -321,6 +370,23 @@ func _update_chain(s: Sim, delta: float) -> void:
 
 func _draw() -> void:
 	var w := size.x
+	if _intro > 0.0:
+		# Letterbox bars and a line of the boss's colour sweeping out under its name.
+		var age := INTRO_TIME - _intro
+		var k := clampf(minf(age / 0.35, _intro / 0.5), 0.0, 1.0)
+		k = 1.0 - (1.0 - k) * (1.0 - k)
+		var bh := 150.0 * k
+		draw_rect(Rect2(0, 0, w, bh), Color(0, 0, 0, 0.8))
+		draw_rect(Rect2(0, size.y - bh, w, bh), Color(0, 0, 0, 0.8))
+		# A dark band behind the title so it reads over the fight.
+		var by := size.y * 0.34
+		for j in 6:
+			var e := float(j) * 14.0
+			draw_rect(Rect2(0, by - 80.0 + e, w, 270.0 - 2.0 * e), Color(0.0, 0.0, 0.02, 0.1 * k))
+		var ly := size.y * 0.34 + 108.0
+		var lw := w * 0.42 * clampf((age - 0.2) / 0.5, 0.0, 1.0) * k
+		draw_line(Vector2(w * 0.5 - lw, ly), Vector2(w * 0.5 + lw, ly), Color(_intro_col * 1.4, 0.8 * k), 3.0)
+		draw_line(Vector2(w * 0.5 - lw * 0.6, ly + 8), Vector2(w * 0.5 + lw * 0.6, ly + 8), Color(_intro_col, 0.35 * k), 2.0)
 	# XP bar.
 	var y := top + 14.0
 	var h := 20.0

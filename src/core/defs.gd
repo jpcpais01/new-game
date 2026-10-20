@@ -22,7 +22,7 @@ const ENEMY := [
 	{"name": "warden", "hp": 1700.0, "speed": 70.0, "r": 74.0, "dmg": 24.0, "xp": 60, "kb": 0.0},
 	{"name": "eclipse", "hp": 8500.0, "speed": 48.0, "r": 92.0, "dmg": 30.0, "xp": 0, "kb": 0.0},
 	{"name": "seraph", "hp": 6000.0, "speed": 60.0, "r": 82.0, "dmg": 26.0, "xp": 0, "kb": 0.0},
-	{"name": "leviathan", "hp": 2400.0, "speed": 265.0, "r": 54.0, "dmg": 18.0, "xp": 0, "kb": 0.0},
+	{"name": "leviathan", "hp": 2100.0, "speed": 265.0, "r": 54.0, "dmg": 18.0, "xp": 0, "kb": 0.0},
 ]
 
 const ENEMY_COLOR := [
@@ -199,8 +199,8 @@ const EXTRAS := {
 	"flux": {"name": "Flux Cache", "color": Color(1.0, 0.5, 1.0), "text": "+25 Flux for the Forge."},
 }
 
-## Relics: one of three is offered when you open the first elite's Prism Cache
-## and every boss's.
+## Relics: one of three is offered when you open every boss's Prism Cache (the
+## Leviathan's, or the first elite's if it escaped).
 ## Each bends the rules for the rest of the run. Applied inside Sim.
 const RELICS := {
 	"halo": {"name": "Guardian Halo", "color": Color(1.0, 0.92, 0.55),

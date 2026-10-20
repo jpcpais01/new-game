@@ -372,7 +372,7 @@ class ShipPreview extends Control:
 			var pts := PackedVector2Array()
 			for k in 24:
 				var f := 1.0 - float(k) / 23.0
-				pts.append(c + Vector2(sin(_t * 2.2 + f * 5.0) * 26.0 * f, 90.0 + 360.0 * f))
+				pts.append(c + Vector2(sin(_t * 2.2 + f * 5.0) * 22.0 * f, 90.0 + 290.0 * f))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			TrailArt.draw(self, pts, Color(lc, a), tier, _t, 2.2, 2.0 * a)
 		var tilt := 1.0 - 0.12 * absf(sin(_t * 0.9))

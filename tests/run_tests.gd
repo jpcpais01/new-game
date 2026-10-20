@@ -1351,6 +1351,9 @@ func _test_leviathan() -> void:
 	e.e_hp[el] = 0.0
 	e.step(0, 0)
 	check(e.pickups.size() == 1 and e.pickups[0].get("relic", false), "then the first elite guards the relic")
+	# Light trails grow with mastery.
+	check(Defs.trail_tier(-1) == 0 and Defs.trail_tier(0) == 1 and Defs.trail_tier(2) == 1, "first trails")
+	check(Defs.trail_tier(3) == 2 and Defs.trail_tier(9) == 3 and Defs.trail_tier(10) == 4, "mastery trails")
 
 
 func _test_runs() -> void:

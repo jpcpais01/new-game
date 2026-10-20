@@ -15,6 +15,7 @@ func _init() -> void:
 		var body := 0.0
 		var other := 0.0
 		var outcome := "alive"
+		var by_state := {}
 		while s.tick < 260 * Sim.TPS and (s.state == Sim.RUNNING or s.state == Sim.CHOOSING):
 			if s.state == Sim.CHOOSING:
 				var bk := Autopilot.banish_pick(s)
@@ -33,6 +34,9 @@ func _init() -> void:
 				elif e[0] == Sim.EV_HURT and t0 >= 0 and outcome == "alive":
 					if s._levi_hit:
 						body += e[1]
+						var hb := s._levi_head()
+						var key := "st%d" % (s.e_state[hb] if hb >= 0 else -1)
+						by_state[key] = float(by_state.get(key, 0.0)) + float(e[1])
 					else:
 						other += e[1]
 				elif e[0] == Sim.EV_BOSS_DOWN and e[1] == Defs.LEVIATHAN:
@@ -42,7 +46,7 @@ func _init() -> void:
 					outcome = "escaped"
 			if s.state == Sim.DEAD and outcome == "alive":
 				outcome = "DIED at %ds" % int(s.seconds())
-		print("seed %d: lvl %d hp %.0f/%.0f at arrival, %s, levi dmg %.0f, other %.0f, %s" % [100 + sd, s.level, hp0,
-				s.max_hp, outcome, body, other, str(s.weapons.map(func(w): return "%s%d" % [w.id, w.lvl]))])
+		print("seed %d: lvl %d hp %.0f/%.0f at arrival, %s, levi dmg %.0f %s, other %.0f, %s" % [100 + sd, s.level, hp0,
+				s.max_hp, outcome, body, str(by_state), other, str(s.weapons.map(func(w): return "%s%d" % [w.id, w.lvl]))])
 	print("down %d/%d" % [down, seeds])
 	quit()

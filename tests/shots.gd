@@ -519,8 +519,11 @@ func _levi_shots() -> void:
 	if h >= 0:
 		s.e_maxhp[h] = 1e6
 		s.e_hp[h] = 0.8e6
+	gs._hud._boss_intro(Defs.LEVIATHAN)
 	main.arena.demo = true
-	await _wait(2.6)
+	await _wait(0.9)
+	await _shot("l0_intro")
+	await _wait(1.7)
 	await _shot("l1_arrival")
 	for k in 3:
 		while h >= 0 and s.e_state[h] != [1, 3, 4][k]:

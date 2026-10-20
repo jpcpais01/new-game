@@ -1780,11 +1780,15 @@ func _leviathan(i: int, dx: float, dy: float) -> float:
 	var sp := e_speed[i] * (1.12 if enraged else 1.0)
 	var c := t % 720
 	if c < 260:
-		# Prowl: slither after where you are going.
+		# Prowl: slither past your flank so the body sweeps by, rather than ramming.
 		e_state[i] = 0
-		var wig := int(Trig.sin_i(t * 9) * 70.0)
-		_levi_turn(i, Trig.angle_of(dx + mvx * st_speed * 0.3, dy + mvy * st_speed * 0.3) + wig, 7)
-		return sp
+		var d := sqrt(dx * dx + dy * dy) + 0.001
+		var side := 1.0 if (t / 720) % 2 == 0 else -1.0
+		var tx := dx - dy / d * 190.0 * side
+		var ty := dy + dx / d * 190.0 * side
+		var wig := int(Trig.sin_i(t * 9) * 60.0)
+		_levi_turn(i, Trig.angle_of(tx, ty) + wig, 7)
+		return sp * 0.9
 	if c < 470:
 		# Coil: circle you, tightening, while the body fires inwards.
 		if c == 260:
@@ -1800,7 +1804,7 @@ func _leviathan(i: int, dx: float, dy: float) -> float:
 		var tx := px + Trig.cos_i(ap + lead) * rad
 		var ty := py + Trig.sin_i(ap + lead) * rad
 		_levi_turn(i, Trig.angle_of(tx - e_x[i], ty - e_y[i]), 16)
-		if c > 300 and c % (36 if enraged else 48) == 0:
+		if c > 300 and c % (40 if enraged else 56) == 0:
 			for s in range(1, lv_n, 3):
 				_fire_orb(lv_x[s], lv_y[s], Trig.angle_of(px - lv_x[s], py - lv_y[s]), 150.0, 12.0)
 		return sp * 1.4
@@ -1815,7 +1819,7 @@ func _leviathan(i: int, dx: float, dy: float) -> float:
 		# Rear back and take aim.
 		e_state[i] = 2
 		_levi_turn(i, Trig.angle_of(dx, dy), 22)
-		return sp * 0.25 * float(30 - lt) / 30.0
+		return 0.0
 	if lt == 30:
 		e_state[i] = 3
 		events.append([EV_TELEGRAPH, e_x[i], e_y[i], e_ang[i], LEVI_LUNGE * float(LEVI_LUNGE_T) / 60.0])
@@ -1831,9 +1835,9 @@ func _leviathan(i: int, dx: float, dy: float) -> float:
 	return sp * 0.6
 
 
-## Ticks before a Leviathan escapes (five sixths of a boss's overload time).
+## Ticks before a Leviathan escapes (half a boss's overload time).
 func levi_escape_ticks() -> int:
-	return overload_ticks * 5 / 6
+	return overload_ticks / 2
 
 
 func _levi_turn(i: int, want: int, rate: int) -> void:
@@ -1928,7 +1932,7 @@ func _levi_body() -> void:
 			var dx := px - lv_x[k]
 			var dy := py - lv_y[k]
 			if dx * dx + dy * dy < rr * rr:
-				_levi_strike(e_dmg[h] * 0.8)
+				_levi_strike(e_dmg[h] * 0.7)
 				break
 	if tick % 2 == 0:
 		for k in range(0, lv_n, 2):

@@ -64,7 +64,7 @@ func _ready() -> void:
 		grid.add_child(card)
 		UiKit.pop_in(card, 0.05 * k, 20)
 		k += 1
-	list.add_child(UiKit.label("RELICS  ·  FROM THE FIRST ELITE AND EVERY BOSS", 30, Color(0.78, 0.55, 1.0),
+	list.add_child(UiKit.label("RELICS  ·  FROM EVERY BOSS (OR THE FIRST ELITE)", 30, Color(0.78, 0.55, 1.0),
 			UiKit.display()))
 	for id in Defs.RELIC_ORDER:
 		list.add_child(_relic_row(id))

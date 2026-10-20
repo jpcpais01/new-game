@@ -481,9 +481,11 @@ func handle_events() -> void:
 			Sim.EV_BOSS:
 				if loud:
 					coach.emit("boss")
-				banner.emit("NIGHT %d" % sim.night if sim.endless else "WARNING", UiKit.RED)
 				boss_started.emit(e[1])
 				shake(0.4)
+				if loud:
+					slowmo(0.45, 0.8)
+					_zoom = maxf(_zoom, 0.35)
 				if loud:
 					Sfx.play("alarm")
 					Sfx.buzz(120)
