@@ -32,6 +32,8 @@ const DEFAULTS := {
 	"radiance": 0,
 	"radiance_cleared": -1,
 	"gauntlet": {},
+	"sector": 0,
+	"sector_best": {},
 	"tips": [],
 	"settings": {"sound": true, "music": true, "haptics": true, "shake": true, "numbers": true},
 }
@@ -126,6 +128,9 @@ func loadout() -> Dictionary:
 	var r := current_radiance()
 	if r > 0:
 		out.radiance = r
+	var sec := current_sector()
+	if sec > 0:
+		out.sector = sec
 	return out
 
 
@@ -133,6 +138,7 @@ func loadout() -> Dictionary:
 func gauntlet_loadout() -> Dictionary:
 	var out := loadout()
 	out.erase("radiance")
+	out.erase("sector")
 	out.gauntlet = true
 	return out
 
@@ -154,6 +160,31 @@ func gauntlet_rec() -> Dictionary:
 	if not (g.get("splits") is Array) or (g.splits as Array).size() != Defs.GAUNTLET.size():
 		g.splits = [0, 0, 0, 0]
 	return g
+
+
+## Sectors open as their mission is completed (the Neon Grid always is).
+func sector_unlocked(k: int) -> bool:
+	var unlock := String(Defs.sector(k).unlock)
+	return unlock == "" or (data.missions as Array).has(unlock)
+
+
+func current_sector() -> int:
+	var k := clampi(int(data.get("sector", 0)), 0, Defs.SECTORS.size() - 1)
+	return k if sector_unlocked(k) else 0
+
+
+func set_sector(k: int) -> void:
+	if sector_unlocked(k):
+		data.sector = k
+		save_data()
+
+
+## A sector's record: time, score and whether the dawn was reached there.
+func sector_rec(k: int) -> Dictionary:
+	var sb = data.get("sector_best", {})
+	if not (sb is Dictionary):
+		return {}
+	return sb.get(String(Defs.sector(k).id), {})
 
 
 ## The highest Radiance level the player may choose (0 until the first dawn).
@@ -291,6 +322,8 @@ func record_run(sim: Sim) -> Dictionary:
 				data.radiance = radiance_max()
 	if sim.loadout.has("daily"):
 		_record_daily(sim, score, beat)
+	else:
+		_record_sector(sim, score, beat)
 	if sim.dawn:
 		data.wins = int(data.wins) + 1
 		var won: Array = data.ships_won
@@ -341,6 +374,23 @@ func _record_common(sim: Sim, earned: int, beat: Dictionary) -> Dictionary:
 	beat.ships = ships
 	save_data()
 	return beat
+
+
+## Sector bookkeeping (not for dailies): best time and score per sector, and
+## whether its dawn has been reached. `beat` gets sector_score and sector_dawn.
+func _record_sector(sim: Sim, score: int, beat: Dictionary) -> void:
+	if not (data.get("sector_best") is Dictionary):
+		data.sector_best = {}
+	var id := String(Defs.sector(sim.sector).id)
+	var rec: Dictionary = (data.sector_best as Dictionary).get(id, {"time": 0.0, "score": 0, "dawn": false})
+	if sim.sector > 0 and score > int(rec.get("score", 0)):
+		beat.sector_score = true
+	if sim.dawn and not bool(rec.get("dawn", false)):
+		beat.sector_dawn = true
+	rec.time = maxf(float(rec.get("time", 0.0)), sim.seconds())
+	rec.score = maxi(int(rec.get("score", 0)), score)
+	rec.dawn = bool(rec.get("dawn", false)) or sim.dawn
+	data.sector_best[id] = rec
 
 
 ## Gauntlet bookkeeping: clears, the fastest clear, best splits per boss.

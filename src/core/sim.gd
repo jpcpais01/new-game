@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 11
+const RULES_VERSION := 12
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -82,6 +82,8 @@ const EV_METEOR := 41     # x, y, r, phase (0 marked, 1 impact)
 const EV_RICOCHET := 42   # x, y, evolved (a glaive bounces off an enemy)
 const EV_LEVI := 43       # x, y, phase (0 coils, 1 lunge marked, 2 lunges, 3 sheds a segment, 4 escapes, 5 a segment bursts), n
 const EV_GAUNTLET := 44   # phase (0 a boss arrives, 1 a boss is passed, 2 the Gauntlet is cleared, 3 a new cycle), stage, ticks, felled
+const EV_MAW := 45        # x, y, phase (0 opens, 1 eats, 2 collapses, 3 burns you), n (eaten so far)
+const EV_FLARE := 46      # phase (0 the sun swells, 1 erupts, 2 burns you, 3 fades, 4 you slipped through), x, y
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -246,6 +248,17 @@ var g_splits: Array = []      # ticks each boss took to fall (-1: it escaped)
 var g_clear_tick := -1        # tick all four bosses of the first cycle were passed
 var g_bonus := 0              # speed and clear score
 
+# --- sectors -----------------------------------------------------------------------
+var sector := Defs.SECTOR_GRID
+var maws: Array = []          # Abyss black holes: {x, y, ox, oy, vx, vy, t, life, fed, eaten}
+var maw_next := 0
+var maws_eaten := 0           # swarm crushed by black holes this run
+var maw_best := 0             # most swarm eaten by one black hole
+var _eaten := {}              # uid -> the black hole that crushed it (its light feeds the hole)
+var flare := {}               # Corona: the flare in flight, {} when none: t, r, gaps, spin, hit, past, uids
+var flare_next := 0
+var flares_passed := 0        # flares slipped through without a burn
+
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
 var sched_i := 0
@@ -370,6 +383,14 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 		level = 1 + Defs.GAUNTLET_DRAFT
 		pending_levels = Defs.GAUNTLET_DRAFT
 		g_next = Defs.GAUNTLET_FIRST * TPS
+	if not gauntlet:
+		sector = clampi(int(loadout.get("sector", 0)), 0, Defs.SECTORS.size() - 1)
+	if sector == Defs.SECTOR_ABYSS:
+		maw_next = Defs.MAW_FIRST * TPS
+	elif sector == Defs.SECTOR_CORONA:
+		flare_next = Defs.FLARE_FIRST * TPS
+		py = Defs.SUN_START
+		ppy = py
 	_recompute()
 	hp = max_hp
 	xp_need = need_for(level)
@@ -431,6 +452,10 @@ func step(ix: int, iy: int, burst := false) -> void:
 	_move_player(ix, iy)
 	_director()
 	_update_rift()
+	if sector == Defs.SECTOR_ABYSS:
+		_update_maws()
+	elif sector == Defs.SECTOR_CORONA:
+		_update_corona()
 	_update_enemies()
 	_grid_build()
 	_separate()
@@ -643,6 +668,7 @@ func flux_earned() -> int:
 	mult *= Defs.radiance_flux(radiance)
 	if gauntlet:
 		mult *= Defs.GAUNTLET_FLUX
+	mult *= float(Defs.sector(sector).flux)
 	return int(float(base) * mult)
 
 
@@ -656,7 +682,7 @@ func score() -> int:
 
 
 func score_mult() -> float:
-	return Daily.multiplier(mods.keys()) * Defs.radiance_score(radiance)
+	return Daily.multiplier(mods.keys()) * Defs.radiance_score(radiance) * float(Defs.sector(sector).score)
 
 
 ## Seconds survived past the dawn (0 before it).
@@ -676,6 +702,10 @@ func checksum() -> int:
 		h = GlowRng.mix32(h ^ (int(g_y[i] * 100.0) & GlowRng.MASK))
 	for k in lv_n:
 		h = GlowRng.mix32(h ^ (int(lv_x[k] * 100.0) & GlowRng.MASK) ^ (k << 20))
+	for m in maws:
+		h = GlowRng.mix32(h ^ (int(float(m.x) * 100.0) & GlowRng.MASK) ^ (int(m.eaten) << 16))
+	if not flare.is_empty():
+		h = GlowRng.mix32(h ^ (int(float(flare.r) * 100.0) & GlowRng.MASK))
 	h = GlowRng.mix32(h ^ int(rng.state()[0]))
 	return h
 
@@ -960,6 +990,12 @@ func _open_rift() -> void:
 	if d > lim:
 		x = x / d * lim
 		y = y / d * lim
+	# Never in the sun.
+	var clear := Defs.SUN_R + 300.0
+	if sector == Defs.SECTOR_CORONA and d < clear:
+		var ra := Trig.angle_of(x, y) if d > 1.0 else a
+		x = Trig.cos_i(ra) * clear
+		y = Trig.sin_i(ra) * clear
 	rift = {"kind": kind, "x": x, "y": y, "ox": x, "oy": y, "life": int(Defs.RIFT_LIFE[kind]) * TPS, "on": false,
 			"prog": 0.0, "k0": 0, "goal": 0, "mets": []}
 	events.append([EV_RIFT, kind, x, y, 0])
@@ -1221,6 +1257,301 @@ func chain_cap() -> float:
 	return Defs.CROWN_MAX_MULT if r_crown else Defs.CHAIN_MAX_MULT
 
 
+# --- sectors: the Abyss ------------------------------------------------------------
+
+## How many black holes may be open at once: one, two from 3:00, three in the
+## Afterdark.
+func maw_cap() -> int:
+	if endless:
+		return 3
+	return 2 if minutes() >= 3.0 else 1
+
+
+## Black holes open, drift after you, drag in the swarm, your gems and you,
+## crush what reaches the core and burst with what they ate when they collapse.
+func _update_maws() -> void:
+	if tick >= maw_next and maws.size() < maw_cap():
+		_open_maw()
+	var k := maws.size() - 1
+	while k >= 0:
+		var m: Dictionary = maws[k]
+		m.t += 1
+		m.ox = m.x
+		m.oy = m.y
+		if int(m.t) >= int(m.life):
+			_collapse_maw(m)
+			maws.remove_at(k)
+			k -= 1
+			continue
+		if int(m.t) % 120 == 0:
+			# Wander, leaning towards you.
+			var a := Trig.angle_of(px - float(m.x), py - float(m.y)) + rng.range_i(320) - 160
+			m.vx = Trig.cos_i(a) * Defs.MAW_SPEED
+			m.vy = Trig.sin_i(a) * Defs.MAW_SPEED
+		m.x += float(m.vx) * DT
+		m.y += float(m.vy) * DT
+		var r := sqrt(float(m.x) * float(m.x) + float(m.y) * float(m.y))
+		if r > ARENA_R - 400.0:
+			m.vx = -float(m.x) / r * Defs.MAW_SPEED
+			m.vy = -float(m.y) / r * Defs.MAW_SPEED
+		_maw_pull(m, maw_strength(m))
+		k -= 1
+
+
+## A black hole's grip, 0..1.5: it opens over MAW_FORM ticks and grips
+## harder in its last second before collapsing.
+static func maw_strength(m: Dictionary) -> float:
+	var t := int(m.t)
+	if t < Defs.MAW_FORM:
+		return float(t) / float(Defs.MAW_FORM)
+	if t > int(m.life) - 60:
+		return 1.5
+	return 1.0
+
+
+func _open_maw() -> void:
+	maw_next = tick + Defs.MAW_EVERY * TPS
+	var a := rng.range_i(Trig.STEPS)
+	var pr := sqrt(px * px + py * py)
+	if pr > 700.0:
+		a = Trig.angle_of(-px, -py) + rng.range_i(Trig.HALF) - Trig.QUARTER
+	var dist := rng.range_f(560.0, 820.0)
+	var x := px + Trig.cos_i(a) * dist
+	var y := py + Trig.sin_i(a) * dist
+	var d := sqrt(x * x + y * y)
+	var lim := ARENA_R - 420.0
+	if d > lim:
+		x = x / d * lim
+		y = y / d * lim
+	var va := Trig.angle_of(px - x, py - y)
+	maws.append({"x": x, "y": y, "ox": x, "oy": y, "vx": Trig.cos_i(va) * Defs.MAW_SPEED,
+			"vy": Trig.sin_i(va) * Defs.MAW_SPEED, "t": 0, "life": Defs.MAW_LIFE * TPS, "fed": 0.0, "eaten": 0})
+	events.append([EV_MAW, x, y, 0, 0])
+
+
+func _maw_pull(m: Dictionary, grip: float) -> void:
+	if grip <= 0.0:
+		return
+	var mx: float = m.x
+	var my: float = m.y
+	var reach := Defs.MAW_PULL
+	var core := Defs.MAW_CORE
+	var grind := tick % 10 == 0
+	for i in en:
+		if e_spawn[i] > 0 or e_hp[i] <= 0.0:
+			continue
+		var dx := mx - e_x[i]
+		var dy := my - e_y[i]
+		var d2 := dx * dx + dy * dy
+		if d2 > reach * reach:
+			continue
+		var d := sqrt(d2) + 0.001
+		var f := 1.0 - d / reach
+		if e_type[i] >= Defs.WARDEN or e_elite[i] == 1:
+			# Too big to swallow: the core grinds them instead.
+			if grind and d < core + e_r[i] * 0.5:
+				_damage(i, maxf(12.0, e_maxhp[i] * 0.006), 0.0, 0.0)
+			if e_elite[i] == 1:
+				var pe := 10.0 * f * grip
+				e_vx[i] += dx / d * pe
+				e_vy[i] += dy / d * pe
+			continue
+		var p := (16.0 + 40.0 * f * f) * grip * maxf(0.35, e_kb[i])
+		e_vx[i] += dx / d * p
+		e_vy[i] += dy / d * p
+		if d < core + e_r[i] * 0.3 and grip >= 0.5:
+			e_hp[i] = 0.0
+			e_flash[i] = 5
+			_eaten[e_uid[i]] = m
+	# Loose gems drift in, and what reaches the core is eaten (for now).
+	var g := gn - 1
+	while g >= 0:
+		if g_mag[g] == 0:
+			var dx := mx - g_x[g]
+			var dy := my - g_y[g]
+			var d2 := dx * dx + dy * dy
+			if d2 < reach * reach:
+				var d := sqrt(d2) + 0.001
+				if d < core * 0.6:
+					m.fed += g_val[g]
+					var l := gn - 1
+					if g != l:
+						g_x[g] = g_x[l]; g_y[g] = g_y[l]; g_ox[g] = g_ox[l]; g_oy[g] = g_oy[l]
+						g_val[g] = g_val[l]; g_spd[g] = g_spd[l]; g_mag[g] = g_mag[l]
+					gn = l
+				else:
+					var sp := (40.0 + 200.0 * (1.0 - d / reach)) * grip * DT
+					g_x[g] += dx / d * sp
+					g_y[g] += dy / d * sp
+		g -= 1
+	# You: a drag you can always outfly, and the core burns.
+	var pdx := mx - px
+	var pdy := my - py
+	var pd2 := pdx * pdx + pdy * pdy
+	if pd2 < reach * reach:
+		var pd := sqrt(pd2) + 0.001
+		var pf := 1.0 - pd / reach
+		var drag := (Defs.MAW_DRAG * pf * pf + 20.0 * pf) * minf(grip, 1.0)
+		px += pdx / pd * minf(drag * DT, pd)
+		py += pdy / pd * minf(drag * DT, pd)
+		if pd < core + PLAYER_R * 0.3 and grip >= 0.5 and iframes <= 0 and shield <= 0:
+			events.append([EV_MAW, px, py, 3, 0])
+			_hurt(10.0 + 2.0 * minutes())
+
+
+## It collapses: a blast that throws the swarm back, and every bit of light it
+## ate bursts out as gems. Fed enough, it leaves a Prism Cache.
+func _collapse_maw(m: Dictionary) -> void:
+	var x: float = m.x
+	var y: float = m.y
+	var eaten: int = m.eaten
+	maw_best = maxi(maw_best, eaten)
+	maw_next = maxi(maw_next, tick + 6 * TPS)
+	events.append([EV_MAW, x, y, 2, eaten])
+	var br := Defs.MAW_BLAST
+	var dmg := 40.0 * _od_scale()
+	for i in en:
+		if e_hp[i] <= 0.0:
+			continue
+		var dx := e_x[i] - x
+		var dy := e_y[i] - y
+		var rr := br + e_r[i]
+		var d2 := dx * dx + dy * dy
+		if d2 < rr * rr:
+			var d := sqrt(d2) + 0.001
+			_damage(i, dmg, dx / d * 420.0, dy / d * 420.0)
+	var fed: float = m.fed
+	if fed > 0.0:
+		var n := clampi(int(fed / 6.0), 3, 16)
+		var base := rng.range_i(Trig.STEPS)
+		for k in n:
+			var a := base + k * Trig.STEPS / n
+			var rd := rng.range_f(50.0, 150.0)
+			_drop_gem(x + Trig.cos_i(a) * rd, y + Trig.sin_i(a) * rd, fed / float(n))
+	if eaten >= Defs.MAW_SATED:
+		_drop_pickup("chest", x, y)
+
+
+# --- sectors: Corona --------------------------------------------------------------------
+
+## The sun burns whatever touches it, and you cannot fly through it. Every few
+## seconds it erupts in a flare.
+func _update_corona() -> void:
+	var sr := Defs.SUN_R
+	# The sun is solid: you are pushed out, burned if you touched it.
+	var pd := sqrt(px * px + py * py)
+	if pd < sr + PLAYER_R:
+		if pd < 0.001:
+			py = sr + PLAYER_R
+		else:
+			px = px / pd * (sr + PLAYER_R)
+			py = py / pd * (sr + PLAYER_R)
+		if iframes <= 0 and shield <= 0:
+			events.append([EV_FLARE, 2, px, py])
+		_hurt(12.0 + 2.0 * minutes())
+	if tick % 10 == 0:
+		for i in en:
+			if e_spawn[i] > 0 or e_hp[i] <= 0.0:
+				continue
+			var rr := sr + e_r[i] * 0.6
+			if e_x[i] * e_x[i] + e_y[i] * e_y[i] < rr * rr:
+				var big := e_type[i] >= Defs.WARDEN or e_elite[i] == 1
+				_damage(i, maxf(10.0, e_maxhp[i] * (0.012 if big else 0.3)), 0.0, 0.0)
+	if flare.is_empty():
+		if tick >= flare_next:
+			_start_flare()
+		return
+	_advance_flare()
+
+
+## Seconds between flares: they come faster as the night goes on.
+func flare_every() -> float:
+	return maxf(float(Defs.FLARE_MIN), float(Defs.FLARE_EVERY) - 0.6 * minutes())
+
+
+func _start_flare() -> void:
+	flare_next = tick + int(flare_every() * float(TPS))
+	var n := 3
+	var base := rng.range_i(Trig.STEPS)
+	var gaps: Array = []
+	for k in n:
+		gaps.append(base + k * Trig.STEPS / n + rng.range_i(120) - 60)
+	var spin := 0
+	if tick >= Defs.FLARE_SPIN_FROM * TPS:
+		spin = 1 if rng.unit() < 0.5 else -1
+	flare = {"t": 0, "r": Defs.SUN_R, "gaps": gaps, "spin": spin, "hit": false, "past": false, "uids": {}}
+	events.append([EV_FLARE, 0, 0.0, 0.0])
+
+
+## Whether the angle `a` lies in one of the flare's gaps.
+func flare_gap(a: int) -> bool:
+	if flare.is_empty():
+		return false
+	for g in flare.gaps:
+		var diff := (a - int(g)) & Trig.MASK
+		if diff > Trig.HALF:
+			diff = Trig.STEPS - diff
+		if diff <= Defs.FLARE_GAP:
+			return true
+	return false
+
+
+func _advance_flare() -> void:
+	flare.t += 1
+	var t: int = flare.t
+	if t < Defs.FLARE_WARN:
+		return
+	if t == Defs.FLARE_WARN:
+		events.append([EV_FLARE, 1, 0.0, 0.0])
+	flare.r += Defs.FLARE_SPEED * DT
+	var spin: int = flare.spin
+	if spin != 0 and t % 3 == 0:
+		var gaps: Array = flare.gaps
+		for k in gaps.size():
+			gaps[k] = (int(gaps[k]) + spin) & Trig.MASK
+	var r: float = flare.r
+	var hw := Defs.FLARE_W * 0.5
+	if r > ARENA_R + Defs.FLARE_W:
+		if not flare.hit and not flare.past:
+			flares_passed += 1
+			events.append([EV_FLARE, 4, px, py])
+		events.append([EV_FLARE, 3, 0.0, 0.0])
+		flare = {}
+		return
+	# You: slip through a gap, or burn.
+	if not flare.hit and not flare.past:
+		var d := sqrt(px * px + py * py)
+		if absf(d - r) < hw + PLAYER_R * 0.6:
+			if not flare_gap(Trig.angle_of(px, py)):
+				flare.hit = true
+				events.append([EV_FLARE, 2, px, py])
+				_hurt(16.0 + 2.5 * minutes())
+		elif r - hw > d + PLAYER_R:
+			flare.past = true
+			flares_passed += 1
+			events.append([EV_FLARE, 4, px, py])
+	# The swarm burns where the front sweeps over it.
+	var uids: Dictionary = flare.uids
+	var dmg := 20.0 * _od_scale()
+	for i in en:
+		if e_spawn[i] > 0 or e_hp[i] <= 0.0 or uids.has(e_uid[i]):
+			continue
+		var ex := e_x[i]
+		var ey := e_y[i]
+		var ed := sqrt(ex * ex + ey * ey) + 0.001
+		if absf(ed - r) < hw + e_r[i] and not flare_gap(Trig.angle_of(ex, ey)):
+			uids[e_uid[i]] = true
+			var big := e_type[i] >= Defs.WARDEN or e_elite[i] == 1
+			_damage(i, e_maxhp[i] * 0.05 if big else maxf(dmg, e_maxhp[i] * 0.4), ex / ed * 380.0, ey / ed * 380.0)
+
+
+## Corona: 0..1 how far the flare's warning has built (0 when none is coming).
+func flare_warn() -> float:
+	if flare.is_empty():
+		return 0.0
+	return minf(1.0, float(flare.t) / float(Defs.FLARE_WARN))
+
+
 func _spawn_random(tm: float) -> void:
 	var type := _pick_type(tm)
 	var a := rng.range_i(Trig.STEPS)
@@ -1249,6 +1580,8 @@ func _pick_type(tm: float) -> int:
 		w[Defs.SENTINEL] = 0.6 + minf(0.6, (tm - 3.4) * 0.2)
 	if tm >= 4.2:
 		w[Defs.BASTION] = 0.8 + minf(0.6, (tm - 4.2) * 0.2)
+	for tilt in Defs.SECTOR_TILT[sector]:
+		w[tilt[0]] *= tilt[1]
 	var total := 0.0
 	for v in w:
 		total += v
@@ -3375,7 +3708,15 @@ func _on_death(i: int) -> void:
 		xpv = xpv * 8 + 10
 	if mods.has("giants"):
 		xpv *= 2
-	if xpv > 0:
+	var maw = _eaten.get(e_uid[i])
+	if maw != null:
+		# Crushed in a black hole: its light feeds the hole until it collapses.
+		_eaten.erase(e_uid[i])
+		maw.fed += float(xpv)
+		maw.eaten += 1
+		maws_eaten += 1
+		events.append([EV_MAW, x, y, 1, int(maw.eaten)])
+	elif xpv > 0:
 		_drop_gem(x, y, float(xpv))
 	match type:
 		Defs.SPLITTER:

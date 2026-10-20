@@ -51,6 +51,10 @@ func _ready() -> void:
 		await _gauntlet_shots()
 		get_tree().quit()
 		return
+	if args.has("sectors"):
+		await _sector_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -604,6 +608,71 @@ func _gauntlet_shots() -> void:
 	gs._on_end(false)
 	await _wait(2.2)
 	await _shot("g6_results")
+
+
+## Fast-forwards the open run until `done` says stop, keeping the ship alive.
+func _ff(s: Sim, done: Callable, limit: int) -> void:
+	while not done.call() and s.tick < limit and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		elif s.state == Sim.RUNNING:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y, Autopilot.burst(s))
+		else:
+			break
+		s.events.clear()
+
+
+func _sector_shots() -> void:
+	Save.data.missions.append("warden")
+	Save.data.missions.append("dawn")
+	Save.data.sector = Defs.SECTOR_ABYSS
+	Save.data.sector_best = {"abyss": {"time": 412.0, "score": 88210, "dawn": false}}
+	main.go_title()
+	await _wait(1.6)
+	await _shot("s0_title")
+	main.go_hangar()
+	await _wait(1.4)
+	await _shot("s1_hangar")
+	main.start_run()
+	await _wait(2.0)
+	await _shot("s2_abyss_intro")
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	_ff(s, func(): return not s.maws.is_empty() and int(s.maws[0].t) > 400 and s.en > 60, 200 * Sim.TPS)
+	if not s.maws.is_empty():
+		s.px = float(s.maws[0].x) + 260.0
+		s.py = float(s.maws[0].y) + 120.0
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(1.2)
+	await _shot("s3_abyss")
+	if not s.maws.is_empty():
+		s.maws[0].t = int(s.maws[0].life) - 20
+	await _wait(0.6)
+	await _shot("s4_collapse")
+	main.arena.demo = false
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(2.4)
+	await _shot("s5_results")
+	Save.data.sector = Defs.SECTOR_CORONA
+	main.start_run()
+	await _wait(2.0)
+	gs = main.screen
+	s = gs.sim
+	gs._hide_hint()
+	_ff(s, func(): return not s.flare.is_empty() and int(s.flare.t) > 50 and s.tick > 100 * Sim.TPS, 200 * Sim.TPS)
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(0.5)
+	await _shot("s6_corona_warn")
+	_ff(s, func(): return not s.flare.is_empty() and float(s.flare.r) > 520.0, 220 * Sim.TPS)
+	await _wait(0.1)
+	await _shot("s7_flare")
+	main.arena.demo = false
 
 
 func _wait(t: float) -> void:

@@ -26,6 +26,12 @@ func build() -> void:
 		var gl := UiKit.label("THE GAUNTLET  ·  CYCLE %d  ·  %d BOSSES PASSED" % [sim.gauntlet_cycle() + 1, sim.g_stage],
 				26, Defs.GAUNTLET_COLOR, UiKit.display())
 		body.add_child(gl)
+	if sim.sector > 0:
+		var sd := Defs.sector(sim.sector)
+		var sl := UiKit.label("%s  ·  %s" % [String(sd.name).to_upper(), sd.text], 24, sd.color, UiKit.body())
+		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sl.custom_minimum_size = Vector2(760, 0)
+		body.add_child(sl)
 	if sim.radiance > 0:
 		var rl := UiKit.label("RADIANCE %d  ·  %s" % [sim.radiance, ". ".join(_rules(sim.radiance))], 24,
 				Defs.radiance_color(sim.radiance), UiKit.body())

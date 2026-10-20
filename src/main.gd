@@ -156,10 +156,11 @@ func go_missions() -> void:
 		return m)
 
 
-## The title demo flies a random ship from the fleet (locked ones too, as a tease).
+## The title demo flies a random ship from the fleet through a random sector
+## (locked ones too, as a tease).
 func demo_loadout() -> Dictionary:
 	var sd: Dictionary = Defs.SHIPS[randi() % Defs.SHIPS.size()]
-	return {"hull": 5, "power": 3, "ship": sd.id}
+	return {"hull": 5, "power": 3, "ship": sd.id, "sector": randi() % Defs.SECTORS.size()}
 
 
 func _switch(make: Callable) -> void:

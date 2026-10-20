@@ -34,6 +34,7 @@ func _init() -> void:
 	_test_starfall()
 	_test_leviathan()
 	_test_gauntlet()
+	_test_sectors()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -1436,6 +1437,150 @@ func _test_gauntlet() -> void:
 	var rr := Sim.from_replay(r.to_replay())
 	check(rr.tick == r.tick and rr.checksum() == r.checksum() and rr.g_splits == r.g_splits,
 			"a Gauntlet replays bit for bit (%d bosses passed)" % r.g_stage)
+
+
+## Steps a run with the swarm held off, so a test can watch one mechanic.
+func _quiet_step(s: Sim, n: int) -> void:
+	for k in n:
+		s.spawn_acc = -1e9
+		s.en = 0
+		s.step(0, 0)
+
+
+func _test_sectors() -> void:
+	check(Sim.new(1, {"sector": 99}).sector == Defs.SECTORS.size() - 1, "the sector is clamped")
+	check(Sim.new(1, {"sector": 2, "gauntlet": true}).sector == 0, "the Gauntlet is always on the Neon Grid")
+	var a := Sim.new(71, {})
+	var b := Sim.new(71, {"sector": 0})
+	Autopilot.play(a, 100 * Sim.TPS)
+	Autopilot.play(b, 100 * Sim.TPS)
+	check(a.checksum() == b.checksum() and a.maws.is_empty() and a.flare.is_empty(),
+			"the Neon Grid plays exactly as before")
+	check(is_equal_approx(Sim.new(1, {"sector": 1}).score_mult(), 1.2) and
+			is_equal_approx(Sim.new(1, {"sector": 2}).score_mult(), 1.35), "sectors raise the score multiplier")
+	# The Abyss: a black hole opens on time.
+	var s := Sim.new(73, {"sector": Defs.SECTOR_ABYSS})
+	while s.maws.is_empty() and s.tick < 60 * Sim.TPS:
+		s.iframes = 999
+		_quiet_step(s, 1)
+	check(s.tick == Defs.MAW_FIRST * Sim.TPS, "the first black hole opens at %ds (%d)" % [Defs.MAW_FIRST, s.tick])
+	_quiet_step(s, Defs.MAW_FORM + 1)
+	var m: Dictionary = s.maws[0]
+	# It crushes the swarm at its core and keeps the light.
+	s._spawn(Defs.DRIFTER, float(m.x) + 20.0, float(m.y), false, 0)
+	var gems := s.gn
+	s.iframes = 999
+	s.spawn_acc = -1e9
+	s.step(0, 0)
+	check(s.maws_eaten == 1 and int(m.eaten) == 1 and float(m.fed) >= 1.0 and s.gn == gems,
+			"a drifter at the core is crushed and fed to the hole (eaten %d, gems %d -> %d)" % [s.maws_eaten, gems, s.gn])
+	check(s.kills == 1, "a crushed enemy counts as your kill")
+	# Elites are too big to swallow.
+	var e := s._spawn(Defs.BRUTE, float(m.x), float(m.y), true, 0)
+	var ehp := s.e_hp[e]
+	s.spawn_acc = -1e9
+	s.step(0, 0)
+	check(s.en == 1 and s.e_hp[0] > 0.0 and s.e_hp[0] <= ehp, "an elite is ground, not swallowed")
+	# It drags you in, and its core burns.
+	s.en = 0
+	s.px = float(m.x) + 300.0
+	s.py = float(m.y)
+	m.vx = 0.0
+	m.vy = 0.0
+	var d0 := absf(s.px - float(m.x))
+	s.spawn_acc = -1e9
+	s.step(0, 0)
+	check(absf(s.px - float(m.x)) < d0 - 0.5, "a black hole drags you in")
+	s.iframes = 0
+	s.px = float(m.x)
+	s.py = float(m.y)
+	var hp0 := s.hp
+	s.spawn_acc = -1e9
+	s.step(0, 0)
+	check(s.hp < hp0, "its core burns you")
+	# Gems drift in and are eaten too.
+	s._drop_gem(float(m.x) + 10.0, float(m.y), 5.0)
+	var fed0 := float(m.fed)
+	s.iframes = 999
+	_quiet_step(s, 2)
+	check(float(m.fed) >= fed0 + 5.0, "loose gems are eaten")
+	# It collapses and gives the light back.
+	m.t = int(m.life) - 1
+	gems = s.gn
+	var burst := false
+	s.spawn_acc = -1e9
+	s.en = 0
+	s.step(0, 0)
+	for ev in s.events:
+		if ev[0] == Sim.EV_MAW and ev[3] == 2:
+			burst = true
+	check(burst and s.maws.is_empty() and s.gn >= gems + 3, "a collapse bursts its light back out (%d gems)" % (s.gn - gems))
+	check(s.maw_best == 1, "the best black hole is remembered")
+	# Corona: you start below the sun, which is solid and burns.
+	var c := Sim.new(74, {"sector": Defs.SECTOR_CORONA})
+	check(is_equal_approx(c.py, Defs.SUN_START), "Corona starts you below the sun")
+	c.px = 0.0
+	c.py = Defs.SUN_R * 0.5
+	var chp := c.hp
+	_quiet_step(c, 1)
+	check(sqrt(c.px * c.px + c.py * c.py) >= Defs.SUN_R + Sim.PLAYER_R - 0.01 and c.hp < chp,
+			"the sun pushes you out and burns you")
+	c.iframes = 999
+	while c.flare.is_empty() and c.tick < 60 * Sim.TPS:
+		_quiet_step(c, 1)
+	check(c.tick == Defs.FLARE_FIRST * Sim.TPS and (c.flare.gaps as Array).size() == 3,
+			"the first flare comes at %ds with three gaps" % Defs.FLARE_FIRST)
+	# In a gap: the front passes you by.
+	var g: int = c.flare.gaps[0]
+	c.px = Trig.cos_i(g) * 500.0
+	c.py = Trig.sin_i(g) * 500.0
+	c.iframes = 0
+	chp = c.hp
+	while not c.flare.is_empty():
+		_quiet_step(c, 1)
+	check(c.flares_passed == 1 and c.hp == chp, "a flare passes you by in a gap")
+	# Out of a gap: it burns, and it burns the swarm too.
+	c.flare_next = c.tick + 1
+	_quiet_step(c, 2)
+	var outside := -1
+	for k in Trig.STEPS:
+		if not c.flare_gap(k):
+			outside = k
+			break
+	c.px = Trig.cos_i(outside) * 500.0
+	c.py = Trig.sin_i(outside) * 500.0
+	c.iframes = 0
+	chp = c.hp
+	var hit_flare := false
+	var dr := c._spawn(Defs.BRUTE, Trig.cos_i(outside) * 700.0, Trig.sin_i(outside) * 700.0, false, 0)
+	var dhp := c.e_hp[dr]
+	while not c.flare.is_empty():
+		c.spawn_acc = -1e9
+		c.step(0, 0)
+		for ev in c.events:
+			if ev[0] == Sim.EV_FLARE and ev[1] == 2:
+				hit_flare = true
+	check(hit_flare and c.hp < chp and c.flares_passed == 1, "a flare burns you outside the gaps")
+	check(c.en == 0 or c.e_hp[0] < dhp, "the front burns the swarm it sweeps over")
+	# Missions.
+	var ms := Sim.new(1, {"sector": 1})
+	ms.maw_best = Defs.MAW_SATED
+	check(Missions.done(_find_mission("sated"), ms, {}), "Sated mission")
+	ms.flares_passed = 15
+	check(Missions.done(_find_mission("sunrunner"), ms, {}), "Sunrunner mission")
+	var carto := {"sector_best": {"grid": {"dawn": true}, "abyss": {"dawn": true}}}
+	check(not Missions.done(_find_mission("cartographer"), null, carto), "Cartographer needs all three dawns")
+	var cw := Sim.new(1, {"sector": 2})
+	cw.dawn = true
+	check(Missions.done(_find_mission("cartographer"), cw, carto), "Cartographer counts this run's dawn")
+	# Replays.
+	for k in [1, 2]:
+		var r := Sim.new(80 + k, {"sector": k, "hull": 2})
+		Autopilot.play(r, 160 * Sim.TPS)
+		var rr := Sim.from_replay(r.to_replay())
+		check(rr.tick == r.tick and rr.checksum() == r.checksum() and rr.maws_eaten == r.maws_eaten and
+				rr.flares_passed == r.flares_passed, "%s replays bit for bit (eaten %d, flares %d)" % [
+				Defs.sector(k).name, r.maws_eaten, r.flares_passed])
 
 
 func _test_runs() -> void:

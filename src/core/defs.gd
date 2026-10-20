@@ -283,6 +283,57 @@ const METEOR_FALL := 60             # ticks from the warning mark to impact
 const METEOR_EVERY := 15
 
 
+## Sectors: the arena a run is flown in. Each has its own sky, its own hazard
+## and a tilt to the swarm, and pays a bigger score and more Flux. Kinds are
+## indices into SECTORS; `unlock` is the mission that opens it.
+enum { SECTOR_GRID, SECTOR_ABYSS, SECTOR_CORONA }
+const SECTORS := [
+	{"id": "grid", "name": "Neon Grid", "title": "Where every pilot learns the light", "color": Color(0.35, 0.95, 1.0),
+		"text": "The arena as you know it: an open grid of light and nothing in your way but the swarm.",
+		"score": 1.0, "flux": 1.0, "unlock": "", "lock": ""},
+	{"id": "abyss", "name": "The Abyss", "title": "Where the light falls in", "color": Color(0.62, 0.45, 1.0),
+		"text": "Black holes drift through the arena and drag in the swarm, your gems and you. Whatever reaches a core is crushed, and when a black hole collapses it bursts with all the light it ate.",
+		"score": 1.2, "flux": 1.15, "unlock": "warden", "lock": "Defeat the Warden to unlock."},
+	{"id": "corona", "name": "Corona", "title": "A dying sun at the heart of it all", "color": Color(1.0, 0.55, 0.22),
+		"text": "A sun burns at the centre of the arena and erupts every few seconds: a wall of fire races outwards with gaps in it. Slip through a gap. Everything else burns.",
+		"score": 1.35, "flux": 1.25, "unlock": "dawn", "lock": "Reach the dawn to unlock."},
+]
+## Swarm weight multipliers per sector: [type, factor].
+const SECTOR_TILT := [
+	[],
+	[[WEAVER, 1.7], [PHANTOM, 1.6], [DART, 0.8]],
+	[[BOMBER, 1.6], [SPITTER, 1.5], [BRUTE, 1.2]],
+]
+
+# The Abyss: black holes ("maws").
+const MAW_FIRST := 35          # seconds until the first black hole
+const MAW_EVERY := 22          # seconds between one opening and the next...
+const MAW_LIFE := 38           # seconds a black hole lives
+const MAW_FORM := 90           # ticks it takes to open (no pull yet)
+const MAW_PULL := 560.0        # its reach
+const MAW_CORE := 70.0         # the event horizon: swarm crushed, you burned
+const MAW_SPEED := 46.0        # px/s it drifts
+const MAW_DRAG := 140.0        # px/s it drags you at its core
+const MAW_SATED := 150         # swarm eaten by one black hole for a Prism Cache when it collapses
+const MAW_BLAST := 260.0
+
+# Corona: the sun and its flares.
+const SUN_R := 120.0
+const SUN_START := 560.0       # you warp in this far below the sun
+const FLARE_FIRST := 24        # seconds until the first flare
+const FLARE_EVERY := 17        # seconds between flares at the start...
+const FLARE_MIN := 12          # ...falling to this
+const FLARE_WARN := 96         # ticks of warning before the front leaves the sun
+const FLARE_SPEED := 330.0     # px/s the front races outwards
+const FLARE_W := 48.0          # thickness of the front
+const FLARE_GAP := 42          # half-width of each gap, in Trig steps (1024 a turn)
+const FLARE_SPIN_FROM := 240   # seconds: from here the gaps turn as the front flies
+
+
+static func sector(k: int) -> Dictionary:
+	return SECTORS[clampi(k, 0, SECTORS.size() - 1)]
+
+
 ## The Forge: permanent upgrades bought with Flux between runs.
 const FORGE := [
 	{"id": "hull", "name": "Hull", "text": "+12 max HP", "max": 5, "cost": [30, 70, 140, 240, 380]},
@@ -518,6 +569,12 @@ const MISSIONS := [
 		"goal": 1, "flux": 500},
 	{"id": "eternal", "name": "Eternal Return", "text": "Defeat 8 bosses in one Gauntlet.", "kind": "gauntlet_bosses",
 		"goal": 8, "flux": 600},
+	{"id": "sated", "name": "Sated", "text": "Feed 150 of the swarm to one black hole in the Abyss.",
+		"kind": "maw", "goal": MAW_SATED, "flux": 300},
+	{"id": "sunrunner", "name": "Sunrunner", "text": "Slip through 15 solar flares in one run in Corona.",
+		"kind": "flares", "goal": 15, "flux": 300},
+	{"id": "cartographer", "name": "Cartographer", "text": "Reach the dawn in all three sectors.",
+		"kind": "sectors", "goal": 3, "flux": 800},
 	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
 		"flux": 300},
 	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,

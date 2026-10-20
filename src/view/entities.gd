@@ -181,6 +181,7 @@ func _draw_glow() -> void:
 		draw_set_transform(Vector2(s.e_x[i], s.e_y[i]), t * 3.0 + float(i), Vector2(sc, sc))
 		draw_texture(portal, Vector2(-64, -64), Color(col * 1.6, (1.0 - k) * 0.9 + 0.1))
 	_draw_threats(s, t)
+	_draw_sector(s, t, a)
 	_draw_levi_glow(s, a, t)
 	# Gems.
 	var gem := Art.tex("gem")
@@ -720,3 +721,93 @@ func _draw_threats(s: Sim, t: float) -> void:
 			draw_set_transform(p0, 0.0, Vector2.ONE * (0.3 + 0.5 * kc))
 			draw_texture(glow, Vector2(-64, -64), Color(col * 1.5, 0.3 + 0.5 * kc))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Sector hazards: the Abyss's black holes and Corona's flares.
+func _draw_sector(s: Sim, t: float, a: float) -> void:
+	if s.sector == Defs.SECTOR_ABYSS:
+		for m in s.maws:
+			_draw_maw(m, t, a)
+	elif s.sector == Defs.SECTOR_CORONA and not s.flare.is_empty():
+		_draw_flare(s, t)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## A black hole: its reach as a faint turning ring, a photon ring at the
+## core, and in its last second a white shudder before it collapses.
+func _draw_maw(m: Dictionary, t: float, a: float) -> void:
+	var x := lerpf(float(m.ox), float(m.x), a)
+	var y := lerpf(float(m.oy), float(m.y), a)
+	var grip := minf(Sim.maw_strength(m), 1.0)
+	var left := int(m.life) - int(m.t)
+	var core := Defs.MAW_CORE * (0.6 + 0.4 * grip)
+	var violet := Color(0.62, 0.42, 1.0)
+	draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE)
+	var reach := Defs.MAW_PULL
+	var segs := 28
+	for k in segs:
+		var a0 := -t * 0.35 + TAU * float(k) / float(segs)
+		draw_arc(Vector2.ZERO, reach, a0, a0 + TAU / float(segs) * 0.4, 4, Color(violet, 0.16 * grip), 3.0)
+	# Rings of light sliding inwards, like water round a drain.
+	for k in 3:
+		var f := fmod(t * 0.45 + float(k) / 3.0, 1.0)
+		var rr := lerpf(reach * 0.85, core * 1.3, f)
+		draw_arc(Vector2.ZERO, rr, 0.0, TAU, 64, Color(violet * 1.3, 0.22 * f * grip), 2.0 + 3.0 * f)
+	var glow := Art.tex("glow")
+	draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE * (core * 3.6 / 128.0))
+	draw_texture(glow, Vector2(-64, -64), Color(0.7, 0.4, 1.4, 0.35 * grip))
+	draw_set_transform(Vector2(x, y), t * 2.4, Vector2.ONE)
+	for k in 6:
+		var a1 := TAU * float(k) / 6.0
+		draw_arc(Vector2.ZERO, core * 1.22, a1, a1 + 0.7, 12, Color(1.8, 1.4, 2.4, 0.8 * grip), 3.0)
+	if left < 60:
+		var k2 := 1.0 - float(left) / 60.0
+		draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE)
+		draw_arc(Vector2.ZERO, core * (2.6 - 1.6 * k2), 0.0, TAU, 64, Color(2.4, 2.2, 2.6, 0.9 * k2), 4.0 + 6.0 * k2)
+	var fed := int(m.eaten)
+	if fed >= Defs.MAW_SATED:
+		# Sated: a golden crown says a cache waits inside.
+		draw_set_transform(Vector2(x, y), -t * 1.2, Vector2.ONE)
+		for k in 8:
+			var a2 := TAU * float(k) / 8.0
+			draw_arc(Vector2.ZERO, core * 1.7, a2, a2 + 0.35, 6, Color(2.0, 1.6, 0.6, 0.85), 4.0)
+
+
+## A flare: while the sun swells, the safe lanes light up as cool wedges;
+## then a wall of fire races outwards with those lanes as its gaps.
+func _draw_flare(s: Sim, t: float) -> void:
+	var f: Dictionary = s.flare
+	var warn := s.flare_warn()
+	var flying := int(f.t) >= Defs.FLARE_WARN
+	var r: float = f.r
+	var gaps: Array = f.gaps.duplicate()
+	gaps.sort()
+	var gw := Trig.to_rad(Defs.FLARE_GAP)
+	var lane := Color(0.55, 1.0, 1.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Safe lanes: wedges from the sun to the wall.
+	var la := (0.18 + 0.18 * sin(t * 10.0)) * warn if not flying else 0.14
+	for g in gaps:
+		var c := Trig.to_rad(int(g))
+		var r0 := maxf(Defs.SUN_R + 20.0, r + (0.0 if not flying else Defs.FLARE_W))
+		var r1 := Sim.ARENA_R
+		if r0 >= r1 - 20.0:
+			continue
+		var p0 := Vector2(cos(c - gw), sin(c - gw))
+		var p1 := Vector2(cos(c + gw), sin(c + gw))
+		draw_colored_polygon(PackedVector2Array([p0 * r0, p0 * r1, p1 * r1, p1 * r0]), Color(lane, la * 0.6))
+		draw_line(p0 * r0, p0 * r1, Color(lane * 1.4, la), 3.0)
+		draw_line(p1 * r0, p1 * r1, Color(lane * 1.4, la), 3.0)
+	if not flying:
+		return
+	# The front: arcs of fire between the gaps.
+	var hot := Color(2.4, 1.15, 0.4)
+	for k in gaps.size():
+		var a0 := Trig.to_rad(int(gaps[k])) + gw
+		var a1 := Trig.to_rad(int(gaps[(k + 1) % gaps.size()])) - gw
+		if a1 <= a0:
+			a1 += TAU
+		var pts := clampi(int(r * (a1 - a0) / 22.0), 8, 160)
+		draw_arc(Vector2.ZERO, r, a0, a1, pts, Color(1.0, 0.35, 0.1, 0.25), Defs.FLARE_W * 2.6)
+		draw_arc(Vector2.ZERO, r, a0, a1, pts, Color(hot, 0.85), Defs.FLARE_W)
+		draw_arc(Vector2.ZERO, r - Defs.FLARE_W * 0.15, a0, a1, pts, Color(2.6, 2.3, 1.8, 0.9), Defs.FLARE_W * 0.25)

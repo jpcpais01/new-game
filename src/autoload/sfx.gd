@@ -23,6 +23,8 @@ const SOUNDS := {
 	"meteor_fall": [2, 0.12, -11.0], "starfall": [1, 0.5, -2.0],
 	"levi_roar": [1, 0.5, -1.0], "lunge": [2, 0.2, -3.0], "shed": [3, 0.06, -4.0], "coil": [1, 0.5, -5.0],
 	"split": [1, 0.2, -3.0], "split_best": [1, 0.3, -2.0], "gong": [1, 0.5, -2.0], "gauntlet_clear": [1, 0.5, 0.0],
+	"maw_open": [1, 0.4, -3.0], "maw_eat": [3, 0.05, -14.0], "maw_collapse": [2, 0.3, -1.0],
+	"flare_warn": [1, 0.5, -4.0], "flare": [1, 0.4, -2.0], "flare_pass": [1, 0.3, -6.0],
 }
 
 var _pools := {}

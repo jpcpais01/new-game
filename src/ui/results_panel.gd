@@ -49,10 +49,12 @@ func build() -> void:
 	cc.add_child(grid)
 	body.add_child(cc)
 	_score_box()
+	_sector()
 	_radiance()
 	_trail()
 	_evolutions()
 	_missions()
+	_new_sectors()
 	_footer()
 
 
@@ -79,7 +81,7 @@ func _footer() -> void:
 	f.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	f.pressed.connect(func(): forge.emit())
 	row.add_child(f)
-	if not (beat.get("ships", []) as Array).is_empty():
+	if not (beat.get("ships", []) as Array).is_empty() or not _unlocked_sectors().is_empty():
 		var hg := UiKit.button("HANGAR", UiKit.CYAN, 40)
 		hg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hg.pressed.connect(func(): hangar.emit())
@@ -208,6 +210,67 @@ func _splits() -> void:
 	body.add_child(p)
 
 
+## The sector flown, with its hazard tally and a first dawn there.
+func _sector() -> void:
+	if sim.sector <= 0:
+		return
+	var sd := Defs.sector(sim.sector)
+	var col: Color = sd.color
+	var h := HBoxContainer.new()
+	h.alignment = BoxContainer.ALIGNMENT_CENTER
+	h.add_theme_constant_override("separation", 14)
+	h.add_child(UiKit.icon_rect("sector_" + String(sd.id), 60))
+	var text := String(sd.name).to_upper()
+	if sim.sector == Defs.SECTOR_ABYSS:
+		text += "  ·  %s DEVOURED" % UiKit.fmt_int(sim.maws_eaten)
+	elif sim.sector == Defs.SECTOR_CORONA:
+		text += "  ·  %d FLARE%s SLIPPED" % [sim.flares_passed, "" if sim.flares_passed == 1 else "S"]
+	if beat.has("sector_dawn"):
+		text += "  ·  FIRST DAWN"
+	h.add_child(UiKit.glow_label(text, 30, col.lerp(Color.WHITE, 0.2)))
+	body.add_child(h)
+	UiKit.pop_in(h, 0.6, 20)
+
+
+## Sectors whose unlocking mission this run completed.
+func _unlocked_sectors() -> Array:
+	var out: Array = []
+	var ids: Array = beat.get("missions", [])
+	for k in range(1, Defs.SECTORS.size()):
+		if ids.has(String(Defs.SECTORS[k].unlock)):
+			out.append(k)
+	return out
+
+
+func _new_sectors() -> void:
+	for k in _unlocked_sectors():
+		var sd := Defs.sector(k)
+		var col: Color = sd.color
+		var p := PanelContainer.new()
+		var sb := UiKit.box(col, Color(col, 0.12), 24, 3, 18)
+		sb.content_margin_left = 20
+		sb.content_margin_right = 20
+		sb.content_margin_top = 12
+		sb.content_margin_bottom = 12
+		p.add_theme_stylebox_override("panel", sb)
+		var h := HBoxContainer.new()
+		h.alignment = BoxContainer.ALIGNMENT_CENTER
+		h.add_theme_constant_override("separation", 18)
+		h.add_child(UiKit.icon_rect("sector_" + String(sd.id), 90))
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 0)
+		v.add_child(UiKit.label("NEW SECTOR UNLOCKED  ·  PICK IT IN THE HANGAR", 24, Color(1, 1, 1, 0.75),
+				UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT))
+		v.add_child(UiKit.glow_label(String(sd.name).to_upper(), 50, col))
+		h.add_child(v)
+		p.add_child(h)
+		body.add_child(p)
+		UiKit.pop_in(p, 1.5, 0)
+		var tw := p.create_tween().set_loops()
+		tw.tween_property(p, "modulate", Color(1.3, 1.3, 1.3), 0.7).set_delay(1.9)
+		tw.tween_property(p, "modulate", Color.WHITE, 0.7)
+
+
 ## A brighter light trail earned for this ship.
 func _trail() -> void:
 	if not beat.has("trail"):
@@ -267,6 +330,8 @@ func _score_box() -> void:
 		tag = "NEW BEST SCORE"
 	elif daily and (beat.has("daily_best") or beat.has("bounty")):
 		tag = "TODAY'S BEST"
+	elif beat.has("sector_score"):
+		tag = "BEST IN " + String(Defs.sector(sim.sector).name).to_upper()
 	elif beat.has("ship_score"):
 		tag = "BEST WITH " + String(Defs.ship(sim.ship_id).name).to_upper()
 	if tag != "":

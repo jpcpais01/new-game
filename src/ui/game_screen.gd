@@ -66,6 +66,8 @@ func begin(seed_value: int, loadout: Dictionary) -> void:
 		_show_hint()
 	if not sim.mods.is_empty():
 		_show_mods()
+	elif sim.sector > 0:
+		_show_sector()
 	elif sim.radiance > 0:
 		_show_radiance()
 
@@ -269,6 +271,10 @@ const COACH := {
 			"through the gap; when it rears back, step out of its line."],
 	"rift": ["RIFTS", "A rift has opened: follow its arrow. Light a Beacon, catch a Wisp, weather a Starfall or " +
 			"win an Umbral Trial for a prize, before it fades."],
+	"maw": ["BLACK HOLES", "It drags in the swarm, your gems and you. Lure the swarm in and keep clear of the " +
+			"core: when it collapses, everything it ate bursts back out as light."],
+	"flare": ["SOLAR FLARE", "The sun is about to erupt. The cool lanes are the gaps in its wall of fire: " +
+			"be inside one when the front reaches you."],
 }
 
 
@@ -335,6 +341,36 @@ func _next_tip() -> void:
 	tw.tween_callback(func():
 		p.queue_free()
 		_next_tip())
+
+
+## A run in another sector opens with its name and epithet (and Radiance).
+func _show_sector() -> void:
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	box.offset_top = main.safe_top() + 320
+	box.offset_bottom = box.offset_top + 320
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 6)
+	add_child(box)
+	move_child(box, _stick.get_index() + 1)
+	var sd := Defs.sector(sim.sector)
+	var col: Color = sd.color
+	var l := HBoxContainer.new()
+	l.alignment = BoxContainer.ALIGNMENT_CENTER
+	l.add_theme_constant_override("separation", 16)
+	l.add_child(UiKit.icon_rect("sector_" + String(sd.id), 84))
+	l.add_child(UiKit.glow_label(String(sd.name).to_upper(), 60, col))
+	box.add_child(l)
+	box.add_child(UiKit.label(String(sd.title).to_upper(), 30, col.lerp(Color.WHITE, 0.5), UiKit.display_light()))
+	var line := "SCORE  x%.2f" % sim.score_mult()
+	if sim.radiance > 0:
+		line = "RADIANCE %d  ·  %s  ·  %s" % [sim.radiance, String(Defs.RADIANCE[sim.radiance - 1].name).to_upper(), line]
+	box.add_child(UiKit.label(line, 26, UiKit.DIM, UiKit.display_light()))
+	UiKit.pop_in(box, 0.6, 0)
+	var tw := box.create_tween()
+	tw.tween_interval(4.0)
+	tw.tween_property(box, "modulate:a", 0.0, 0.8)
+	tw.tween_callback(box.queue_free)
 
 
 ## A Radiance run opens with its level, then fades away.

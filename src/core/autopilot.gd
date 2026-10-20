@@ -94,6 +94,23 @@ static func move(s: Sim) -> Vector2i:
 				var w := (gap - d) / gap * 7.0
 				fx += dx / d * w
 				fy += dy / d * w
+	# Black holes: keep clear of the core and lean out of the pull.
+	for m in s.maws:
+		var dx: float = s.px - float(m.x)
+		var dy: float = s.py - float(m.y)
+		var d := sqrt(dx * dx + dy * dy) + 1.0
+		var gap := Defs.MAW_CORE + 230.0
+		if d < gap:
+			var w := (gap - d) / gap * 6.0
+			fx += dx / d * w
+			fy += dy / d * w
+		elif d < Defs.MAW_PULL:
+			fx += dx / d * 0.7 * (1.0 - d / Defs.MAW_PULL)
+			fy += dy / d * 0.7 * (1.0 - d / Defs.MAW_PULL)
+	if s.sector == Defs.SECTOR_CORONA:
+		var c := _corona(s)
+		fx += c.x
+		fy += c.y
 	var threat := sqrt(fx * fx + fy * fy)
 	var chased := false
 	if threat < 0.9:
@@ -155,6 +172,50 @@ static func move(s: Sim) -> Vector2i:
 	if l < 0.05:
 		return Vector2i(0, 0)
 	return Vector2i(int(fx / l * 100.0), int(fy / l * 100.0))
+
+
+## Corona: stay off the sun, and line up with a gap before a flare's front
+## reaches you.
+static func _corona(s: Sim) -> Vector2:
+	var fx := 0.0
+	var fy := 0.0
+	var pd := sqrt(s.px * s.px + s.py * s.py) + 1.0
+	var ux := s.px / pd
+	var uy := s.py / pd
+	var gap := Defs.SUN_R + 170.0
+	if pd < gap:
+		var w := (gap - pd) / gap * 5.0
+		fx += ux * w
+		fy += uy * w
+	if s.flare.is_empty() or s.flare.hit or s.flare.past:
+		return Vector2(fx, fy)
+	var fr: float = s.flare.r
+	var ahead := pd - fr
+	if ahead < -30.0 or ahead > 900.0:
+		return Vector2(fx, fy)
+	var a := Trig.angle_of(s.px, s.py)
+	var best := 0
+	var bd := Trig.STEPS
+	for g in s.flare.gaps:
+		var diff := (int(g) - a) & Trig.MASK
+		if diff > Trig.HALF:
+			diff -= Trig.STEPS
+		if absi(diff) < absi(bd):
+			bd = diff
+			best = int(g)
+	# Tangent towards growing angles.
+	var tx := -uy
+	var ty := ux
+	var urgency := 1.0 - clampf(ahead / 900.0, 0.0, 1.0)
+	var sgn := 1.0 if bd > 0 else -1.0
+	if absi(bd) > Defs.FLARE_GAP / 2:
+		var w2 := 3.0 + 7.0 * urgency
+		fx += tx * sgn * w2
+		fy += ty * sgn * w2
+	else:
+		fx += tx * float(bd) / float(Defs.FLARE_GAP) * 2.0
+		fy += ty * float(bd) / float(Defs.FLARE_GAP) * 2.0
+	return Vector2(fx, fy)
 
 
 ## Whether the open rift is worth flying to right now.
