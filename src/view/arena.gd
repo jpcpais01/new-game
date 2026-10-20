@@ -24,6 +24,7 @@ signal coach(key: String)
 signal gauntlet_split(stage: int, ticks: int, felled: bool)
 signal gauntlet_cleared(ticks: int)
 signal gauntlet_cycle(cycle: int)
+signal resonance_formed(id: String)
 
 const TICK := 1.0 / 60.0
 
@@ -723,6 +724,10 @@ func handle_events() -> void:
 				_on_maw(e, loud)
 			Sim.EV_FLARE:
 				_on_flare(e, loud)
+			Sim.EV_RESONANCE:
+				_on_resonance(e, loud)
+			Sim.EV_RESFX:
+				_on_resfx(e, loud)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
@@ -1161,3 +1166,53 @@ func _on_kill(e: Array, loud: bool) -> void:
 	elif loud and _kill_sounds < 3:
 		_kill_sounds += 1
 		Sfx.play("kill", randf_range(0.85, 1.25) * (1.25 if r < 15.0 else 1.0))
+
+
+## Two weapons start to resonate: their colours spiral in from either side of
+## the ship and lock together in a bloom of the resonance's own light.
+func _on_resonance(e: Array, loud: bool) -> void:
+	var info: Dictionary = Defs.RESONANCES[e[1]]
+	var col: Color = info.color
+	var ca: Color = Defs.WEAPONS[e[2]].color
+	var cb: Color = Defs.WEAPONS[e[3]].color
+	fx.ring(sim.px, sim.py, 520.0, 30.0, 0.45, ca, 1.6)
+	fx.ring(sim.px, sim.py, 600.0, 30.0, 0.5, cb, 1.6)
+	for k in 3:
+		fx.ring(sim.px, sim.py, 20.0, 360.0 + 180.0 * k, 0.6 + 0.2 * k, col, 1.8)
+	fx.burst(sim.px, sim.py, ca * 1.8, 36, 900.0, 1.3, 0.8)
+	fx.burst(sim.px, sim.py, cb * 1.8, 36, 900.0, 1.3, 0.8)
+	fx.burst(sim.px, sim.py, Color(2, 2, 2), 24, 600.0, 1.0, 0.6)
+	fx.flash(sim.px, sim.py, 520.0, 0.6, col)
+	add_wave(sim.px, sim.py, 2.2, 900.0)
+	_flash = maxf(_flash, 0.6)
+	shake(0.35)
+	if loud:
+		slowmo(0.35, 0.7)
+		Sfx.play("resonance")
+		Sfx.buzz(60)
+		resonance_formed.emit(e[1])
+
+
+func _on_resfx(e: Array, loud: bool) -> void:
+	var info: Dictionary = Defs.RESONANCES[e[1]]
+	var col: Color = info.color
+	match String(e[1]):
+		"refraction":
+			var a := Vector2(e[2], e[3])
+			var b := Vector2(e[4], e[5])
+			fx.beam(a, b, e[6], col * 1.3, 0.2)
+			fx.spray(e[2], e[3], col * 1.8, 6, (b - a).angle(), 0.5, 520.0, 0.7, 0.2)
+			if loud:
+				Sfx.play("lance", randf_range(1.4, 1.6), -7.0)
+		"homecoming":
+			fx.ring(e[2], e[3], 20.0, e[4], 0.3, col, 1.3)
+			fx.flash(e[2], e[3], 90.0, 0.2, col)
+			add_wave(e[2], e[3], 0.6, 1100.0)
+			if loud:
+				Sfx.play("nova", randf_range(1.3, 1.4), -6.0)
+		"bladestorm":
+			fx.slash(e[2], e[3], Trig.to_rad(e[4]), e[5], Trig.to_rad(e[6]), col, _slash_spin, 0.22)
+		"surge":
+			var rad := sim.orbit_radius()
+			fx.ring(e[2], e[3], rad * 0.7, rad * 1.15, 0.35, col, 1.4)
+			fx.burst(e[2], e[3], col * 1.6, 14, 520.0, 0.9, 0.4)

@@ -25,6 +25,7 @@ const SOUNDS := {
 	"split": [1, 0.2, -3.0], "split_best": [1, 0.3, -2.0], "gong": [1, 0.5, -2.0], "gauntlet_clear": [1, 0.5, 0.0],
 	"maw_open": [1, 0.4, -3.0], "maw_eat": [3, 0.05, -14.0], "maw_collapse": [2, 0.3, -1.0],
 	"flare_warn": [1, 0.5, -4.0], "flare": [1, 0.4, -2.0], "flare_pass": [1, 0.3, -6.0],
+	"resonance": [1, 0.5, -1.0],
 }
 
 var _pools := {}

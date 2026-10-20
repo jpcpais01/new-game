@@ -26,6 +26,9 @@ func _init() -> void:
 					s.banish(bk)
 				else:
 					s.choose(Autopilot.pick(s))
+					for e in s.events:
+						if e[0] == Sim.EV_RESONANCE:
+							line += " [RES %s @%ds]" % [e[1], int(s.seconds())]
 				continue
 			var m := Autopilot.move(s)
 			s.step(m.x, m.y, Autopilot.burst(s))
@@ -46,6 +49,8 @@ func _init() -> void:
 					line += " [cache @%ds]" % int(s.seconds())
 				elif e[0] == Sim.EV_OVERDRIVE:
 					line += " [OD @%ds]" % int(s.seconds())
+				elif e[0] == Sim.EV_RESONANCE:
+					line += " [RES %s @%ds]" % [e[1], int(s.seconds())]
 				elif e[0] == Sim.EV_RELIC:
 					line += " [RELIC %s @%ds]" % [e[1], int(s.seconds())]
 			max_en = maxi(max_en, s.en)

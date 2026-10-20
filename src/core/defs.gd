@@ -249,6 +249,48 @@ static func is_umbral(id: String) -> bool:
 	return UMBRALS.has(id)
 
 
+## Resonances: two weapons that sing together. Hold both at level
+## RESONANCE_LEVEL or higher and a bonus effect switches on for the rest of
+## the run. The nine pairs form a ring, so every weapon has two partners and
+## four neighbouring weapons on the ring can hold three resonances at once.
+const RESONANCES := {
+	"conductor": {"name": "Conductor", "a": "pulse", "b": "arc", "color": Color(0.6, 0.85, 1.0),
+		"text": "Every third Pulse bolt that lands leaps on as lightning through two more enemies."},
+	"salvo": {"name": "Salvo", "a": "pulse", "b": "seeker", "color": Color(1.0, 0.82, 0.45),
+		"text": "Every third Pulse volley also launches two hunter missiles."},
+	"payload": {"name": "Payload", "a": "seeker", "b": "lance", "color": Color(1.0, 0.86, 0.5),
+		"text": "Every Prism Lance beam ends in a missile blast on the farthest enemy it pierces."},
+	"refraction": {"name": "Refraction", "a": "lance", "b": "glaive", "color": Color(0.9, 1.0, 0.55),
+		"text": "Every glaive ricochet refracts a beam of light through the enemies behind its next mark."},
+	"homecoming": {"name": "Homecoming", "a": "glaive", "b": "nova", "color": Color(0.85, 0.75, 1.0),
+		"text": "A glaive that comes home to your hand bursts into a Nova shockwave."},
+	"surge": {"name": "Halo Surge", "a": "nova", "b": "orbit", "color": Color(0.95, 0.6, 1.0),
+		"text": "Every Nova shockwave supercharges your Halo Blades: a wider orbit and +60% damage for a second."},
+	"bladestorm": {"name": "Bladestorm", "a": "orbit", "b": "scythe", "color": Color(0.5, 1.0, 0.95),
+		"text": "Every Ion Scythe sweep also slashes outwards from each of your Halo Blades."},
+	"sow": {"name": "Reap and Sow", "a": "scythe", "b": "mine", "color": Color(0.75, 1.0, 0.65),
+		"text": "An Ion Scythe sweep that cuts an enemy down sows a Photon Mine where it fell."},
+	"tesla": {"name": "Tesla Field", "a": "mine", "b": "arc", "color": Color(0.85, 0.7, 1.0),
+		"text": "Photon Mines discharge lightning through three nearby enemies when they blow."},
+}
+const RESONANCE_ORDER := ["conductor", "salvo", "payload", "refraction", "homecoming", "surge", "bladestorm",
+		"sow", "tesla"]
+const RESONANCE_LEVEL := 2
+const RESONANCE_COLOR := Color(0.55, 1.0, 0.92)
+
+
+## Resonances a weapon takes part in, as [resonance id, partner weapon] pairs.
+static func resonance_partners(weapon: String) -> Array:
+	var out: Array = []
+	for id in RESONANCE_ORDER:
+		var r: Dictionary = RESONANCES[id]
+		if r.a == weapon:
+			out.append([id, r.b])
+		elif r.b == weapon:
+			out.append([id, r.a])
+	return out
+
+
 ## Rifts: every minute or so a rift opens somewhere in the arena with a
 ## challenge and a prize. Kinds are indices into RIFTS.
 enum { RIFT_BEACON, RIFT_WISP, RIFT_TRIAL, RIFT_STARFALL }
@@ -408,6 +450,8 @@ static func card_info(id: String) -> Dictionary:
 		return RELICS[id]
 	if UMBRALS.has(id):
 		return UMBRALS[id]
+	if RESONANCES.has(id):
+		return RESONANCES[id]
 	return EXTRAS.get(id, {})
 
 
@@ -575,6 +619,12 @@ const MISSIONS := [
 		"kind": "flares", "goal": 15, "flux": 300},
 	{"id": "cartographer", "name": "Cartographer", "text": "Reach the dawn in all three sectors.",
 		"kind": "sectors", "goal": 3, "flux": 800},
+	{"id": "harmonist", "name": "Harmonist", "text": "Discover 5 resonances.", "kind": "res_codex", "goal": 5,
+		"flux": 300},
+	{"id": "chorus", "name": "Chorus", "text": "Hold 3 resonances at once in one run.", "kind": "resonances",
+		"goal": 3, "flux": 400},
+	{"id": "symphony", "name": "Symphony", "text": "Discover all 9 resonances.", "kind": "res_codex", "goal": 9,
+		"flux": 800},
 	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
 		"flux": 300},
 	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,

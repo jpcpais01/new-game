@@ -15,6 +15,7 @@ const DEFAULTS := {
 	"total_flux": 0,
 	"tutorial_done": false,
 	"evolved": [],
+	"resonances": [],
 	"ship": "lumen",
 	"missions": [],
 	"ships_won": [],
@@ -357,6 +358,13 @@ func _record_common(sim: Sim, earned: int, beat: Dictionary) -> Dictionary:
 		if sim.is_evolved(w.id) and not known.has(w.id):
 			known.append(w.id)
 			beat[w.id] = true
+	var heard: Array = data.resonances
+	var fresh_res: Array = []
+	for id in sim.resonances:
+		if not heard.has(id):
+			heard.append(id)
+			fresh_res.append(id)
+	beat.resonances = fresh_res
 	# Missions: pay out once, unlock ships.
 	var done: Array = data.missions
 	var fresh: Array = []

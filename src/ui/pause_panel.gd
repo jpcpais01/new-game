@@ -79,6 +79,28 @@ func build() -> void:
 		rl.custom_minimum_size = Vector2(680, 0)
 		row.add_child(rl)
 		body.add_child(row)
+	# Resonances: the ones playing, then the ones a carried weapon could still join.
+	for id in sim.resonances:
+		var r: Dictionary = Defs.RESONANCES[id]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		row.add_child(UiKit.icon_rect("res_" + id, 56))
+		var rl := UiKit.label("%s  ·  %s" % [String(r.name).to_upper(), r.text], 22, r.color, UiKit.body(),
+				HORIZONTAL_ALIGNMENT_LEFT)
+		rl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		rl.custom_minimum_size = Vector2(680, 0)
+		row.add_child(rl)
+		body.add_child(row)
+	var maybe: Array = []
+	for w in sim.weapons:
+		for p in Defs.resonance_partners(w.id):
+			if not sim.has_resonance(p[0]) and sim.weapon_level(p[1]) > 0 and not maybe.has(p[0]):
+				maybe.append(p[0])
+	for id in maybe:
+		var r: Dictionary = Defs.RESONANCES[id]
+		body.add_child(UiKit.label("%s %d  +  %s %d  →  %s" % [String(Defs.WEAPONS[r.a].name).to_upper(),
+				sim.weapon_level(r.a), String(Defs.WEAPONS[r.b].name).to_upper(), sim.weapon_level(r.b),
+				String(r.name).to_upper()], 22, Color(r.color, 0.75), UiKit.display_light()))
 	# Evolution recipes for the weapons you carry.
 	var lines: Array = []
 	for w in sim.weapons:

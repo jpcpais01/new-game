@@ -35,6 +35,7 @@ func _init() -> void:
 	_test_leviathan()
 	_test_gauntlet()
 	_test_sectors()
+	_test_resonances()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -1604,5 +1605,144 @@ func _test_runs() -> void:
 		check(r.checksum() == s.checksum(), "replay matches checksum (seed %d)" % seed_v)
 		check(r.kills == s.kills and r.level == s.level, "replay matches stats (seed %d)" % seed_v)
 		check(not s.relics.is_empty() and r.relics == s.relics, "relic picks replay (seed %d: %s)" % [seed_v, s.relics])
+		check(r.resonances == s.resonances, "resonances replay (seed %d: %s)" % [seed_v, s.resonances])
 	var ms := Time.get_ticks_msec() - t0
 	print("sim speed: %.3f ms/tick" % (float(ms) / float(maxi(total_ticks, 1)) / 2.0))
+
+
+## Two weapons at the given levels, both cooled down to fire at `t_a`/`t_b`.
+func _pair(seed_v: int, a: String, la: int, ta: int, b: String, lb: int, tb: int) -> Sim:
+	var s := _quiet(seed_v)
+	s.weapons = [{"id": a, "lvl": la, "t": ta, "k": 0, "a": 0}, {"id": b, "lvl": lb, "t": tb, "k": 0, "a": 0}]
+	s._check_resonances()
+	return s
+
+
+## Steps n ticks and returns every event they produced.
+func _collect(s: Sim, n: int) -> Array:
+	var out: Array = []
+	for t in n:
+		s.step(0, 0)
+		out.append_array(s.events)
+	return out
+
+
+func _count(evs: Array, code: int, sub := "") -> int:
+	var n := 0
+	for e in evs:
+		if int(e[0]) == code and (sub == "" or String(e[1]) == sub):
+			n += 1
+	return n
+
+
+func _test_resonances() -> void:
+	# The nine pairs form a ring: every weapon has exactly two partners.
+	check(Defs.RESONANCE_ORDER.size() == Defs.RESONANCES.size() and Defs.RESONANCES.size() == 9,
+			"nine resonances, all in RESONANCE_ORDER")
+	for id in Defs.WEAPON_ORDER:
+		var ps := Defs.resonance_partners(id)
+		check(ps.size() == 2 and ps[0][1] != ps[1][1] and Defs.is_weapon(ps[0][1]) and Defs.is_weapon(ps[1][1]),
+				"%s resonates with two other weapons" % id)
+	for id in Defs.RESONANCE_ORDER:
+		check(Defs.card_info(id).has("text"), "resonance %s has a card text" % id)
+	# Switching on: both weapons at level 2.
+	var s := _quiet(301)
+	check(s.weapons.size() == 1 and s.weapons[0].id == "pulse", "Lumen starts with the Pulse Cannon")
+	s._apply_card("arc")
+	s._apply_card("arc")
+	check(s.resonances.is_empty(), "no resonance while the Pulse Cannon is level 1")
+	check(s.resonances_from("pulse") == ["conductor"] and s.resonances_from("arc").is_empty(),
+			"the card that completes a resonance knows it")
+	s.events.clear()
+	s._apply_card("pulse")
+	check(s.resonances == ["conductor"] and s.rs_conductor and _count(s.events, Sim.EV_RESONANCE) == 1,
+			"Conductor switches on with both weapons at level 2")
+	s._apply_card("pulse")
+	check(s.resonances.size() == 1, "a resonance switches on once")
+	check(s.resonances_from("pulse").is_empty(), "an active resonance is not offered again")
+	# Conductor: Pulse bolts leap on as lightning (Arc Coil held back so only the resonance arcs).
+	var c := _pair(302, "pulse", 2, 1, "arc", 2, 99999)
+	var o := _quiet(302)
+	o.weapons = [{"id": "pulse", "lvl": 2, "t": 1, "k": 0, "a": 0}, {"id": "arc", "lvl": 1, "t": 99999, "k": 0, "a": 0}]
+	for sim in [c, o]:
+		for k in 12:
+			var e: int = sim._spawn(Defs.BRUTE, sim.px + 260.0 + 40.0 * (k % 4), sim.py - 60.0 + 40.0 * (k / 4), false, 0)
+			sim.e_speed[e] = 0.0
+	var ce := _collect(c, 240)
+	var oe := _collect(o, 240)
+	check(_count(ce, Sim.EV_ARC) > 0 and _count(oe, Sim.EV_ARC) == 0,
+			"Conductor arcs from Pulse hits (%d arcs)" % _count(ce, Sim.EV_ARC))
+	# Salvo: every third Pulse volley launches hunter missiles.
+	var sv := _pair(303, "pulse", 2, 1, "seeker", 2, 99999)
+	var tgt := sv._spawn(Defs.BRUTE, sv.px + 400.0, sv.py, false, 0)
+	sv.e_speed[tgt] = 0.0
+	sv.e_hp[tgt] = 1e9
+	var se := _collect(sv, 200)
+	check(sv.rs_salvo and _count(se, Sim.EV_SHOT, "salvo") >= 1, "Salvo launches hunters with the Pulse Cannon")
+	# Payload: a Lance beam ends in a blast on the farthest enemy it pierced.
+	var pl := _pair(304, "seeker", 2, 99999, "lance", 2, 1)
+	for k in 3:
+		var e2 := pl._spawn(Defs.BRUTE, pl.px + 200.0 + 150.0 * k, pl.py, false, 0)
+		pl.e_speed[e2] = 0.0
+	var pe := _collect(pl, 2)
+	check(pl.rs_payload and _count(pe, Sim.EV_LANCE) >= 1 and _count(pe, Sim.EV_BLAST) >= 1,
+			"Payload ends the beam in a blast")
+	# Refraction: glaive ricochets refract beams.
+	var rf := _pair(305, "lance", 2, 99999, "glaive", 2, 1)
+	for k in 10:
+		var e3 := rf._spawn(Defs.BRUTE, rf.px + 220.0 + 70.0 * (k % 5), rf.py - 70.0 + 140.0 * (k / 5), false, 0)
+		rf.e_speed[e3] = 0.0
+		rf.e_hp[e3] = 1e9
+	var re := _collect(rf, 90)
+	check(rf.rs_refraction and _count(re, Sim.EV_RESFX, "refraction") >= 1, "Refraction splits beams off ricochets")
+	# Homecoming: a glaive caught in hand bursts into a shockwave.
+	var hc := _pair(306, "glaive", 2, 1, "nova", 2, 99999)
+	var e4 := hc._spawn(Defs.BRUTE, hc.px + 260.0, hc.py, false, 0)
+	hc.e_speed[e4] = 0.0
+	hc.e_hp[e4] = 1e9
+	var he := _collect(hc, 120)
+	check(hc.rs_homecoming and _count(he, Sim.EV_RESFX, "homecoming") >= 1, "Homecoming bursts when a glaive returns")
+	# Halo Surge: a Nova flings the blades wider for a moment.
+	var su := _pair(307, "nova", 2, 99999, "orbit", 2, 0)
+	var base := su.orbit_radius()
+	su.weapons[0].t = 1
+	var e5 := su._spawn(Defs.BRUTE, su.px + 600.0, su.py, false, 0)
+	su.e_speed[e5] = 0.0
+	su.step(0, 0)
+	check(su.surge_t > 0 and su.orbit_radius() > base * 1.3, "Halo Surge widens the orbit (%.0f -> %.0f)" % [
+			base, su.orbit_radius()])
+	_collect(su, Sim.SURGE_TICKS + 2)
+	check(su.surge_t == 0 and absf(su.orbit_radius() - base) < 0.01, "Halo Surge fades")
+	# Bladestorm: every blade slashes with the Scythe.
+	var bs := _pair(308, "orbit", 2, 0, "scythe", 2, 1)
+	var e6 := bs._spawn(Defs.BRUTE, bs.px + 150.0, bs.py, false, 0)
+	bs.e_speed[e6] = 0.0
+	var be := _collect(bs, 1)
+	check(bs.rs_bladestorm and _count(be, Sim.EV_RESFX, "bladestorm") == int(bs.orbit_spec().n),
+			"Bladestorm slashes from every blade")
+	# Reap and Sow: a Scythe kill plants a mine.
+	var sw := _pair(309, "scythe", 2, 1, "mine", 2, 99999)
+	for k in 3:
+		sw._spawn(Defs.MITE, sw.px + 120.0, sw.py - 30.0 + 30.0 * k, false, 0)
+	sw.step(0, 0)
+	check(sw.rs_sow and sw.kills > 0 and sw.mines.size() == 1, "Reap and Sow plants a mine where the Scythe kills")
+	# Tesla Field: a mine blast discharges lightning.
+	var tf := _pair(310, "mine", 2, 99999, "arc", 2, 99999)
+	tf.mines = [{"x": tf.px + 300.0, "y": tf.py, "t": 0, "life": 2, "dmg": 1.0, "blast": 40.0}]
+	for k in 3:
+		var e7 := tf._spawn(Defs.BRUTE, tf.px + 420.0 + 60.0 * k, tf.py, false, 0)
+		tf.e_speed[e7] = 0.0
+	var te := _collect(tf, 3)
+	check(tf.rs_tesla and tf.mines.is_empty() and _count(te, Sim.EV_ARC) == 1, "Tesla Field discharges lightning")
+	# Without the partner nothing changes.
+	var nm := _quiet(310)
+	nm.weapons = [{"id": "mine", "lvl": 2, "t": 99999, "k": 0, "a": 0}, {"id": "arc", "lvl": 1, "t": 99999, "k": 0, "a": 0}]
+	nm._check_resonances()
+	nm.mines = [{"x": nm.px + 300.0, "y": nm.py, "t": 0, "life": 2, "dmg": 1.0, "blast": 40.0}]
+	check(_count(_collect(nm, 3), Sim.EV_ARC) == 0 and nm.resonances.is_empty(), "no Tesla Field with a level 1 Arc Coil")
+	# Missions read the run and the save.
+	var mm := _find_mission("harmonist")
+	check(Missions.progress(mm, null, {"resonances": ["conductor", "salvo"]}) == 2, "Harmonist counts discovered resonances")
+	var ch := _find_mission("chorus")
+	var run := _pair(311, "pulse", 2, 9, "arc", 2, 9)
+	check(Missions.progress(ch, run, {}) == 1, "Chorus counts resonances held at once")

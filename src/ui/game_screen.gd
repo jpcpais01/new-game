@@ -19,6 +19,7 @@ var _dawn: Control
 var _tips: Array = []      # queued coach tips [title, text, colour]
 var _tip: Control
 var _gauntlet_intro := false
+var _resonated := false    # a resonance switched on during the last pick
 
 
 func _ready() -> void:
@@ -61,6 +62,7 @@ func begin(seed_value: int, loadout: Dictionary) -> void:
 	arena.overdrive_ready.connect(_on_od_ready)
 	arena.coach.connect(_on_coach)
 	arena.card_taken.connect(_on_card_taken)
+	arena.resonance_formed.connect(_on_resonance)
 	Sfx.music("run")
 	if not bool(Save.data.tutorial_done):
 		_show_hint()
@@ -127,9 +129,10 @@ func _open_cards() -> void:
 
 
 func _on_pick(index: int) -> void:
+	_resonated = false
 	sim.choose(index)
 	arena.handle_events()
-	if sim.state == Sim.CHOOSING:
+	if sim.state == Sim.CHOOSING and not _resonated:
 		_cards.open(sim)
 		Sfx.play("levelup", 1.12)
 	else:
@@ -139,6 +142,18 @@ func _on_pick(index: int) -> void:
 		# A burst of light as play resumes.
 		arena.fx.ring(sim.px, sim.py, 10.0, 260.0, 0.45, UiKit.CYAN, 1.2)
 		arena.add_wave(sim.px, sim.py, 1.0)
+		if _resonated:
+			# Let the resonance play out before the next cards.
+			_card_delay = 2.2
+
+
+## A resonance switched on: the HUD shows it; explain the idea the first time.
+func _on_resonance(_id: String) -> void:
+	_resonated = true
+	if Save.tip_once("resonance"):
+		_queue_tip("RESONANCE", "Some weapons resonate in pairs. Hold both at level 2 and they unlock a bonus " +
+				"for the run. Cards show a partner you already carry, and the Codex maps all nine.",
+				Defs.RESONANCE_COLOR)
 
 
 func _on_chest(rewards: Array, big: bool) -> void:
