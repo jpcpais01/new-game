@@ -55,6 +55,15 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 				v = maxi(v, mini(1, (data.get("evolved", []) as Array).size()))
 		"codex":
 			v = (data.get("evolved", []) as Array).size()
+		"res_codex":
+			var known: Array = data.get("resonances", [])
+			v = known.size()
+			if run != null:
+				for id in run.resonances:
+					if not known.has(id):
+						v += 1
+		"resonances":
+			v = run.resonances.size() if run != null else 0
 		"fleet":
 			v = (data.get("ships_won", []) as Array).size()
 		"overdrives":

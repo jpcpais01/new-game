@@ -289,6 +289,11 @@ func _draw_glow() -> void:
 		var evo: bool = spec.get("evo", false)
 		var bcol := Color(1.7, 1.0, 2.6) if evo else Color(1.3, 2.0, 2.0)
 		var bsc := 1.15 if evo else 0.85
+		if s.surge_t > 0:
+			# Halo Surge: the blades blaze magenta-white and swell.
+			var sk := minf(1.0, float(s.surge_t) / 20.0)
+			bcol = bcol.lerp(Color(2.6, 1.4, 2.8), sk)
+			bsc *= 1.0 + 0.3 * sk
 		var px := lerpf(s.ppx, s.px, a)
 		var py := lerpf(s.ppy, s.py, a)
 		var base := float(s.orbit_ang) + float(spec.spin) * a
@@ -307,6 +312,9 @@ func _draw_glow() -> void:
 				draw_arc(Vector2.ZERO, rr, a0, a0 + PI * 1.2, 40, Color(0.7, 0.4, 1.0, 0.16), 6.0 - k)
 		else:
 			draw_arc(Vector2.ZERO, rad, 0.0, TAU, 64, Color(0.4, 1.0, 1.0, 0.08), 3.0)
+		if s.surge_t > 0:
+			var sa := minf(1.0, float(s.surge_t) / 20.0)
+			draw_arc(Vector2.ZERO, rad, 0.0, TAU, 72, Color(1.0, 0.55, 1.0, 0.35 * sa), 10.0)
 	# Ship core glow, the Aegis shield and the Overdrive-ready halo.
 	if s.state != Sim.DEAD:
 		var x := lerpf(s.ppx, s.px, a)

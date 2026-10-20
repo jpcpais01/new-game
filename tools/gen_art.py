@@ -701,6 +701,37 @@ def app_icon():
     fg(432, 0.2).save(os.path.join(ICO, "icon_fg_432.png"))
 
 
+# Round 13: resonance icons. The two weapons side by side inside a ring of the
+# resonance's colour, with a spark where they meet. Built from the weapon icons.
+RESONANCES = {
+    "conductor": ("pulse", "arc", (0.6, 0.85, 1.0)),
+    "salvo": ("pulse", "seeker", (1.0, 0.82, 0.45)),
+    "payload": ("seeker", "lance", (1.0, 0.86, 0.5)),
+    "refraction": ("lance", "glaive", (0.9, 1.0, 0.55)),
+    "homecoming": ("glaive", "nova", (0.85, 0.75, 1.0)),
+    "surge": ("nova", "orbit", (0.95, 0.6, 1.0)),
+    "bladestorm": ("orbit", "scythe", (0.5, 1.0, 0.95)),
+    "sow": ("scythe", "mine", (0.75, 1.0, 0.65)),
+    "tesla": ("mine", "arc", (0.85, 0.7, 1.0)),
+}
+
+
+def resonance_icons():
+    for name, (a, b, col) in RESONANCES.items():
+        ring = [(math.cos(t) * 0.97, math.sin(t) * 0.97) for t in np.linspace(0, 2 * math.pi, 65)]
+        base = neon([], col, size=96, radius=44, line=2.6, glow=5.0, fill=0.0, lines=[ring], core_white=0.5,
+                    glow_amt=0.7)
+        for wid, x in ((a, 0), (b, 38)):
+            ic = Image.open(os.path.join(SPR, "i_" + wid + ".png")).convert("RGBA").resize((58, 58), Image.LANCZOS)
+            layer = Image.new("RGBA", (96, 96), (0, 0, 0, 0))
+            layer.paste(ic, (x, 19), ic)
+            base = Image.alpha_composite(base, layer)
+        spark = neon([star(4, 0.42, 0.1)], (1.0, 1.0, 1.0), size=96, radius=26, line=2.4, glow=6.0,
+                     fill=0.9, core_white=1.0)
+        base = Image.alpha_composite(base, spark)
+        save(base, "i_res_" + name)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -735,6 +766,10 @@ if __name__ == "__main__":
         sector_icons()
         print("sector art ok")
         sys.exit(0)
+    if "--resonance" in sys.argv:
+        resonance_icons()
+        print("resonance art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -752,5 +787,6 @@ if __name__ == "__main__":
     leviathan_sprites()
     gauntlet_icons()
     sector_icons()
+    resonance_icons()
     app_icon()
     print("art ok")

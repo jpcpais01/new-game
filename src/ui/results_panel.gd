@@ -367,7 +367,7 @@ func _score_box() -> void:
 	UiKit.pop_in(p, 0.7, 20)
 
 
-## Evolved weapons this run; first-time discoveries are marked NEW.
+## Evolved weapons, relics and resonances this run; first-time discoveries are marked NEW.
 func _evolutions() -> void:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -387,6 +387,15 @@ func _evolutions() -> void:
 		rc.add_child(UiKit.icon_rect(id, 84))
 		rc.add_child(UiKit.label("UMBRAL" if Defs.is_umbral(id) else "RELIC", 18, Art.card_color(id), UiKit.display()))
 		row.add_child(rc)
+	var fresh_res: Array = beat.get("resonances", [])
+	for id in sim.resonances:
+		var cell := VBoxContainer.new()
+		cell.add_theme_constant_override("separation", 0)
+		cell.add_child(UiKit.icon_rect("res_" + id, 84))
+		var col: Color = Defs.RESONANCES[id].color
+		cell.add_child(UiKit.label("NEW" if fresh_res.has(id) else "RESONANCE", 18, col if fresh_res.has(id) else
+				Color(col, 0.7), UiKit.display()))
+		row.add_child(cell)
 	if row.get_child_count() == 0:
 		row.free()
 		return

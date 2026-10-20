@@ -1,7 +1,7 @@
 class_name CodexScreen
 extends Control
 ## The Codex: every evolution (silhouettes until discovered, recipes always
-## shown), the relics and a bestiary of the swarm.
+## shown), the resonance web, the relics and a bestiary of the swarm.
 
 var main
 
@@ -64,6 +64,11 @@ func _ready() -> void:
 		grid.add_child(card)
 		UiKit.pop_in(card, 0.05 * k, 20)
 		k += 1
+	var heard: Array = Save.data.get("resonances", [])
+	list.add_child(UiKit.label("RESONANCES  ·  TWO WEAPONS AT LEVEL 2", 30, Defs.RESONANCE_COLOR, UiKit.display()))
+	list.add_child(ResonanceWeb.new(heard))
+	for id in Defs.RESONANCE_ORDER:
+		list.add_child(_res_row(id, heard.has(id)))
 	list.add_child(UiKit.label("RELICS  ·  FROM EVERY BOSS (OR THE FIRST ELITE)", 30, Color(0.78, 0.55, 1.0),
 			UiKit.display()))
 	for id in Defs.RELIC_ORDER:
@@ -129,6 +134,18 @@ func _evo_card(w: String, found: bool) -> Control:
 	l.custom_minimum_size = Vector2(400, 0)
 	v.add_child(l)
 	return p
+
+
+## A resonance: its recipe always, its name and effect once discovered.
+func _res_row(id: String, found: bool) -> Control:
+	var r: Dictionary = Defs.RESONANCES[id]
+	var recipe := "%s + %s" % [Defs.WEAPONS[r.a].name, Defs.WEAPONS[r.b].name]
+	if not found:
+		var row := _info_row("res_" + id, "? ? ?", "Hold %s and %s at level 2 in one run." % [
+				Defs.WEAPONS[r.a].name, Defs.WEAPONS[r.b].name], Color(0.55, 0.5, 0.75))
+		(row.get_child(0).get_child(0) as Control).modulate = Color(0.3, 0.27, 0.45, 0.8)
+		return row
+	return _info_row("res_" + id, String(r.name), String(r.text) + "\n" + recipe, r.color)
 
 
 func _relic_row(id: String) -> Control:

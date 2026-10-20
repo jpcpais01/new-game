@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 12
+const RULES_VERSION := 13
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -84,6 +84,9 @@ const EV_LEVI := 43       # x, y, phase (0 coils, 1 lunge marked, 2 lunges, 3 sh
 const EV_GAUNTLET := 44   # phase (0 a boss arrives, 1 a boss is passed, 2 the Gauntlet is cleared, 3 a new cycle), stage, ticks, felled
 const EV_MAW := 45        # x, y, phase (0 opens, 1 eats, 2 collapses, 3 burns you), n (eaten so far)
 const EV_FLARE := 46      # phase (0 the sun swells, 1 erupts, 2 burns you, 3 fades, 4 you slipped through), x, y
+const EV_RESONANCE := 47  # resonance id, weapon a, weapon b (a resonance switches on)
+const EV_RESFX := 48      # resonance id, then its data (refraction: x1, y1, x2, y2, w; homecoming: x, y, r;
+                          # bladestorm: x, y, angle, radius, half arc; surge: x, y)
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -258,6 +261,23 @@ var _eaten := {}              # uid -> the black hole that crushed it (its light
 var flare := {}               # Corona: the flare in flight, {} when none: t, r, gaps, spin, hit, past, uids
 var flare_next := 0
 var flares_passed := 0        # flares slipped through without a burn
+
+# Resonances (two weapons at RESONANCE_LEVEL+ switch on a bonus effect)
+var resonances: Array = []    # resonance ids in the order they switched on
+var rs_conductor := false
+var rs_salvo := false
+var rs_payload := false
+var rs_refraction := false
+var rs_homecoming := false
+var rs_surge := false
+var rs_bladestorm := false
+var rs_sow := false
+var rs_tesla := false
+var surge_t := 0              # ticks left of a Halo Surge
+var _rs_hits := 0             # Pulse bolts landed (Conductor arcs on every third)
+var _rs_volleys := 0          # Pulse volleys fired (Salvo launches on every third)
+var _rs_refract := -100       # tick of the last Refraction beam
+var _rs_home := -100          # tick of the last Homecoming shockwave
 
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
@@ -2564,6 +2584,10 @@ func _fire_pulse(spec: Dictionary, w: Dictionary) -> bool:
 				_add_bullet(kind, px, py, a + k * Trig.STEPS / 16 + Trig.STEPS / 32, 760.0, spec.dmg, r,
 						spec.pierce, 60, 0.0)
 			events.append([EV_SHOT, "supernova", px, py, a])
+	if rs_salvo:
+		_rs_volleys += 1
+		if _rs_volleys % 3 == 0:
+			_salvo(t, a)
 	return true
 
 
@@ -2606,6 +2630,9 @@ func _orbit(spec: Dictionary) -> void:
 	orbit_ang = (orbit_ang + int(spec.spin)) & Trig.MASK
 	var n: int = spec.n
 	var rad := orbit_radius()
+	var dmg: float = spec.dmg * (1.6 if surge_t > 0 else 1.0)
+	if surge_t > 0:
+		surge_t -= 1
 	var evo: bool = spec.get("evo", false)
 	var br := (28.0 if evo else 20.0) * st_area
 	var push := 520.0 if evo else 220.0
@@ -2626,7 +2653,7 @@ func _orbit(spec: Dictionary) -> void:
 				var ox := e_x[i] - px
 				var oy := e_y[i] - py
 				var od := sqrt(ox * ox + oy * oy) + 0.001
-				_damage(i, spec.dmg, ox / od * push, oy / od * push)
+				_damage(i, dmg, ox / od * push, oy / od * push)
 
 
 func orbit_spec() -> Dictionary:
@@ -2641,10 +2668,12 @@ func orbit_radius() -> float:
 	var spec := orbit_spec()
 	if spec.is_empty():
 		return 0.0
+	# Halo Surge flings the orbit 40% wider, easing back in over its last third of a second.
+	var surge := 1.0 + 0.4 * minf(1.0, float(surge_t) / 20.0)
 	if spec.has("r2"):
 		var k := 0.5 + 0.5 * Trig.sin_i(tick * 5)
-		return (float(spec.r) + (float(spec.r2) - float(spec.r)) * k) * st_area
-	return float(spec.r) * st_area
+		return (float(spec.r) + (float(spec.r2) - float(spec.r)) * k) * st_area * surge
+	return float(spec.r) * st_area * surge
 
 
 func _fire_arc(spec: Dictionary) -> bool:
@@ -2681,6 +2710,9 @@ func _fire_nova(spec: Dictionary) -> bool:
 	var mr: float = spec.r * st_area
 	novas.append({"x": px, "y": py, "r": 0.0, "max": mr, "step": mr / 16.0, "dmg": spec.dmg, "hit": {}})
 	events.append([EV_NOVA, px, py, mr])
+	if rs_surge:
+		surge_t = SURGE_TICKS
+		events.append([EV_RESFX, "surge", px, py])
 	if spec.has("well"):
 		# Singularity: open a black hole on the nearest enemy, or ahead of the ship.
 		var t := _nearest(px, py, 620.0)
@@ -2799,6 +2831,9 @@ func _fire_lance(spec: Dictionary, w: Dictionary) -> bool:
 		var ux := Trig.cos_i(da)
 		var uy := Trig.sin_i(da)
 		var length := 1000.0
+		var far := -1.0
+		var fx := 0.0
+		var fy := 0.0
 		for i in en:
 			if e_spawn[i] > 0 or e_hp[i] <= 0.0:
 				continue
@@ -2809,9 +2844,17 @@ func _fire_lance(spec: Dictionary, w: Dictionary) -> bool:
 				continue
 			var perp := absf(rx * uy - ry * ux)
 			if perp < wd * 0.5 + e_r[i]:
+				if along > far:
+					far = along
+					fx = e_x[i]
+					fy = e_y[i]
 				_damage(i, spec.dmg, ux * 160.0, uy * 160.0)
 		events.append([EV_LANCE, px, py, px + ux * length, py + uy * length, wd,
 				float(k) / float(dirs) if evo else -1.0])
+		# Payload: the beam ends in a missile blast (Spectrum: on its first sweep).
+		if rs_payload and far >= 0.0 and int(w.k) == 0:
+			var ss := wspec("seeker")
+			_explode(fx, fy, float(ss.blast) * 1.15 * st_area, float(ss.dmg))
 	return true
 
 
@@ -2833,6 +2876,9 @@ func _fire_scythe(spec: Dictionary, w: Dictionary) -> bool:
 	var leech: float = spec.get("leech", 0.0)
 	var healed := 0.0
 	var evo: bool = spec.get("evo", false)
+	var felled := false
+	var kx := 0.0
+	var ky := 0.0
 	for k in dirs:
 		var da := a + k * Trig.STEPS / dirs
 		var ux := Trig.cos_i(da)
@@ -2850,10 +2896,18 @@ func _fire_scythe(spec: Dictionary, w: Dictionary) -> bool:
 			if not full and rx * ux + ry * uy < d * cosh - e_r[i]:
 				continue
 			_damage(i, spec.dmg, rx / d * 380.0, ry / d * 380.0)
-			if leech > 0.0 and e_hp[i] <= 0.0 and healed < 4.0:
-				healed += leech
-				_heal(leech)
+			if e_hp[i] <= 0.0:
+				felled = true
+				kx = e_x[i]
+				ky = e_y[i]
+				if leech > 0.0 and healed < 4.0:
+					healed += leech
+					_heal(leech)
 		events.append([EV_SLASH, px, py, da, r, half, evo, int(w.k)])
+	if rs_bladestorm:
+		_bladestorm(float(spec.dmg) * 0.5)
+	if rs_sow and felled:
+		_sow(kx, ky)
 	return true
 
 
@@ -2870,7 +2924,7 @@ func _fire_mine(spec: Dictionary) -> bool:
 	for k in n:
 		while mines.size() >= int(spec.max):
 			var old: Dictionary = mines.pop_front()
-			_explode(old.x, old.y, old.blast, old.dmg)
+			_mine_boom(old)
 		var off := 0.0 if n == 1 else (44.0 if k == 0 else -44.0)
 		mines.append({"x": bx + sx * off, "y": by + sy * off, "t": MINE_ARM, "life": MINE_LIFE,
 				"dmg": float(spec.dmg), "blast": float(spec.blast) * st_area})
@@ -2936,7 +2990,7 @@ func _update_mines() -> void:
 					e_vy[i] += dy / d * 26.0 * e_kb[i]
 		if boom:
 			mines.remove_at(k)
-			_explode(m.x, m.y, m.blast, m.dmg)
+			_mine_boom(m)
 		k -= 1
 	if evo and tick % 8 == 0:
 		var hw := 14.0
@@ -3019,6 +3073,8 @@ func _update_glaive(i: int) -> bool:
 		b_vx[i] += (dx / d * sp - b_vx[i]) * 0.3
 		b_vy[i] += (dy / d * sp - b_vy[i]) * 0.3
 		if d < 34.0 + sp * DT:
+			if rs_homecoming and tick - _rs_home >= HOME_GAP:
+				_homecoming()
 			return _catch_glaive(i)
 		if b_life[i] <= 0:
 			return true
@@ -3093,6 +3149,8 @@ func _ricochet(i: int, e: int) -> void:
 		else:
 			_glaive_home(i)
 		return
+	if rs_refraction and tick - _rs_refract >= REFRACT_GAP:
+		_refract(e, nxt)
 	b_tx[i] = e_x[nxt]
 	b_ty[i] = e_y[nxt]
 	b_life[i] = maxi(b_life[i], 90)
@@ -3132,6 +3190,189 @@ func _catch_glaive(i: int) -> bool:
 	b_vy[i] = Trig.sin_i(a) * GLAIVE_SPEED
 	events.append([EV_SHOT, "glaive_evo", px, py, a])
 	return false
+
+
+# --- resonances ---------------------------------------------------------------------
+
+const SURGE_TICKS := 70
+const REFRACT_GAP := 5         # ticks between Refraction beams
+const REFRACT_LEN := 560.0
+const HOME_GAP := 40           # ticks between Homecoming shockwaves
+const BLADESTORM_HALF := 200   # half arc of a blade's slash, in Trig steps
+
+
+## The spec of a weapon at its current level ({} when not carried).
+func wspec(id: String) -> Dictionary:
+	var l := weapon_level(id)
+	if l == 0:
+		return {}
+	return Defs.WEAPONS[id].levels[l - 1]
+
+
+func has_resonance(id: String) -> bool:
+	return resonances.has(id)
+
+
+## Resonances that would switch on if weapon `id` went up a level now.
+func resonances_from(id: String) -> Array:
+	var out: Array = []
+	if not Defs.is_weapon(id) or weapon_level(id) + 1 < Defs.RESONANCE_LEVEL:
+		return out
+	for p in Defs.resonance_partners(id):
+		if not resonances.has(p[0]) and weapon_level(p[1]) >= Defs.RESONANCE_LEVEL:
+			out.append(p[0])
+	return out
+
+
+func _check_resonances() -> void:
+	for id in Defs.RESONANCE_ORDER:
+		if resonances.has(id):
+			continue
+		var r: Dictionary = Defs.RESONANCES[id]
+		if weapon_level(r.a) < Defs.RESONANCE_LEVEL or weapon_level(r.b) < Defs.RESONANCE_LEVEL:
+			continue
+		resonances.append(id)
+		match id:
+			"conductor":
+				rs_conductor = true
+			"salvo":
+				rs_salvo = true
+			"payload":
+				rs_payload = true
+			"refraction":
+				rs_refraction = true
+			"homecoming":
+				rs_homecoming = true
+			"surge":
+				rs_surge = true
+			"bladestorm":
+				rs_bladestorm = true
+			"sow":
+				rs_sow = true
+			"tesla":
+				rs_tesla = true
+		events.append([EV_RESONANCE, id, r.a, r.b])
+
+
+## A lightning chain from (x, y) through up to n enemies within reach of each
+## other. Enemies in `hit` (uids) are skipped.
+func _chain_bolt(x: float, y: float, n: int, reach: float, dmg: float, hit: Dictionary) -> void:
+	var pts := PackedVector2Array([Vector2(x, y)])
+	var cx := x
+	var cy := y
+	for c in n:
+		var nxt := _nearest(cx, cy, reach, hit)
+		if nxt < 0:
+			break
+		hit[e_uid[nxt]] = true
+		cx = e_x[nxt]
+		cy = e_y[nxt]
+		pts.append(Vector2(cx, cy))
+		_damage(nxt, dmg, 0.0, 0.0)
+	if pts.size() > 1:
+		events.append([EV_ARC, pts, false])
+
+
+## Conductor: a Pulse bolt that landed on enemy e leaps on as lightning.
+func _conduct(e: int) -> void:
+	var spec := wspec("arc")
+	_chain_bolt(e_x[e], e_y[e], 2, 220.0 * st_area, float(spec.dmg) * 0.5, {e_uid[e]: true})
+
+
+## Salvo: two hunter missiles fly out beside the volley, at its target t.
+func _salvo(t: int, a: int) -> void:
+	var spec := wspec("seeker")
+	for k in 2:
+		var j := _add_bullet(2, px, py, a + (160 if k == 0 else -160), 420.0, float(spec.dmg) * 0.6, 9.0, 0, 110,
+				float(spec.blast) * 0.6 * st_area)
+		if j >= 0:
+			b_tx[j] = e_x[t]
+			b_ty[j] = e_y[t]
+	events.append([EV_SHOT, "salvo", px, py, a])
+
+
+## Refraction: a glaive leaving enemy e for enemy nxt splits a beam of light
+## through nxt and whatever stands behind it.
+func _refract(e: int, nxt: int) -> void:
+	_rs_refract = tick
+	var spec := wspec("lance")
+	var x0 := e_x[e]
+	var y0 := e_y[e]
+	var dx := e_x[nxt] - x0
+	var dy := e_y[nxt] - y0
+	var d := sqrt(dx * dx + dy * dy) + 0.001
+	var ux := dx / d
+	var uy := dy / d
+	var wd: float = float(spec.w) * 0.55 * st_area
+	var dmg: float = float(spec.dmg) * 0.4
+	var skip := e_uid[e]
+	for i in en:
+		if e_spawn[i] > 0 or e_hp[i] <= 0.0 or e_uid[i] == skip:
+			continue
+		var rx := e_x[i] - x0
+		var ry := e_y[i] - y0
+		var along := rx * ux + ry * uy
+		if along < -e_r[i] or along > REFRACT_LEN + e_r[i]:
+			continue
+		if absf(rx * uy - ry * ux) < wd * 0.5 + e_r[i]:
+			_damage(i, dmg, ux * 120.0, uy * 120.0)
+	events.append([EV_RESFX, "refraction", x0, y0, x0 + ux * REFRACT_LEN, y0 + uy * REFRACT_LEN, wd])
+
+
+## Homecoming: a glaive caught in hand bursts into a small Nova shockwave.
+func _homecoming() -> void:
+	_rs_home = tick
+	var spec := wspec("nova")
+	var mr: float = float(spec.r) * 0.6 * st_area
+	novas.append({"x": px, "y": py, "r": 0.0, "max": mr, "step": mr / 12.0, "dmg": float(spec.dmg) * 0.7,
+			"hit": {}})
+	events.append([EV_RESFX, "homecoming", px, py, mr])
+
+
+## Bladestorm: every Halo Blade slashes outwards along with the Scythe.
+func _bladestorm(dmg: float) -> void:
+	var spec := orbit_spec()
+	var n: int = spec.n
+	var rad := orbit_radius()
+	var br := 100.0 * st_area
+	var cosh := Trig.cos_i(BLADESTORM_HALF)
+	for k in n:
+		var ba := orbit_ang + k * Trig.STEPS / n
+		var ux := Trig.cos_i(ba)
+		var uy := Trig.sin_i(ba)
+		var bx := px + ux * rad
+		var by := py + uy * rad
+		_query(bx, by, br)
+		for q in _qn:
+			var i := _qbuf[q]
+			if e_hp[i] <= 0.0:
+				continue
+			var rx := e_x[i] - bx
+			var ry := e_y[i] - by
+			var d := sqrt(rx * rx + ry * ry) + 0.001
+			if d > br + e_r[i] or rx * ux + ry * uy < d * cosh - e_r[i]:
+				continue
+			_damage(i, dmg, rx / d * 260.0, ry / d * 260.0)
+		events.append([EV_RESFX, "bladestorm", bx, by, ba, br, BLADESTORM_HALF])
+
+
+## Reap and Sow: a mine planted where the Scythe cut an enemy down, armed almost at once.
+func _sow(x: float, y: float) -> void:
+	var spec := mine_spec()
+	while mines.size() >= int(spec.max):
+		var old: Dictionary = mines.pop_front()
+		_mine_boom(old)
+	mines.append({"x": x, "y": y, "t": 8, "life": MINE_LIFE, "dmg": float(spec.dmg),
+			"blast": float(spec.blast) * st_area})
+	events.append([EV_MINE, x, y])
+
+
+## A Photon Mine detonates (Tesla Field: and discharges lightning).
+func _mine_boom(m: Dictionary) -> void:
+	_explode(m.x, m.y, m.blast, m.dmg)
+	if rs_tesla:
+		var spec := wspec("arc")
+		_chain_bolt(m.x, m.y, 3, 300.0 * st_area, float(spec.dmg) * 0.8, {})
 
 
 # --- relics -------------------------------------------------------------------------
@@ -3444,6 +3685,10 @@ func _update_bullets() -> void:
 					var sp := sqrt(b_vx[i] * b_vx[i] + b_vy[i] * b_vy[i]) + 0.001
 					_damage(e, b_dmg[i], b_vx[i] / sp * 130.0, b_vy[i] / sp * 130.0)
 					b_last[i] = e_uid[e]
+					if rs_conductor:
+						_rs_hits += 1
+						if _rs_hits % 3 == 0:
+							_conduct(e)
 					b_pierce[i] -= 1
 					if b_pierce[i] < 0:
 						dead = true
@@ -4013,6 +4258,7 @@ func _apply_card(id: String) -> void:
 		if not found:
 			weapons.append({"id": id, "lvl": 1, "t": 10, "k": 0, "a": 0})
 		events.append([EV_PICK, id, weapon_level(id)])
+		_check_resonances()
 	elif Defs.PASSIVES.has(id):
 		if not passives.has(id):
 			passive_order.append(id)

@@ -55,6 +55,10 @@ func _ready() -> void:
 		await _sector_shots()
 		get_tree().quit()
 		return
+	if args.has("resonance"):
+		await _resonance_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -673,6 +677,75 @@ func _sector_shots() -> void:
 	await _wait(0.1)
 	await _shot("s7_flare")
 	main.arena.demo = false
+
+
+func _resonance_shots() -> void:
+	Save.data.tutorial_done = true
+	Save.data.resonances = ["surge"]
+	main.start_run()
+	await _wait(1.0)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	_ff(s, func(): return s.seconds() > 95.0, 120 * Sim.TPS)
+	s.hp = s.max_hp
+	s.weapons = [
+		{"id": "pulse", "lvl": 1, "t": 5, "k": 0, "a": 0},
+		{"id": "arc", "lvl": 2, "t": 5, "k": 0, "a": 0},
+		{"id": "nova", "lvl": 2, "t": 5, "k": 0, "a": 0},
+		{"id": "orbit", "lvl": 1, "t": 5, "k": 0, "a": 0},
+	]
+	s.events.clear()
+	gs._hud._rebuild_loadout()
+	s.state = Sim.CHOOSING
+	s.pending_levels = 0
+	s.choices = ["pulse", "orbit", "amplifier"]
+	gs._open_cards()
+	await _wait(1.2)
+	await _shot("r1_cards")
+	gs._cards._pick(0)
+	await _wait(1.3)
+	await _shot("r2_reveal")
+	await _wait(2.6)
+	s._apply_card("orbit")
+	main.arena.handle_events()
+	await _wait(3.4)
+	main.arena.demo = true
+	_ff(s, func(): return s.surge_t > 30, s.tick + 600)
+	await _wait(0.05)
+	await _shot("r3_surge")
+	main.arena.demo = false
+	# Bladestorm, Reap and Sow and Tesla Field together.
+	s.weapons = [
+		{"id": "orbit", "lvl": 4, "t": 5, "k": 0, "a": 0},
+		{"id": "scythe", "lvl": 4, "t": 5, "k": 0, "a": 0},
+		{"id": "mine", "lvl": 4, "t": 5, "k": 0, "a": 0},
+		{"id": "arc", "lvl": 4, "t": 5, "k": 0, "a": 0},
+	]
+	s._check_resonances()
+	s.events.clear()
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(2.0)
+	await _shot("r4_bladestorm")
+	main.arena.demo = false
+	gs.open_pause()
+	await _wait(0.7)
+	await _shot("r5_pause")
+	gs._pause.close()
+	gs._resume()
+	Save.data.resonances = ["surge", "conductor", "bladestorm", "sow", "tesla"]
+	main.go_codex()
+	await _wait(1.2)
+	var sc: Array = main.screen.find_children("*", "ScrollContainer", true, false)
+	if not sc.is_empty():
+		sc[0].scroll_vertical = 1180
+	await _wait(0.6)
+	await _shot("r6_codex")
+	if not sc.is_empty():
+		sc[0].scroll_vertical = 1900
+	await _wait(0.4)
+	await _shot("r7_codex_list")
 
 
 func _wait(t: float) -> void:

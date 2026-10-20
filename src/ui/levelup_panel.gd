@@ -196,6 +196,7 @@ func _make_card(id: String, sz: Vector2) -> Control:
 	desc.size = Vector2(sz.x - tx - 34, 110)
 	card.add_child(desc)
 	_evo_badge(card, id, sz, name)
+	_res_badge(card, id, sz)
 	# Level pips.
 	if Defs.is_weapon(id) or Defs.PASSIVES.has(id):
 		var pips := HBoxContainer.new()
@@ -308,6 +309,54 @@ func close() -> void:
 	var tw := create_tween()
 	tw.tween_property(self, "modulate:a", 0.0, 0.15)
 	tw.tween_callback(func(): visible = false)
+
+
+## Bottom-right strip naming the resonance this weapon card completes (bright
+## and pulsing), or one whose partner you already carry (dim).
+func _res_badge(card: Control, id: String, sz: Vector2) -> void:
+	if not Defs.is_weapon(id):
+		return
+	var rid := ""
+	var hot := false
+	var ready := sim.resonances_from(id)
+	if not ready.is_empty():
+		rid = ready[0]
+		hot = true
+	else:
+		for p in Defs.resonance_partners(id):
+			if not sim.has_resonance(p[0]) and sim.weapon_level(p[1]) > 0:
+				rid = p[0]
+				break
+	if rid == "":
+		return
+	var info: Dictionary = Defs.RESONANCES[rid]
+	var col: Color = info.color if hot else Color(info.color, 0.5)
+	var head := UiKit.label("RESONATES" if hot else "BOTH AT LV2", 18, Color(col, col.a * 0.8),
+			UiKit.display_light(), HORIZONTAL_ALIGNMENT_RIGHT)
+	head.position = Vector2(sz.x - 360.0 - 100.0, sz.y - 82.0)
+	head.size = Vector2(360, 24)
+	card.add_child(head)
+	var lab := UiKit.label(String(info.name).to_upper(), 26, col, UiKit.display(), HORIZONTAL_ALIGNMENT_RIGHT)
+	lab.position = Vector2(sz.x - 360.0 - 100.0, sz.y - 58.0)
+	lab.size = Vector2(360, 34)
+	card.add_child(lab)
+	var ic := UiKit.icon_rect("res_" + rid, 60)
+	ic.position = Vector2(sz.x - 86.0, sz.y - 72.0)
+	ic.size = Vector2(60, 60)
+	ic.modulate = Color.WHITE if hot else Color(1, 1, 1, 0.4)
+	card.add_child(ic)
+	if hot:
+		var glow := Panel.new()
+		glow.add_theme_stylebox_override("panel", UiKit.box(info.color, Color(0, 0, 0, 0), 28, 3, 18))
+		glow.size = sz
+		glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(glow)
+		var tw := glow.create_tween().set_loops()
+		tw.tween_property(glow, "modulate:a", 0.25, 0.55)
+		tw.tween_property(glow, "modulate:a", 1.0, 0.55)
+		var t2 := ic.create_tween().set_loops()
+		t2.tween_property(ic, "modulate", Color(1.6, 1.6, 1.6), 0.55)
+		t2.tween_property(ic, "modulate", Color.WHITE, 0.55)
 
 
 ## Top-right badge showing what this card evolves with (weapons) or into

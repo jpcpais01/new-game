@@ -57,6 +57,8 @@ var _g_prev_clear := 0
 var _split_head: Label
 var _split_time: Label
 var _split_sub: Label
+var _res_queue: Array = []
+var _res_box: Control
 
 
 func _ready() -> void:
@@ -144,6 +146,9 @@ func bind(a: Arena) -> void:
 		if arena.sim.endless:
 			_boss_name.text += "  ·  NIGHT %d" % arena.sim.night)
 	a.card_taken.connect(func(_id, _lvl): _rebuild_loadout())
+	a.resonance_formed.connect(func(id: String):
+		_rebuild_loadout()
+		show_resonance(id))
 	if a.sim.gauntlet:
 		var g := Save.gauntlet_rec()
 		_g_best = (g.splits as Array).duplicate()
@@ -218,6 +223,10 @@ func _rebuild_loadout() -> void:
 		c.queue_free()
 	for id in arena.sim.relics:
 		var ic := UiKit.icon_rect(id, 44)
+		ic.custom_minimum_size = Vector2(44, 44)
+		_relics.add_child(ic)
+	for id in arena.sim.resonances:
+		var ic := UiKit.icon_rect("res_" + id, 44)
 		ic.custom_minimum_size = Vector2(44, 44)
 		_relics.add_child(ic)
 	_icons.clear()
@@ -336,6 +345,8 @@ func _process(delta: float) -> void:
 	_update_rift(s, delta)
 	_update_chain(s, delta)
 	_intro = maxf(0.0, _intro - delta)
+	if not _res_queue.is_empty() and not arena.paused and not is_instance_valid(_res_box):
+		_reveal_resonance(_res_queue.pop_front())
 	queue_redraw()
 
 
@@ -519,6 +530,7 @@ func _draw() -> void:
 	var ky := top + 69.0
 	var pts := PackedVector2Array([Vector2(kx, ky - 13), Vector2(kx + 9, ky), Vector2(kx, ky + 13), Vector2(kx - 9, ky)])
 	draw_colored_polygon(pts, Color(1.0, 0.35, 0.7))
+	_draw_res_links()
 	_draw_cache_arrows()
 	_draw_rift()
 	# Chain timer: a gold fuse that burns down between kills.
@@ -544,6 +556,121 @@ func _draw() -> void:
 		for k in range(1, 10):
 			var x := br.position.x + bw * k / 10.0
 			draw_line(Vector2(x, by), Vector2(x, by + 18), Color(0, 0, 0, 0.5 * _boss_alpha), 2.0)
+
+
+## Resonating weapons in the loadout are bridged by an arc of the
+## resonance's colour, with a spark running along it.
+func _draw_res_links() -> void:
+	var s := arena.sim
+	var fade := _loadout.modulate.a
+	for idx in s.resonances.size():
+		var r: Dictionary = Defs.RESONANCES[s.resonances[idx]]
+		if not _icons.has(r.a) or not _icons.has(r.b):
+			continue
+		var sa: Control = _icons[r.a]
+		var sb: Control = _icons[r.b]
+		var x0 := _loadout.position.x + sa.position.x + 27.0
+		var x1 := _loadout.position.x + sb.position.x + 27.0
+		var y0 := _loadout.position.y + 4.0
+		var hgt := 8.0 + 3.0 * absf(x1 - x0) / 60.0
+		var pts := PackedVector2Array()
+		for k in 17:
+			var t := float(k) / 16.0
+			pts.append(Vector2(lerpf(x0, x1, t), y0 - hgt * 4.0 * t * (1.0 - t)))
+		var col: Color = r.color
+		var pulse := 0.65 + 0.35 * sin(arena.vtime * 3.0 + float(idx) * 2.1)
+		draw_polyline(pts, Color(col, 0.22 * fade), 8.0, true)
+		draw_polyline(pts, Color(col * 1.4, 0.85 * pulse * fade), 2.5, true)
+		var tt := fmod(arena.vtime * 0.6 + float(idx) * 0.37, 1.0)
+		var sp := Vector2(lerpf(x0, x1, tt), y0 - hgt * 4.0 * tt * (1.0 - tt))
+		draw_circle(sp, 6.0, Color(col, 0.35 * fade))
+		draw_circle(sp, 3.0, Color(1, 1, 1, 0.95 * fade))
+
+
+## A resonance switched on: shown once play resumes (not under the cards or
+## a cache), one at a time.
+func show_resonance(id: String) -> void:
+	_res_queue.append(id)
+
+
+## The two weapons slide in from either side, lock together in a flash and
+## become the resonance's sigil, with its name and what it does underneath.
+func _reveal_resonance(id: String) -> void:
+	var info: Dictionary = Defs.RESONANCES[id]
+	var col: Color = info.color
+	var fresh := not (Save.data.get("resonances", []) as Array).has(id)
+	var w := size.x
+	var cy := size.y * 0.36
+	var box := Control.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(box)
+	_res_box = box
+	var shade := ColorRect.new()
+	shade.color = Color(0.0, 0.0, 0.03, 0.55)
+	shade.position = Vector2(0, cy - 150.0)
+	shade.size = Vector2(w, 440.0)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shade.modulate.a = 0.0
+	box.add_child(shade)
+	var tag := UiKit.glow_label("NEW RESONANCE" if fresh else "RESONANCE", 32, col, UiKit.display_light())
+	tag.position = Vector2(0, cy - 140.0)
+	tag.size = Vector2(w, 44)
+	tag.modulate.a = 0.0
+	box.add_child(tag)
+	var icons: Array = []
+	for k in 2:
+		var wid: String = info.a if k == 0 else info.b
+		var ic := UiKit.icon_rect(wid, 130)
+		ic.size = Vector2(130, 130)
+		ic.pivot_offset = Vector2(65, 65)
+		ic.position = Vector2(w * 0.5 - 65.0 + (-300.0 if k == 0 else 300.0), cy - 75.0)
+		ic.modulate = Color(1, 1, 1, 0)
+		box.add_child(ic)
+		icons.append(ic)
+	var sigil := UiKit.icon_rect("res_" + id, 190)
+	sigil.size = Vector2(190, 190)
+	sigil.pivot_offset = Vector2(95, 95)
+	sigil.position = Vector2(w * 0.5 - 95.0, cy - 105.0)
+	sigil.modulate = Color(3, 3, 3, 0)
+	sigil.scale = Vector2(0.4, 0.4)
+	box.add_child(sigil)
+	var name := UiKit.glow_label(String(info.name).to_upper(), 72, col.lerp(Color.WHITE, 0.35), UiKit.display())
+	name.position = Vector2(0, cy + 92.0)
+	name.size = Vector2(w, 90)
+	name.pivot_offset = Vector2(w * 0.5, 45)
+	name.modulate.a = 0.0
+	box.add_child(name)
+	var desc := UiKit.label(String(info.text), 32, Color(0.92, 0.94, 1.0), UiKit.body())
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc.size = Vector2(minf(w - 120.0, 820.0), 90)
+	desc.position = Vector2((w - desc.size.x) * 0.5, cy + 196.0)
+	desc.modulate.a = 0.0
+	box.add_child(desc)
+	var tw := box.create_tween()
+	tw.tween_property(shade, "modulate:a", 1.0, 0.2)
+	tw.parallel().tween_property(tag, "modulate:a", 1.0, 0.25)
+	for k in 2:
+		var ic: TextureRect = icons[k]
+		var to_x := w * 0.5 - 65.0 + (-62.0 if k == 0 else 62.0)
+		tw.parallel().tween_property(ic, "modulate:a", 1.0, 0.18)
+		tw.parallel().tween_property(ic, "position:x", to_x, 0.42).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_IN)
+	# They meet: a flash, and the sigil blooms out of them.
+	for k in 2:
+		var ic: TextureRect = icons[k]
+		tw.parallel().tween_property(ic, "modulate", Color(3, 3, 3, 0), 0.25).set_delay(0.42)
+		tw.parallel().tween_property(ic, "scale", Vector2(1.5, 1.5), 0.25).set_delay(0.42)
+	tw.parallel().tween_property(sigil, "modulate", Color.WHITE, 0.35).set_delay(0.42)
+	tw.parallel().tween_property(sigil, "scale", Vector2.ONE, 0.5).set_delay(0.42) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	name.scale = Vector2(1.4, 1.4)
+	tw.parallel().tween_property(name, "modulate:a", 1.0, 0.25).set_delay(0.55)
+	tw.parallel().tween_property(name, "scale", Vector2.ONE, 0.45).set_delay(0.55) \
+			.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(desc, "modulate:a", 1.0, 0.4).set_delay(0.8)
+	tw.tween_interval(2.1)
+	tw.tween_property(box, "modulate:a", 0.0, 0.5)
+	tw.tween_callback(box.queue_free)
 
 
 ## The Gauntlet ladder: the four bosses of this cycle in a row, passed ones

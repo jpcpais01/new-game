@@ -829,6 +829,33 @@ def sfx_sectors():
     write_wav("flare_pass", x, 0.7)
 
 
+def sfx_resonance():
+    """Resonance: two tones that drift into harmony and ring out as one chord (own RNG)."""
+    global rng
+    rng = np.random.default_rng(433)
+    n = int(1.9 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    # Two voices glide from a sour interval into a clean fifth over 0.45 s, beating as they meet.
+    glide = int(0.45 * SR)
+    for f0, f1, p in ((440.0 * 1.41, 660.0, 0.3), (440.0 * 0.94, 440.0, -0.3)):
+        f = np.concatenate([np.linspace(f0, f1, glide) ** 1.0, np.full(n - glide, f1)])
+        ph = 2 * np.pi * np.cumsum(f) / SR
+        x += (np.sin(ph) + 0.35 * np.sin(2 * ph) + 0.12 * np.sin(3 * ph)) * env(n, 0.02, 1.1, 0.25, 0.5, 0.3) * 0.22
+    # The bloom: a bell chord and a sparkle as they lock together.
+    st = glide
+    for k, m in enumerate([69, 76, 81, 85, 88, 93]):
+        s0 = st + int(0.035 * k * SR)
+        sg = n - s0
+        t2 = np.arange(sg) / SR
+        bell = np.sin(2 * np.pi * mtof(m) * t2) + 0.4 * np.sin(2 * np.pi * mtof(m) * 2.76 * t2) * expdecay(sg, 9)
+        x[s0:] += bell * expdecay(sg, 2.4) * 0.1
+    sparkle = highpass(noise(n - st), 5000) * expdecay(n - st, 5) * 0.12
+    x[st:] += sparkle
+    x += np.sin(2 * np.pi * 55 * tt) * env(n, 0.3, 1.2) * 0.15 * (tt > 0.4)
+    write_wav("resonance", x, 0.85)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -867,6 +894,10 @@ if __name__ == "__main__":
         sfx_sectors()
         print("sector audio ok")
         sys.exit(0)
+    if "--resonance" in sys.argv:
+        sfx_resonance()
+        print("resonance audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -883,4 +914,5 @@ if __name__ == "__main__":
     sfx_leviathan()
     sfx_gauntlet()
     sfx_sectors()
+    sfx_resonance()
     print("audio ok")

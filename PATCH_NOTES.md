@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 16:00 UTC
+
+- **Resonances.** Weapons now sing together. Nine pairs of weapons resonate: hold both at level 2 and a bonus effect switches on for the rest of the run. Every weapon has two partners, so four weapons in a row on the ring can carry three resonances at once.
+- **Nine new effects.** Conductor (Pulse bolts leap on as lightning), Salvo (Pulse volleys launch hunter missiles), Payload (Lance beams end in missile blasts), Refraction (glaive ricochets split off beams), Homecoming (a returning glaive bursts into a shockwave), Halo Surge (every Nova flings your Halo Blades wide, blazing and stronger), Bladestorm (every Scythe sweep slashes out from each blade), Reap and Sow (Scythe kills plant mines) and Tesla Field (mines discharge lightning).
+- **A moment worth waiting for.** When two weapons start to resonate, their colours spiral into your ship, time slows, and the two weapons slide together on screen and fuse into the resonance's sigil with a new chord. Level-up cards light up with the resonance a pick would complete, the HUD bridges resonating weapons with an arc of light, and the pause menu lists what you hold and what you could still complete.
+- **The resonance web.** The Codex now maps all nine resonances as a ring of weapons. Discovered bridges burn in their own colour; the rest wait as faint lines with their recipe beside them.
+- **Three new missions.** Harmonist (discover 5 resonances), Chorus (hold 3 resonances at once) and Symphony (discover all 9), worth 1,500 Flux together.
+
 ## Oct 20, 2026 · 13:00 UTC
 
 - **Sectors: two new arenas.** Pick where you fly in the Hangar. Each sector has its own sky, its own hazard and its own swarm, and pays a bigger score and more Flux. The Neon Grid is the arena you know.
