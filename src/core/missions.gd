@@ -29,6 +29,10 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = 1 if run != null and run.warden_down else 0
 		"seraph":
 			v = 1 if run != null and run.seraph_down else 0
+		"leviathan":
+			v = 1 if run != null and run.levi_down else 0
+		"charmer":
+			v = 1 if run != null and run.levi_clean else 0
 		"chain":
 			v = int(data.get("best_chain", 0))
 			if run != null:

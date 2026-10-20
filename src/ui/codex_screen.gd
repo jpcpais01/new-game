@@ -20,6 +20,7 @@ const LORE := [
 	["The Warden", "Arrives at 4:00. Radial bursts and summoned drifters. Overloads if you stall."],
 	["Eclipse", "Arrives at 8:00. Spiral streams, dashes and swarms. Defeat it to reach the dawn."],
 	["The Seraph", "Arrives at 6:00. A turning wheel of lasers, aimed lances, and it blinks to your side in a ring of fire. Ride the gaps between its arms."],
+	["The Leviathan", "Arrives at 2:00. A serpent of light: only its head can be hurt, and its body burns. It coils around you as its scales fire inward, then rears back and lunges. Wounded, it sheds its tail. Kill it fast, or it escapes with its relic."],
 ]
 
 

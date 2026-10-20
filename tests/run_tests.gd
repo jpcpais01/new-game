@@ -32,6 +32,7 @@ func _init() -> void:
 	_test_glaive()
 	_test_echo()
 	_test_starfall()
+	_test_leviathan()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -417,13 +418,24 @@ func _test_afterdark() -> void:
 	s.tick = s.night_next - 1
 	s.step(0, 0)
 	b = s.boss_index()
-	check(b >= 0 and s.e_type[b] == Defs.SERAPH and s.night == 2, "night 2 brings back the Seraph")
+	check(b >= 0 and s.e_type[b] == Defs.LEVIATHAN and s.night == 2, "night 2 brings back the Leviathan")
+	s.e_hp[b] = 0.0
+	s.step(0, 0)
+	var night_big := false
+	for p in s.pickups:
+		if p.k == "bigchest":
+			night_big = true
+	check(night_big, "an Afterdark Leviathan drops a boss cache")
+	s.tick = s.night_next - 1
+	s.step(0, 0)
+	b = s.boss_index()
+	check(b >= 0 and s.e_type[b] == Defs.SERAPH and s.night == 3, "night 3 brings back the Seraph")
 	s.e_hp[b] = 0.0
 	s.step(0, 0)
 	s.tick = s.night_next - 1
 	s.step(0, 0)
 	b = s.boss_index()
-	check(b >= 0 and s.e_type[b] == Defs.ECLIPSE and s.night == 3, "night 3 brings back the Eclipse")
+	check(b >= 0 and s.e_type[b] == Defs.ECLIPSE and s.night == 4, "night 4 brings back the Eclipse")
 	var bosses := s.bosses_killed
 	s.e_hp[b] = 0.0
 	s.step(0, 0)
@@ -438,7 +450,7 @@ func _test_afterdark() -> void:
 	_kill_boss(s, Defs.WARDEN)
 	var data := {"best_score": 0, "best_afterdark": 0, "daily_runs": 2, "daily_streak_best": 3}
 	check(Missions.done(_find_mission("afterdark"), s, data), "Into the Afterdark mission")
-	check(Missions.done(_find_mission("nightmare"), s, data), "Nightmare: five bosses in one run")
+	check(Missions.done(_find_mission("nightmare"), s, data), "Nightmare: six bosses in one run")
 	var plain := Sim.new(61)
 	plain.tick = s.tick
 	var pe := plain._spawn(Defs.DRIFTER, 0.0, 0.0, false, 0)
@@ -1248,6 +1260,97 @@ func _test_starfall() -> void:
 		p.iframes = 2
 		p.step(0, 0)
 	check(float(p.rift.prog) < 2.0 and (p.rift.mets as Array).is_empty(), "outside the ring the storm pauses")
+
+
+func _test_leviathan() -> void:
+	var at := -1
+	for ev in Sim.SCHEDULE:
+		if ev[1] == "boss" and ev[2] == Defs.LEVIATHAN:
+			at = ev[0]
+	check(at == 120, "the Leviathan arrives at 2:00")
+	var s := _quiet(401)
+	var i := s._spawn(Defs.LEVIATHAN, s.px + 700.0, s.py, false, 0)
+	check(s.lv_n == Defs.LEVI_SEGS and s.lv_uid == s.e_uid[i], "the Leviathan uncoils a body")
+	var coiled := false
+	var marked := false
+	var lunged := false
+	var orbs := 0
+	var spaced := true
+	for k in 720:
+		s.iframes = 999
+		s.step(0, 0)
+		for e in s.events:
+			if int(e[0]) == Sim.EV_LEVI and int(e[3]) == 0:
+				coiled = true
+			if int(e[0]) == Sim.EV_TELEGRAPH:
+				marked = true
+			if int(e[0]) == Sim.EV_ORB:
+				orbs += 1
+		if s.e_state[i] == 4:
+			lunged = true
+		for j in range(1, s.lv_n):
+			var dx := s.lv_x[j] - s.lv_x[j - 1]
+			var dy := s.lv_y[j] - s.lv_y[j - 1]
+			if absf(sqrt(dx * dx + dy * dy) - Defs.LEVI_GAP) > 0.5:
+				spaced = false
+	check(coiled and orbs > 10, "the Leviathan coils and its body fires inwards (%d orbs)" % orbs)
+	check(marked and lunged, "the Leviathan marks its lunge, then lunges")
+	check(spaced, "the body follows the head like a chain")
+	# The body burns.
+	s.qn = 0
+	s.iframes = 0
+	s.px = s.lv_x[10]
+	s.py = s.lv_y[10]
+	var hp0 := s.hp
+	s.step(0, 0)
+	check(s.hp < hp0, "touching the body hurts")
+	# Wounded, it sheds its tail.
+	s.e_hp[i] = s.e_maxhp[i] * 0.7
+	s.iframes = 999
+	s.step(0, 0)
+	check(s.lv_n == Defs.LEVI_SEGS - Defs.LEVI_SHED and _has_event(s, Sim.EV_LEVI), "it sheds its tail at 75 percent")
+	s.e_hp[i] = s.e_maxhp[i] * 0.2
+	s.step(0, 0)
+	check(s.lv_n == Defs.LEVI_SEGS - 3 * Defs.LEVI_SHED, "and again at half and a quarter (%d)" % s.lv_n)
+	s.e_hp[i] = 0.0
+	s.step(0, 0)
+	var relic := false
+	var core := false
+	for p in s.pickups:
+		if p.k == "chest" and p.get("relic", false):
+			relic = true
+		if p.k == "core":
+			core = true
+	check(s.levi_down and s.bosses_killed == 1 and relic and core, "the Leviathan falls and guards the first relic")
+	for k in 3 * Defs.LEVI_SEGS + 6:
+		s.iframes = 999
+		s.step(0, 0)
+	check(s.lv_n == 0 and s.lv_pop == 0, "its body bursts after it falls")
+	check(Missions.done(_find_mission("serpentfall"), s, {}), "Serpentfall mission")
+	check(not Missions.done(_find_mission("charmer"), s, {}), "Snake Charmer needs a clean fight")
+	# Untouched, it charms.
+	var c := _quiet(402)
+	var ci := c._spawn(Defs.LEVIATHAN, c.px + 900.0, c.py, false, 0)
+	c.step(0, 0)
+	c.e_hp[ci] = 0.0
+	c.step(0, 0)
+	check(Missions.done(_find_mission("charmer"), c, {}), "Snake Charmer mission")
+	# Left alive too long, it escapes with its prize; the first elite then guards the relic.
+	var e := _quiet(403)
+	var ei := e._spawn(Defs.LEVIATHAN, e.px + 900.0, e.py, false, 0)
+	e.step(0, 0)
+	e.e_t[ei] = e.levi_escape_ticks()
+	e.step(0, 0)
+	var escaped := false
+	for ev in e.events:
+		if int(ev[0]) == Sim.EV_LEVI and int(ev[3]) == 4:
+			escaped = true
+	check(escaped and e.boss_index() < 0 and e.bosses_killed == 0 and e.pickups.is_empty() and e.lv_n == 0,
+			"a Leviathan left too long escapes")
+	var el := e._spawn(Defs.BRUTE, e.px + 800.0, e.py, true, 0)
+	e.e_hp[el] = 0.0
+	e.step(0, 0)
+	check(e.pickups.size() == 1 and e.pickups[0].get("relic", false), "then the first elite guards the relic")
 
 
 func _test_runs() -> void:

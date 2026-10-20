@@ -4,7 +4,8 @@ extends Control
 
 signal pause_pressed
 
-const BOSS_NAMES := {Defs.WARDEN: "THE WARDEN", Defs.ECLIPSE: "ECLIPSE", Defs.SERAPH: "THE SERAPH"}
+const BOSS_NAMES := {Defs.WARDEN: "THE WARDEN", Defs.ECLIPSE: "ECLIPSE", Defs.SERAPH: "THE SERAPH",
+		Defs.LEVIATHAN: "THE LEVIATHAN"}
 ## The Chain counter shows from this many kills in a row.
 const CHAIN_SHOW := 5
 

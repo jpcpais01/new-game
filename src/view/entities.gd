@@ -44,6 +44,7 @@ func _draw_enemies() -> void:
 	var a := arena.alpha
 	var t := arena.vtime
 	var gold := Art.tex("ring")
+	_draw_levi_body(s, a, t)
 	for i in s.en:
 		if s.e_spawn[i] > 6:
 			continue
@@ -76,6 +77,8 @@ func _draw_enemies() -> void:
 				rot = -t * 0.3
 			Defs.SERAPH:
 				rot = t * (1.6 if s.e_state[i] == 2 else 0.5)
+			Defs.LEVIATHAN:
+				rot = Trig.to_rad(s.e_ang[i])
 		var sc := r / Art.SPRITE_R * (1.0 + 0.05 * sin(t * 5.0 + uid))
 		var mod := Color(1.25, 1.25, 1.25, 1.0)
 		if s.e_spawn[i] > 0:
@@ -95,6 +98,14 @@ func _draw_enemies() -> void:
 			mod = Color(1.8, 1.4, 1.9)
 		elif type == Defs.ECLIPSE and s.e_state[i] == 1:
 			mod = Color(2.0, 1.2, 1.8)
+		elif type == Defs.LEVIATHAN and s.e_state[i] >= 3:
+			# Rearing to lunge: it trembles and burns white; lunging, it stretches.
+			if s.e_state[i] == 3:
+				x += randf_range(-4.0, 4.0)
+				y += randf_range(-4.0, 4.0)
+				mod = Color(2.2, 1.9, 2.4)
+			else:
+				mod = Color(1.8, 1.6, 2.2)
 		elif type == Defs.PHANTOM:
 			# Flickers like a bad signal, and fades out before a blink.
 			var fade := clampf(float(s.e_t[i]) / 48.0, 0.0, 1.0) if s.e_state[i] == 1 else 1.0
@@ -170,6 +181,7 @@ func _draw_glow() -> void:
 		draw_set_transform(Vector2(s.e_x[i], s.e_y[i]), t * 3.0 + float(i), Vector2(sc, sc))
 		draw_texture(portal, Vector2(-64, -64), Color(col * 1.6, (1.0 - k) * 0.9 + 0.1))
 	_draw_threats(s, t)
+	_draw_levi_glow(s, a, t)
 	# Gems.
 	var gem := Art.tex("gem")
 	for i in s.gn:
@@ -330,6 +342,95 @@ func _draw_glow() -> void:
 				draw_arc(Vector2.ZERO, 52.0, 0.0, TAU, 48, Color(gold, 0.18), 8.0)
 			else:
 				draw_arc(Vector2.ZERO, 46.0, -PI * 0.5, -PI * 0.5 + TAU * hf, 40, Color(gold, 0.3), 2.0)
+
+
+## The Leviathan's body: hex scales from the tail up to the neck, tinted
+## violet to magenta, with a ripple of light running down it.
+func _draw_levi_body(s: Sim, a: float, t: float) -> void:
+	var n := s.lv_n
+	if n <= 0:
+		return
+	var h := s._levi_head()
+	var fade := 1.0
+	var hx := s.lv_x[0]
+	var hy := s.lv_y[0]
+	var st := 0
+	if h >= 0:
+		hx = lerpf(s.e_ox[h], s.e_x[h], a)
+		hy = lerpf(s.e_oy[h], s.e_y[h], a)
+		st = s.e_state[h]
+		if s.e_spawn[h] > 0:
+			fade = 1.0 - clampf(float(s.e_spawn[h]) / 150.0, 0.0, 1.0)
+	var first := n - s.lv_pop if h < 0 else 0
+	var tex := Art.tex("levi_seg")
+	var neck: Color = Defs.ENEMY_COLOR[Defs.LEVIATHAN]
+	var tail := Color(1.0, 0.36, 0.78)
+	var frozen := s.freeze > 0
+	for k in range(n - 1, first - 1, -1):
+		var x := lerpf(s.lv_ox[k], s.lv_x[k], a)
+		var y := lerpf(s.lv_oy[k], s.lv_y[k], a)
+		var ax := hx
+		var ay := hy
+		if k > 0:
+			ax = lerpf(s.lv_ox[k - 1], s.lv_x[k - 1], a)
+			ay = lerpf(s.lv_oy[k - 1], s.lv_y[k - 1], a)
+		var ang := atan2(ay - y, ax - x)
+		var f := float(k) / float(Defs.LEVI_SEGS - 1)
+		var wave := 0.5 + 0.5 * sin(t * 7.0 - float(k) * 0.55)
+		var col := neck.lerp(tail, f) * (1.05 + 0.35 * wave)
+		if st == 1:
+			col *= 1.1
+		elif st == 3:
+			col = col.lerp(Color(1.8, 1.6, 2.0), 0.25)
+		if h < 0:
+			# The head has fallen: every scale burns white before it bursts.
+			col = col.lerp(Color(1.7, 1.6, 2.0), 0.35)
+			x += randf_range(-3.0, 3.0)
+			y += randf_range(-3.0, 3.0)
+		if frozen:
+			col = Color(0.55, 0.65, 1.7)
+		var sc := Sim.levi_seg_r(k) / 24.0 * 1.2 * (1.0 + 0.06 * wave)
+		draw_set_transform(Vector2(x, y), ang, Vector2(sc, sc))
+		draw_texture(tex, Vector2(-32, -32), Color(col, fade))
+
+
+## The Leviathan's spine of light (additive), and while it coils, the ring
+## it is closing around you.
+func _draw_levi_glow(s: Sim, a: float, t: float) -> void:
+	var n := s.lv_n
+	if n <= 0:
+		return
+	var h := s._levi_head()
+	if h >= 0 and s.e_spawn[h] > 0:
+		return
+	var neck: Color = Defs.ENEMY_COLOR[Defs.LEVIATHAN]
+	var tail := Color(1.0, 0.36, 0.78)
+	var first := n - s.lv_pop if h < 0 else 0
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var prev := Vector2(lerpf(s.e_ox[h], s.e_x[h], a), lerpf(s.e_oy[h], s.e_y[h], a)) if h >= 0 else \
+			Vector2(s.lv_x[first], s.lv_y[first])
+	for k in range(first, n):
+		var p := Vector2(lerpf(s.lv_ox[k], s.lv_x[k], a), lerpf(s.lv_oy[k], s.lv_y[k], a))
+		var f := float(k) / float(Defs.LEVI_SEGS - 1)
+		var col := neck.lerp(tail, f)
+		var w := Sim.levi_seg_r(k)
+		var pulse := 0.5 + 0.5 * sin(t * 7.0 - float(k) * 0.55)
+		draw_line(prev, p, Color(col, 0.1 + 0.08 * pulse), w * 2.2)
+		draw_line(prev, p, Color(col * 1.4, 0.4 + 0.25 * pulse), w * 0.3)
+		prev = p
+	if h >= 0 and s.e_state[h] == 1:
+		# The coil closing: a dashed ring at the radius it is tightening to.
+		var c := s.e_t[h] % 720
+		var k2 := clampf(float(c - 260) / 210.0, 0.0, 1.0)
+		var rad := 420.0 - 210.0 * k2
+		var px := lerpf(s.ppx, s.px, a)
+		var py := lerpf(s.ppy, s.py, a)
+		draw_set_transform(Vector2(px, py), 0.0, Vector2.ONE)
+		var segs := 24
+		for i in segs:
+			var a0 := -t * 0.9 + TAU * float(i) / float(segs)
+			draw_arc(Vector2.ZERO, rad, a0, a0 + TAU / float(segs) * 0.5, 4, Color(neck * 1.5, 0.22 + 0.2 * k2), 3.0)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Ricochet Glaive: a spinning disc with a short smear of afterimages.

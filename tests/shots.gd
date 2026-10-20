@@ -43,6 +43,10 @@ func _ready() -> void:
 		await _ricochet_shots()
 		get_tree().quit()
 		return
+	if args.has("leviathan"):
+		await _levi_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -488,6 +492,50 @@ func _ricochet_shots() -> void:
 	main.go_codex()
 	await _wait(1.0)
 	await _shot("r5_codex")
+
+
+func _levi_shots() -> void:
+	main.start_run()
+	await _wait(1.0)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	s.rift_next = 1 << 30
+	while s.seconds() < 124.0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y)
+		s.events.clear()
+	gs._hud._rebuild_loadout()
+	var h := s.boss_index()
+	if h >= 0:
+		s.e_maxhp[h] = 1e6
+		s.e_hp[h] = 0.8e6
+	main.arena.demo = true
+	await _wait(2.6)
+	await _shot("l1_arrival")
+	for k in 3:
+		while h >= 0 and s.e_state[h] != [1, 3, 4][k]:
+			await _wait(0.05)
+			s.hp = s.max_hp
+			h = s.boss_index()
+		if k == 0:
+			await _wait(1.6)
+		await _shot(["l2_coil", "l3_rear", "l4_lunge"][k])
+	if h >= 0:
+		s.e_hp[h] = s.e_maxhp[h] * 0.3
+		await _wait(0.12)
+		await _shot("l5_shed")
+		s.e_hp[h] = 0.0
+		await _wait(0.4)
+		await _shot("l6_burst")
+	await _wait(1.0)
+	main.go_codex()
+	await _wait(1.0)
+	await _shot("l7_codex")
 
 
 func _wait(t: float) -> void:

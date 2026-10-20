@@ -137,6 +137,11 @@ ENEMIES = {
                 {"line": 4.6, "glow": 13.0, "fill": 0.42}),
     "seraph": ([star(6, 1.0, 0.3), regular(36, 0.46), regular(6, 0.22, math.pi / 6)], (0.4, 1.0, 0.85),
                {"line": 4.4, "glow": 13.0, "fill": 0.3}),
+    # A viper's head with two burning eyes and swept-back horns.
+    "leviathan": ([[(1.0, 0.0), (0.62, 0.36), (0.0, 0.58), (-0.55, 0.92), (-0.4, 0.42), (-0.95, 0.0), (-0.4, -0.42),
+                    (-0.55, -0.92), (0.0, -0.58), (0.62, -0.36)],
+                   [(0.36, 0.2), (0.05, 0.34), (0.12, 0.14)], [(0.36, -0.2), (0.05, -0.34), (0.12, -0.14)]],
+                  (0.52, 0.46, 1.0), {"line": 4.2, "glow": 12.0, "fill": 0.34}),
 }
 
 
@@ -584,6 +589,14 @@ def ricochet_sprites():
     save(white_img(a), "comet")
 
 
+# Round 10: the Leviathan.
+def leviathan_sprites():
+    enemy_sprites()
+    # A body segment: a hex scale with a chevron spine, white so the view can tint it.
+    save(neon([regular(6, 1.0), regular(6, 0.42)], (1, 1, 1), size=64, radius=24, line=2.8, glow=5.5, fill=0.4,
+              core_white=1.0, lines=[[(-0.6, 0.62), (0.3, 0.0), (-0.6, -0.62)]]), "levi_seg")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -670,6 +683,10 @@ if __name__ == "__main__":
         ricochet_sprites()
         print("ricochet art ok")
         sys.exit(0)
+    if "--leviathan" in sys.argv:
+        leviathan_sprites()
+        print("leviathan art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -684,5 +701,6 @@ if __name__ == "__main__":
     radiance_icons()
     rift_sprites()
     ricochet_sprites()
+    leviathan_sprites()
     app_icon()
     print("art ok")

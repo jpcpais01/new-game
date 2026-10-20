@@ -29,6 +29,18 @@ static func move(s: Sim) -> Vector2i:
 			var w := (reach - d) / reach
 			fx += dx / d * w * w * 3.0
 			fy += dy / d * w * w * 3.0
+	# The Leviathan's body burns: give it room.
+	if s.lv_pop <= 0:
+		for k in s.lv_n:
+			var dx := s.px - s.lv_x[k]
+			var dy := s.py - s.lv_y[k]
+			var d2 := dx * dx + dy * dy
+			var reach := 150.0 + Sim.levi_seg_r(k) * 2.0
+			if d2 < reach * reach:
+				var d := sqrt(d2) + 1.0
+				var w := (reach - d) / reach
+				fx += dx / d * w * w * 3.0
+				fy += dy / d * w * w * 3.0
 	for i in s.qn:
 		var dx := s.px - s.q_x[i]
 		var dy := s.py - s.q_y[i]
@@ -51,6 +63,21 @@ static func move(s: Sim) -> Vector2i:
 		if absf(side) < gap:
 			var sgn := 1.0 if side >= 0.0 else -1.0
 			var w := (gap - absf(side)) / gap * (6.0 if l[5] or float(l[7]) > 0.6 else 2.5)
+			fx += uy * sgn * w
+			fy += -ux * sgn * w
+	# A marked lunge: step out of its line.
+	var lg := s.levi_lunge()
+	if not lg.is_empty():
+		var ux := Trig.cos_i(lg[2])
+		var uy := Trig.sin_i(lg[2])
+		var rx: float = s.px - lg[0]
+		var ry: float = s.py - lg[1]
+		var along := rx * ux + ry * uy
+		var side := rx * uy - ry * ux
+		var gap := 160.0
+		if along > -60.0 and along < float(lg[3]) + 80.0 and absf(side) < gap:
+			var sgn := 1.0 if side >= 0.0 else -1.0
+			var w := (gap - absf(side)) / gap * 7.0
 			fx += uy * sgn * w
 			fy += -ux * sgn * w
 	# Meteors about to land: get out from under the mark.
