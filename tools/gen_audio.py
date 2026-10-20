@@ -630,6 +630,49 @@ def sfx_rifts():
     write_wav("rift_done", x, 0.85)
 
 
+def sfx_ricochet():
+    """Ricochet Glaive and the Starfall rift (own RNG)."""
+    global rng
+    rng = np.random.default_rng(257)
+    # Glaive throw: a spinning whirr that rises and fades.
+    n = int(0.3 * SR)
+    tt = np.arange(n) / SR
+    am = 0.55 + 0.45 * np.sin(2 * np.pi * 38 * tt)
+    x = lowpass(highpass(noise(n), 700), 5200) * am * env(n, 0.02, 0.0, 1.0, 0.24, 0.04) * 0.7
+    x += np.sin(sweep_phase(520, 980, n, 0.7)) * am * env(n, 0.02, 0.22) * 0.22
+    write_wav("glaive", x, 0.65)
+    # Ricochet: a short metallic tink.
+    n = int(0.16 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for f, a, k in [(2900, 0.5, 30.0), (4350, 0.32, 40.0), (6100, 0.2, 55.0)]:
+        x += np.sin(2 * np.pi * f * tt) * expdecay(n, k) * a
+    x += highpass(noise(n), 5000) * expdecay(n, 160) * 0.5
+    write_wav("ricochet", x, 0.6)
+    # Meteor fall: a thin whistle sliding down.
+    n = int(0.7 * SR)
+    x = np.sin(sweep_phase(2600, 900, n, 0.8)) * env(n, 0.15, 0.0, 1.0, 0.35, 0.2) * 0.35
+    x += lowpass(highpass(noise(n), 2500), 6000) * env(n, 0.2, 0.5) * 0.12
+    write_wav("meteor_fall", x, 0.5)
+    # Meteor impact: a heavy thump, a crack of debris and a rumble.
+    n = int(0.9 * SR)
+    x = np.sin(sweep_phase(140, 32, n, 0.4)) * expdecay(n, 6.5) * 0.95
+    x += lowpass(noise(n), 2400) * expdecay(n, 14) * 0.6
+    x += highpass(noise(n), 3500) * expdecay(n, 45) * 0.35
+    write_wav("meteor", x, 0.9)
+    # Starfall begins: a falling glassy chime over a deep swell.
+    n = int(1.5 * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(sweep_phase(70, 45, n, 0.6)) * env(n, 0.3, 0.6, 0.4, 0.6, 0.2) * 0.5
+    for k, m in enumerate([96, 91, 88, 84, 79]):
+        st = int(k * 0.08 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2) + 0.35 * np.sin(2 * np.pi * mtof(m) * 2.76 * t2)) * \
+            expdecay(seg, 4.0) * 0.16
+    write_wav("starfall", x, 0.8)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -652,6 +695,10 @@ if __name__ == "__main__":
         sfx_rifts()
         print("rift audio ok")
         sys.exit(0)
+    if "--ricochet" in sys.argv:
+        sfx_ricochet()
+        print("ricochet audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -664,4 +711,5 @@ if __name__ == "__main__":
     sfx_arsenal()
     sfx_radiance()
     sfx_rifts()
+    sfx_ricochet()
     print("audio ok")

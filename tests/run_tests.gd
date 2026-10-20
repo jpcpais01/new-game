@@ -29,6 +29,9 @@ func _init() -> void:
 	_test_banish()
 	_test_rifts()
 	_test_umbrals()
+	_test_glaive()
+	_test_echo()
+	_test_starfall()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -1053,6 +1056,198 @@ func _test_umbrals() -> void:
 	_give_chest(l, "bigchest")
 	l.step(0, 0)
 	check(l.relic_choice and not l.umbral_choice and l.light_relics() == 0, "boss caches still offer relics")
+
+
+func _glaives(s: Sim) -> int:
+	var n := 0
+	for i in s.bn:
+		if s.b_kind[i] >= 4:
+			n += 1
+	return n
+
+
+func _test_glaive() -> void:
+	# A glaive ricochets down a line of enemies, then flies home.
+	var s := _quiet(301)
+	s.weapons = [{"id": "glaive", "lvl": 2, "t": 1, "k": 0, "a": 0}]
+	var line: Array = []
+	for k in 4:
+		var e := s._spawn(Defs.BRUTE, s.px + 220.0 + 150.0 * k, s.py, false, 0)
+		s.e_speed[e] = 0.0
+		line.append(e)
+	s.step(0, 0)
+	check(_glaives(s) == 1 and _has_event(s, Sim.EV_SHOT), "a glaive is thrown")
+	var bounced := 0
+	var home := false
+	for t in 120:
+		s.step(0, 0)
+		for e in s.events:
+			if int(e[0]) == Sim.EV_RICOCHET:
+				bounced += 1
+		for i in s.bn:
+			if s.b_kind[i] == 5:
+				home = true
+	var hurt := 0
+	for e in line:
+		if s.e_hp[e] < s.e_maxhp[e]:
+			hurt += 1
+	check(hurt == 4 and bounced >= 4, "it ricochets through the line (%d hit, %d ricochets)" % [hurt, bounced])
+	check(home, "out of ricochets, it flies home")
+	check(s.ricochet_best >= 4, "ricochets are counted (%d)" % s.ricochet_best)
+	for t in 120:
+		s.step(0, 0)
+	check(_glaives(s) <= 1, "a glaive is thrown again only once it is back in hand")
+	# Only as many glaives in flight as the level allows.
+	var m := _quiet(302)
+	m.weapons = [{"id": "glaive", "lvl": 4, "t": 1, "k": 0, "a": 0}]
+	for k in 12:
+		var a := k * Trig.STEPS / 12
+		var e2 := m._spawn(Defs.BRUTE, m.px + Trig.cos_i(a) * 400.0, m.py + Trig.sin_i(a) * 400.0, false, 0)
+		m.e_speed[e2] = 0.0
+	var most := 0
+	for t in 240:
+		m.weapons[0].t = mini(m.weapons[0].t, 2)
+		m.step(0, 0)
+		most = maxi(most, _glaives(m))
+	check(most == 2, "a Lv4 glaive keeps two in flight (%d)" % most)
+	# Ouroboros: damage grows with each ricochet, and a caught glaive leaps back out.
+	var o := _quiet(303)
+	o.weapons = [{"id": "glaive", "lvl": Defs.EVO_LEVEL, "t": 1, "k": 0, "a": 0}]
+	var spec := o.glaive_spec()
+	for k in 16:
+		var a2 := k * Trig.STEPS / 16
+		var e3 := o._spawn(Defs.BRUTE, o.px + Trig.cos_i(a2) * 300.0, o.py + Trig.sin_i(a2) * 300.0, false, 0)
+		o.e_speed[e3] = 0.0
+		o.e_hp[e3] = 1e6
+		o.e_maxhp[e3] = 1e6
+	var grew := 0.0
+	var rethrown := false
+	for t in 600:
+		o.step(0, 0)
+		for i in o.bn:
+			if o.b_kind[i] == 4:
+				grew = maxf(grew, o.b_dmg[i] / float(spec.dmg))
+		for e in o.events:
+			if int(e[0]) == Sim.EV_SHOT and e[1] == "glaive_evo":
+				rethrown = true
+	check(grew > 1.5 and grew <= 3.0001, "Ouroboros grows with every ricochet, up to x3 (x%.2f)" % grew)
+	check(rethrown, "a caught Ouroboros glaive leaps straight back out")
+	check(o.ricochet_best > int(spec.bounce), "Ouroboros keeps counting ricochets across throws (%d)" % o.ricochet_best)
+	check(Missions.progress(_find_mission("ricochet"), o, {}) == mini(40, o.ricochet_best), "the Ricochet mission")
+
+
+func _test_echo() -> void:
+	var s := _quiet(311)
+	s.ship_id = "echo"
+	s.loadout.ship = "echo"
+	var e := s._spawn(Defs.DRIFTER, s.px + 600.0, s.py, false, 0)
+	s.e_hp[e] = 0.0
+	s.step(0, 0)
+	check(s.chain == 1 and s.chain_t > Defs.CHAIN_TICKS, "Echo's Chain fades twice as slowly")
+	var b := s._spawn(Defs.BRUTE, s.px + 600.0, s.py, false, 0)
+	s.st_crit = 0.0
+	var h0 := s.e_hp[b]
+	s._damage(b, 10.0, 0.0, 0.0)
+	var plain := h0 - s.e_hp[b]
+	s.chain = 250
+	h0 = s.e_hp[b]
+	s._damage(b, 10.0, 0.0, 0.0)
+	check(is_equal_approx(h0 - s.e_hp[b], plain * 1.4), "Resonance: a 250 Chain adds +40% damage")
+	s.chain = 999
+	h0 = s.e_hp[b]
+	s._damage(b, 10.0, 0.0, 0.0)
+	check(is_equal_approx(h0 - s.e_hp[b], plain * 1.4), "Resonance stops at +40%")
+	# Encore: the Chain holds through hits, and kills throw glaives.
+	var o := Sim.new(312, {"ship": "echo"})
+	o.spawn_acc = -1e9
+	o.sched_i = Sim.SCHEDULE.size()
+	o.rift_next = 1 << 30
+	_surround(o, Defs.DRIFTER, 24)
+	o.chain = 60
+	o.chain_t = 1000
+	o.od = o.od_need
+	o.step(0, 0, true)
+	check(o.od_t > 0 and _glaives(o) >= 10, "Encore opens with a ring of glaives")
+	o.iframes = 0
+	o._hurt(5.0)
+	check(o.chain >= 60, "Encore: a hit does not break the Chain")
+	var thrown := false
+	for t in 120:
+		o.step(0, 0)
+		if o.state == Sim.CHOOSING:
+			o.choose(0)
+		for i in o.bn:
+			if o.b_kind[i] == 6 and o.b_pierce[i] == 2:
+				thrown = true
+	check(thrown, "Encore: kills throw glaives")
+	check(Defs.ship_mission("echo").get("id", "") == "unbroken", "Unbroken unlocks Echo")
+
+
+func _test_starfall() -> void:
+	# Never before 1:30.
+	var early := _quiet(321)
+	var seen := false
+	for k in 40:
+		early.rift_last = Defs.RIFT_BEACON
+		early._open_rift()
+		if int(early.rift.kind) == Defs.RIFT_STARFALL:
+			seen = true
+		early.rift = {}
+	check(not seen, "no Starfall before 1:30")
+	# Step in and the storm begins; meteors crush the swarm.
+	var s := _quiet(322)
+	s.tick = 200 * Sim.TPS
+	_rift_at(s, Defs.RIFT_STARFALL, s.px + 50.0, s.py)
+	var brute := s._spawn(Defs.BRUTE, s.px + 200.0, s.py, false, 0)
+	s.e_speed[brute] = 0.0
+	s.step(0, 0)
+	check(s.rift.on and _has_event(s, Sim.EV_RIFT), "stepping into the ring calls the Starfall")
+	var marks := 0
+	var impacts := 0
+	var won := false
+	for t in Defs.STARFALL_TICKS + Defs.METEOR_FALL + 10:
+		s.iframes = 2
+		s.step(0, 0)
+		for e in s.events:
+			if int(e[0]) == Sim.EV_METEOR:
+				if int(e[4]) == 0:
+					marks += 1
+				else:
+					impacts += 1
+			if int(e[0]) == Sim.EV_RIFT and int(e[4]) == 2:
+				won = true
+	check(marks > 30 and impacts == marks, "meteors are marked, then land (%d/%d)" % [impacts, marks])
+	check(won and s.starfalls == 1 and s.rifts_done == 1, "an unstruck Starfall is weathered")
+	var core := false
+	for p in s.pickups:
+		if p.k == "core":
+			core = true
+	check(core or s.level > 1, "the last star falls as a Star Core")
+	check(Missions.done(_find_mission("stargazer"), s, {}), "the Stargazer mission")
+	# Stand still under it and a meteor finds you: the rift fails.
+	var f := _quiet(323)
+	f.tick = 200 * Sim.TPS
+	_rift_at(f, Defs.RIFT_STARFALL, f.px, f.py)
+	f.max_hp = 1e6
+	f.hp = 1e6
+	var failed := false
+	for t in Defs.STARFALL_TICKS + Defs.METEOR_FALL:
+		f.step(0, 0)
+		for e in f.events:
+			if int(e[0]) == Sim.EV_RIFT and int(e[4]) == 4:
+				failed = true
+		if failed:
+			break
+	check(failed and f.hp < 1e6 and f.starfalls == 0, "a meteor strike ends the Starfall")
+	# Outside the ring the storm pauses.
+	var p := _quiet(324)
+	_rift_at(p, Defs.RIFT_STARFALL, p.px, p.py)
+	p.step(0, 0)
+	p.px += Defs.STARFALL_R + 200.0
+	for t in 120:
+		p.iframes = 2
+		p.step(0, 0)
+	check(float(p.rift.prog) < 2.0 and (p.rift.mets as Array).is_empty(), "outside the ring the storm pauses")
 
 
 func _test_runs() -> void:

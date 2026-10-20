@@ -3,7 +3,7 @@ extends RefCounted
 ## A simple kiting pilot used by the title demo and the tests: flees nearby threats, drifts towards
 ## gems when safe, stays off the arena wall, and picks cards by preference.
 
-const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "scythe", "mine", "amplifier", "vitality",
+const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "scythe", "glaive", "mine", "amplifier", "vitality",
 		"overclock", "magnet", "thrusters", "plating", "lens", "renewal", "fortune", "scholar", "halo", "phoenix",
 		"wake", "starbreaker", "wrath", "supercrit", "overcharge", "midas", "u_gambit", "u_hunger", "u_sun",
 		"u_crown", "u_frenzy", "heal", "flux"]
@@ -53,6 +53,20 @@ static func move(s: Sim) -> Vector2i:
 			var w := (gap - absf(side)) / gap * (6.0 if l[5] or float(l[7]) > 0.6 else 2.5)
 			fx += uy * sgn * w
 			fy += -ux * sgn * w
+	# Meteors about to land: get out from under the mark.
+	if not s.rift.is_empty() and s.rift.has("mets"):
+		for m in s.rift.mets:
+			if int(m[2]) > 50:
+				continue
+			var dx: float = s.px - float(m[0])
+			var dy: float = s.py - float(m[1])
+			var gap := Defs.METEOR_R + 70.0
+			var d2 := dx * dx + dy * dy
+			if d2 < gap * gap:
+				var d := sqrt(d2) + 1.0
+				var w := (gap - d) / gap * 7.0
+				fx += dx / d * w
+				fy += dy / d * w
 	var threat := sqrt(fx * fx + fy * fy)
 	var chased := false
 	if threat < 0.9:
@@ -77,6 +91,8 @@ static func move(s: Sim) -> Vector2i:
 			# Inside a beacon: just hold near the middle.
 			if int(s.rift.kind) == Defs.RIFT_BEACON and rd < Defs.BEACON_R * 0.6:
 				k = 0.25 * rd / (Defs.BEACON_R * 0.6)
+			elif int(s.rift.kind) == Defs.RIFT_STARFALL and rd < Defs.STARFALL_R * 0.6:
+				k = 0.3 * rd / (Defs.STARFALL_R * 0.6)
 			fx += rx / rd * k
 			fy += ry / rd * k
 	if threat < 0.4 and not chased:
@@ -123,6 +139,8 @@ static func _rift_pull(s: Sim, threat: float) -> bool:
 			return true
 		Defs.RIFT_TRIAL:
 			return not s.rift.on and s.hp > s.max_hp * 0.55
+		Defs.RIFT_STARFALL:
+			return s.rift.on or (threat < 0.7 and s.hp > s.max_hp * 0.5)
 	return false
 
 

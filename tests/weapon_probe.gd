@@ -1,13 +1,14 @@
 extends SceneTree
 ## Weapon balance probe (not run in CI): damage each weapon deals per second
 ## at every level against a steady crowd, with the ship standing still.
-## godot --headless --path . -s tests/weapon_probe.gd -- [seconds]
+## godot --headless --path . -s tests/weapon_probe.gd -- [seconds] [weapon,ids]
 
 
 func _init() -> void:
 	var args := OS.get_cmdline_user_args()
 	var secs := 20 if args.is_empty() else int(args[0])
-	for id in Defs.WEAPON_ORDER:
+	var only: Array = Array(args[1].split(",")) if args.size() > 1 else Defs.WEAPON_ORDER
+	for id in only:
 		var line := "%-7s" % id
 		for lvl in range(1, Defs.EVO_LEVEL + 1):
 			var s := Sim.new(77)

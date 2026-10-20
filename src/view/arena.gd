@@ -221,6 +221,14 @@ func _update_view(delta: float) -> void:
 			var green := kind == 2 or sim.b_pierce[i] > 0
 			fx.particle(sim.b_x[i], sim.b_y[i], randf_range(-30, 30), randf_range(-30, 30), 0.35,
 					0.8 if kind == 1 else 0.55, Color(0.6, 1.8, 0.7) if green else Color(1.6, 0.8, 0.3), 0, 3.0)
+	# Glaives shed sparks as they spin.
+	if not paused:
+		for i in sim.bn:
+			var gk := sim.b_kind[i]
+			if gk >= 4 and randf() < 0.6:
+				var gold := sim.is_evolved("glaive") and gk != 6
+				fx.particle(sim.b_x[i], sim.b_y[i], randf_range(-50, 50), randf_range(-50, 50), 0.25, 0.6,
+						Color(1.3, 1.5, 0.5) if gold else Color(0.8, 1.5, 0.6), 0, 3.0)
 	# Singularities suck light inwards.
 	if not paused:
 		for w in sim.wells:
@@ -385,6 +393,11 @@ func handle_events() -> void:
 							460.0, 0.8, 0.14)
 					if loud:
 						Sfx.play("shoot", randf_range(0.8, 0.9))
+				elif e[1] == "glaive" or e[1] == "glaive_evo":
+					var gc := Color(1.8, 2.0, 0.6) if e[1] == "glaive_evo" else Color(1.0, 2.0, 0.7)
+					fx.spray(e[2] + cos(ang) * 24.0, e[3] + sin(ang) * 24.0, gc, 4, ang, 0.8, 420.0, 0.7, 0.14)
+					if loud:
+						Sfx.play("glaive", randf_range(0.92, 1.1) * (0.85 if e[1] == "glaive_evo" else 1.0))
 				elif e[1] == "supernova":
 					fx.ring(e[2], e[3], 20.0, 220.0, 0.35, Color(1.0, 0.8, 0.4), 1.4)
 					fx.flash(e[2], e[3], 160.0, 0.25, Color(1.0, 0.75, 0.35))
@@ -620,6 +633,14 @@ func handle_events() -> void:
 					Sfx.buzz(50)
 			Sim.EV_RIFT:
 				_on_rift(e, loud)
+			Sim.EV_RICOCHET:
+				var rc := Color(1.8, 2.0, 0.6) if e[3] else Color(1.0, 2.0, 0.7)
+				fx.spray(e[1], e[2], rc, 5, randf() * TAU, TAU, 480.0, 0.8, 0.18)
+				fx.ring(e[1], e[2], 6.0, 46.0, 0.16, rc * 0.6, 0.7)
+				if loud:
+					Sfx.play("ricochet", randf_range(0.9, 1.25))
+			Sim.EV_METEOR:
+				_on_meteor(e, loud)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
@@ -659,6 +680,16 @@ func _on_rift(e: Array, loud: bool) -> void:
 				fx.burst(x, y, col * 1.8, 24, 500.0, 1.0, 0.5)
 				if loud:
 					Sfx.play("wisp", 1.2)
+			elif kind == Defs.RIFT_STARFALL:
+				for k in 2:
+					fx.ring(x, y, Defs.STARFALL_R * 1.6, Defs.STARFALL_R, 0.5 + 0.2 * k, col, 1.6)
+				fx.flash(x, y, Defs.STARFALL_R * 1.4, 0.4, col)
+				add_wave(x, y, 1.4, 900.0)
+				shake(0.25)
+				if loud:
+					banner.emit("STARFALL\nSTAY IN THE RING", col)
+					Sfx.play("starfall")
+					Sfx.buzz(60)
 			else:
 				fx.ring(x, y, 20.0, Defs.BEACON_R, 0.4, col, 1.4)
 				if loud:
@@ -675,7 +706,7 @@ func _on_rift(e: Array, loud: bool) -> void:
 			shake(0.45)
 			slowmo(0.35, 0.4)
 			if loud:
-				var done := ["BEACON LIT", "WISP CAUGHT", "TRIAL WON"]
+				var done := ["BEACON LIT", "WISP CAUGHT", "TRIAL WON", "STARFALL WEATHERED"]
 				banner.emit(done[kind], col)
 				Sfx.play("rift_done")
 				Sfx.buzz(70)
@@ -683,7 +714,7 @@ func _on_rift(e: Array, loud: bool) -> void:
 			fx.ring(x, y, 200.0, 10.0, 0.5, Color(col, 0.6), 1.0)
 			if loud:
 				if phase == 4:
-					var lost := ["BEACON LOST", "WISP ESCAPED", "TRIAL FAILED"]
+					var lost := ["BEACON LOST", "WISP ESCAPED", "TRIAL FAILED", "STRUCK BY A STAR"]
 					banner.emit(lost[kind], UiKit.RED)
 				Sfx.play("blink", 0.5)
 
@@ -710,6 +741,13 @@ func _rift_particles(p: Vector2) -> void:
 				var c := Color.from_hsv(randf(), 0.5, 1.0) * 1.8
 				fx.particle(x + randf_range(-10, 10), y + randf_range(-10, 10), randf_range(-60, 60),
 						randf_range(-60, 60), 0.5, 1.0, c, 0, 4.0)
+		Defs.RIFT_STARFALL:
+			# Stardust drifting down through the ring.
+			if randf() < 0.7:
+				var ang3 := randf() * TAU
+				var rr3 := Defs.STARFALL_R * sqrt(randf())
+				fx.particle(x + cos(ang3) * rr3, y + sin(ang3) * rr3 - 40.0, randf_range(10, 30), randf_range(60, 140),
+						0.7, 0.8, col * (2.0 if sim.rift.on else 1.3), 0, 2.0)
 		Defs.RIFT_TRIAL:
 			if randf() < 0.8:
 				var ang2 := randf() * TAU
@@ -719,6 +757,27 @@ func _rift_particles(p: Vector2) -> void:
 				var tang := ang2 + PI * 0.5
 				fx.particle(sx2, sy2, (x - sx2) * 2.0 + cos(tang) * 160.0, (y - sy2) * 2.0 + sin(tang) * 160.0, 0.5,
 						0.9, Color(1.2, 0.5, 2.0), 1, 0.5)
+
+
+## Starfall meteors: a whistle when one is called down, then a crater of
+## light where it lands.
+func _on_meteor(e: Array, loud: bool) -> void:
+	var col: Color = Defs.RIFTS[Defs.RIFT_STARFALL].color
+	var r: float = e[3]
+	if int(e[4]) == 0:
+		if loud:
+			Sfx.play("meteor_fall", randf_range(0.9, 1.15))
+		return
+	fx.flash(e[1], e[2], r * 2.2, 0.35, col)
+	fx.ring(e[1], e[2], 10.0, r * 1.25, 0.32, col, 1.6)
+	fx.ring(e[1], e[2], r * 0.4, r * 2.0, 0.5, Color(1.0, 0.7, 0.5), 0.8)
+	fx.burst(e[1], e[2], col * 1.8, 26, 640.0, 1.1, 0.55)
+	fx.burst(e[1], e[2], Color(2.0, 1.6, 1.2), 10, 380.0, 1.4, 0.8)
+	add_wave(e[1], e[2], 1.2, 1000.0)
+	shake(0.16)
+	if loud:
+		Sfx.play("meteor", randf_range(0.85, 1.1))
+		Sfx.buzz(25)
 
 
 ## Ion Scythe: a crescent of light, alternating its swing. Lunar Reaper
@@ -787,6 +846,9 @@ func _on_overdrive(id: String, x: float, y: float, loud: bool) -> void:
 		fx.ring(x, y, 40.0, 1000.0, 0.45, Color(1.0, 1.0, 1.0), 2.4)
 	elif id == "nyx":
 		fx.flash(x, y, 900.0, 0.8, Color(0.4, 0.2, 0.9))
+	elif id == "echo":
+		for k in 4:
+			fx.ring(x, y, 60.0 + 40.0 * k, 300.0 + 160.0 * k, 0.35 + 0.12 * k, Color(1.0, 0.85, 0.4), 1.2)
 	if loud:
 		Sfx.play("overdrive")
 		Sfx.buzz(140)
