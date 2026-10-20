@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 9
+const RULES_VERSION := 10
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -32,6 +32,8 @@ const MINE_LIFE := 720
 const MINE_TRIGGER := 64.0
 const MINE_PULL := 190.0
 const WAKE_R := 34.0
+const LEVI_LUNGE := 950.0     # px/s
+const LEVI_LUNGE_T := 40      # ticks a lunge lasts
 
 enum { RUNNING, CHOOSING, DEAD, WON }
 
@@ -78,13 +80,14 @@ const EV_BANISH := 39      # card id banished, slot, new card id
 const EV_RIFT := 40       # kind, x, y, phase (0 opened, 1 taken on, 2 completed, 3 faded untouched, 4 failed)
 const EV_METEOR := 41     # x, y, r, phase (0 marked, 1 impact)
 const EV_RICOCHET := 42   # x, y, evolved (a glaive bounces off an enemy)
+const EV_LEVI := 43       # x, y, phase (0 coils, 1 lunge marked, 2 lunges, 3 sheds a segment, 4 escapes, 5 a segment bursts), n
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
 ## Director schedule: [second, kind, type, count]
 const SCHEDULE := [
 	[70, "ring", Defs.DRIFTER, 14],
-	[120, "elite", Defs.BRUTE, 1],
+	[120, "boss", Defs.LEVIATHAN, 1],
 	[150, "ring", Defs.PHANTOM, 8],
 	[175, "squad", Defs.DART, 10],
 	[205, "grid", Defs.SENTINEL, 5],
@@ -218,6 +221,19 @@ var r_crown := false
 var starfalls := 0            # Starfalls weathered this run
 var ricochet_best := 0        # most ricochets landed by one throw of a glaive
 var _encore_n := 0            # Encore glaives thrown this tick
+var relic_given := false      # the first relic cache of the run has dropped
+
+# --- the Leviathan: its body, a chain of segments behind the head ---
+var lv_n := 0                 # segments still attached
+var lv_uid := 0               # uid of the head the body belongs to
+var lv_pop := 0               # segments still to burst after the head fell
+var lv_x := PackedFloat64Array()
+var lv_y := PackedFloat64Array()
+var lv_ox := PackedFloat64Array()
+var lv_oy := PackedFloat64Array()
+var levi_down := false
+var levi_clean := false       # a Leviathan fell without ever touching you
+var _levi_hit := false
 
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
@@ -356,6 +372,8 @@ func _alloc() -> void:
 	q_vy.resize(MAX_Q); q_dmg.resize(MAX_Q); q_life.resize(MAX_Q)
 	g_x.resize(MAX_G); g_y.resize(MAX_G); g_ox.resize(MAX_G); g_oy.resize(MAX_G); g_val.resize(MAX_G)
 	g_spd.resize(MAX_G); g_mag.resize(MAX_G)
+	lv_x.resize(Defs.LEVI_SEGS); lv_y.resize(Defs.LEVI_SEGS); lv_ox.resize(Defs.LEVI_SEGS)
+	lv_oy.resize(Defs.LEVI_SEGS)
 	_head.resize(GRID_N * GRID_N)
 	_next.resize(MAX_E)
 	_qbuf.resize(MAX_E)
@@ -390,6 +408,7 @@ func step(ix: int, iy: int, burst := false) -> void:
 	_update_enemies()
 	_grid_build()
 	_separate()
+	_levi_body()
 	_aegis_aura()
 	_update_chain()
 	_update_wake_trail()
@@ -627,6 +646,8 @@ func checksum() -> int:
 		h = GlowRng.mix32(h ^ (int(e_x[i] * 100.0) & GlowRng.MASK) ^ ((int(e_hp[i] * 100.0) & 0xFFFF) << 8))
 	for i in gn:
 		h = GlowRng.mix32(h ^ (int(g_y[i] * 100.0) & GlowRng.MASK))
+	for k in lv_n:
+		h = GlowRng.mix32(h ^ (int(lv_x[k] * 100.0) & GlowRng.MASK) ^ (k << 20))
 	h = GlowRng.mix32(h ^ int(rng.state()[0]))
 	return h
 
@@ -714,6 +735,9 @@ func _snapshot() -> void:
 	for i in gn:
 		g_ox[i] = g_x[i]
 		g_oy[i] = g_y[i]
+	for k in lv_n:
+		lv_ox[k] = lv_x[k]
+		lv_oy[k] = lv_y[k]
 
 
 func _move_player(ix: int, iy: int) -> void:
@@ -1278,6 +1302,8 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	e_shd[i] = 0
 	e_uid[i] = uid_next
 	uid_next += 1
+	if type == Defs.LEVIATHAN:
+		_levi_init(i)
 	return i
 
 
@@ -1400,6 +1426,10 @@ func _update_enemies() -> void:
 				var v5 := _seraph(i, dx, dy, d)
 				vx = ux * sp * v5
 				vy = uy * sp * v5
+			Defs.LEVIATHAN:
+				var v6 := _leviathan(i, dx, dy)
+				vx = Trig.cos_i(e_ang[i]) * v6
+				vy = Trig.sin_i(e_ang[i]) * v6
 			Defs.WARDEN:
 				var v := _warden(i, dx, dy, d)
 				vx = ux * sp * v
@@ -1730,6 +1760,204 @@ func _eclipse(i: int, dx: float, dy: float, d: float) -> float:
 			_spawn_at_safe(Defs.MITE, px + Trig.cos_i(a) * 420.0, py + Trig.sin_i(a) * 420.0, false, 40)
 		events.append([EV_WAVE, "SWARM"])
 	return 1.0
+
+
+## The Leviathan: prowls after you, coils around you while its body fires
+## inward, then rears back and lunges. Sheds its tail as it weakens and
+## escapes if it lives too long. Returns its speed along e_ang.
+func _leviathan(i: int, dx: float, dy: float) -> float:
+	e_t[i] += 1
+	var t := e_t[i]
+	if t >= levi_escape_ticks():
+		e_state[i] = 9
+		e_hp[i] = 0.0
+		return 0.0
+	var frac := e_hp[i] / e_maxhp[i]
+	while e_k[i] < 3 and frac < 0.75 - 0.25 * float(e_k[i]):
+		e_k[i] += 1
+		_levi_shed()
+	var enraged := frac < 0.5
+	var sp := e_speed[i] * (1.12 if enraged else 1.0)
+	var c := t % 720
+	if c < 260:
+		# Prowl: slither past your flank so the body sweeps by, rather than ramming.
+		e_state[i] = 0
+		var d := sqrt(dx * dx + dy * dy) + 0.001
+		var side := 1.0 if (t / 720) % 2 == 0 else -1.0
+		var tx := dx - dy / d * 190.0 * side
+		var ty := dy + dx / d * 190.0 * side
+		var wig := int(Trig.sin_i(t * 9) * 60.0)
+		_levi_turn(i, Trig.angle_of(tx, ty) + wig, 7)
+		return sp * 0.9
+	if c < 470:
+		# Coil: circle you, tightening, while the body fires inwards.
+		if c == 260:
+			# Keep turning the way it already turns.
+			var cross := Trig.cos_i(e_ang[i]) * dy - Trig.sin_i(e_ang[i]) * dx
+			e_ax[i] = 1.0 if cross >= 0.0 else -1.0
+			events.append([EV_LEVI, e_x[i], e_y[i], 0, lv_n])
+		e_state[i] = 1
+		var k := float(c - 260) / 210.0
+		var rad := 420.0 - 210.0 * k
+		var ap := Trig.angle_of(-dx, -dy)
+		var lead := 110 if e_ax[i] > 0.0 else -110
+		var tx := px + Trig.cos_i(ap + lead) * rad
+		var ty := py + Trig.sin_i(ap + lead) * rad
+		_levi_turn(i, Trig.angle_of(tx - e_x[i], ty - e_y[i]), 16)
+		if c > 300 and c % (40 if enraged else 56) == 0:
+			for s in range(1, lv_n, 3):
+				_fire_orb(lv_x[s], lv_y[s], Trig.angle_of(px - lv_x[s], py - lv_y[s]), 150.0, 12.0)
+		return sp * 1.4
+	var lc := c - 470
+	var li := lc / 125
+	var lt := lc % 125
+	if li >= (2 if enraged else 1):
+		e_state[i] = 0
+		_levi_turn(i, Trig.angle_of(dx, dy), 7)
+		return sp
+	if lt < 30:
+		# Rear back and take aim.
+		e_state[i] = 2
+		_levi_turn(i, Trig.angle_of(dx, dy), 22)
+		return 0.0
+	if lt == 30:
+		e_state[i] = 3
+		events.append([EV_TELEGRAPH, e_x[i], e_y[i], e_ang[i], LEVI_LUNGE * float(LEVI_LUNGE_T) / 60.0])
+		events.append([EV_LEVI, e_x[i], e_y[i], 1, lv_n])
+	if lt < 62:
+		return 0.0
+	if lt < 62 + LEVI_LUNGE_T:
+		if lt == 62:
+			events.append([EV_LEVI, e_x[i], e_y[i], 2, lv_n])
+		e_state[i] = 4
+		return LEVI_LUNGE
+	e_state[i] = 0
+	return sp * 0.6
+
+
+## Ticks before a Leviathan escapes (half a boss's overload time).
+func levi_escape_ticks() -> int:
+	return overload_ticks / 2
+
+
+func _levi_turn(i: int, want: int, rate: int) -> void:
+	var diff := posmod(want - e_ang[i] + Trig.HALF, Trig.STEPS) - Trig.HALF
+	e_ang[i] = (e_ang[i] + clampi(diff, -rate, rate)) & Trig.MASK
+
+
+## Radius of body segment k: thick at the neck, thin at the tail.
+static func levi_seg_r(k: int) -> float:
+	return 30.0 - 15.0 * float(k) / float(Defs.LEVI_SEGS - 1)
+
+
+## A new Leviathan uncoils away from you.
+func _levi_init(i: int) -> void:
+	lv_uid = e_uid[i]
+	lv_n = Defs.LEVI_SEGS
+	lv_pop = 0
+	_levi_hit = false
+	e_t[i] = 0
+	var a := Trig.angle_of(e_x[i] - px, e_y[i] - py)
+	for k in lv_n:
+		lv_x[k] = e_x[i] + Trig.cos_i(a) * Defs.LEVI_GAP * float(k + 1)
+		lv_y[k] = e_y[i] + Trig.sin_i(a) * Defs.LEVI_GAP * float(k + 1)
+		lv_ox[k] = lv_x[k]
+		lv_oy[k] = lv_y[k]
+
+
+func _levi_head() -> int:
+	if lv_uid == 0:
+		return -1
+	for i in en:
+		if e_type[i] == Defs.LEVIATHAN and e_uid[i] == lv_uid:
+			return i
+	return -1
+
+
+## The tail breaks off: each segment bursts into orbs and a mite.
+func _levi_shed() -> void:
+	var n := mini(Defs.LEVI_SHED, lv_n - 2)
+	for s in n:
+		lv_n -= 1
+		var x := lv_x[lv_n]
+		var y := lv_y[lv_n]
+		events.append([EV_LEVI, x, y, 3, lv_n])
+		for m in 6:
+			_fire_orb(x, y, m * Trig.STEPS / 6 + s * 40, 140.0, 12.0)
+		_spawn_at_safe(Defs.MITE, x, y, false, 10)
+
+
+## A hit from the Leviathan; remembers whether it really landed.
+func _levi_strike(dmg: float) -> void:
+	var h0 := hp
+	var r0 := revives
+	_hurt(dmg)
+	if hp != h0 or revives != r0:
+		_levi_hit = true
+
+
+## The body follows the head like a chain, burns you and shoves the swarm
+## aside. Runs after the grid is built. After the head falls, the body bursts.
+func _levi_body() -> void:
+	if lv_n <= 0:
+		return
+	var h := _levi_head()
+	if h < 0:
+		if lv_pop > 0 and tick % 3 == 0:
+			var k := lv_n - lv_pop
+			lv_pop -= 1
+			events.append([EV_LEVI, lv_x[k], lv_y[k], 5, k])
+			_blasts.append([lv_x[k], lv_y[k], 90.0, 20.0 * _od_scale()])
+			_drop_gem(lv_x[k], lv_y[k], 2.0)
+			if lv_pop <= 0:
+				lv_n = 0
+				lv_uid = 0
+		return
+	if freeze > 0 or e_spawn[h] > 0:
+		return
+	var fx := e_x[h]
+	var fy := e_y[h]
+	for k in lv_n:
+		var dx := lv_x[k] - fx
+		var dy := lv_y[k] - fy
+		var d := sqrt(dx * dx + dy * dy)
+		if d > 0.001:
+			lv_x[k] = fx + dx / d * Defs.LEVI_GAP
+			lv_y[k] = fy + dy / d * Defs.LEVI_GAP
+		fx = lv_x[k]
+		fy = lv_y[k]
+	if iframes <= 0 and shield <= 0 and state == RUNNING:
+		for k in lv_n:
+			var rr := levi_seg_r(k) + PLAYER_R * 0.7
+			var dx := px - lv_x[k]
+			var dy := py - lv_y[k]
+			if dx * dx + dy * dy < rr * rr:
+				_levi_strike(e_dmg[h] * 0.7)
+				break
+	if tick % 2 == 0:
+		for k in range(0, lv_n, 2):
+			var r := levi_seg_r(k)
+			_query(lv_x[k], lv_y[k], r)
+			for q in _qn:
+				var j := _qbuf[q]
+				if e_r[j] > BOSS_R or e_spawn[j] > 0:
+					continue
+				var dx := e_x[j] - lv_x[k]
+				var dy := e_y[j] - lv_y[k]
+				var rr := e_r[j] + r
+				var d2 := dx * dx + dy * dy
+				if d2 < rr * rr and d2 > 0.0001:
+					var d := sqrt(d2)
+					e_x[j] += dx / d * (rr - d) * 0.6
+					e_y[j] += dy / d * (rr - d) * 0.6
+
+
+## The Leviathan's lunge while it is marked: [x, y, angle, length], or [].
+func levi_lunge() -> Array:
+	var h := _levi_head()
+	if h < 0 or e_state[h] != 3:
+		return []
+	return [e_x[h], e_y[h], e_ang[h], LEVI_LUNGE * float(LEVI_LUNGE_T) / 60.0]
 
 
 func _fire_orb(x: float, y: float, a: int, speed: float, dmg: float) -> void:
@@ -2914,7 +3142,10 @@ func _contact() -> void:
 		var dy := e_y[i] - py
 		var rr := e_r[i] + PLAYER_R * 0.8
 		if dx * dx + dy * dy < rr * rr:
-			_hurt(e_dmg[i])
+			if e_type[i] == Defs.LEVIATHAN:
+				_levi_strike(e_dmg[i] * (1.5 if e_state[i] == 4 else 1.0))
+			else:
+				_hurt(e_dmg[i])
 			return
 
 
@@ -3017,6 +3248,12 @@ func _on_death(i: int) -> void:
 	if e_state[i] == 9 and type == Defs.BOMBER:
 		events.append([EV_KILL, x, y, type, false, e_r[i]])
 		return
+	if e_state[i] == 9 and type == Defs.LEVIATHAN:
+		# It escaped into the dark, and took its prize with it.
+		events.append([EV_LEVI, x, y, 4, lv_n])
+		lv_n = 0
+		lv_uid = 0
+		return
 	kills += 1
 	if elite:
 		elite_kills += 1
@@ -3082,6 +3319,26 @@ func _on_death(i: int) -> void:
 			for k in 14:
 				var a4 := k * Trig.STEPS / 14
 				_drop_gem(x + Trig.cos_i(a4) * 100.0, y + Trig.sin_i(a4) * 100.0, 12.0)
+		Defs.LEVIATHAN:
+			bosses_killed += 1
+			levi_down = true
+			if not _levi_hit:
+				levi_clean = true
+			events.append([EV_BOSS_DOWN, type, x, y])
+			# The body bursts segment by segment, from the neck to the tail.
+			lv_pop = lv_n
+			if endless:
+				_drop_pickup("bigchest", x, y)
+				_drop_pickup("heart", x - 70.0, y)
+			else:
+				_drop_pickup("chest", x, y)
+				if not relic_given:
+					relic_given = true
+					pickups[pickups.size() - 1].relic = true
+				_drop_pickup("core", x + 70.0, y)
+			for k in 10:
+				var a5 := k * Trig.STEPS / 10
+				_drop_gem(x + Trig.cos_i(a5) * 90.0, y + Trig.sin_i(a5) * 90.0, 8.0)
 		Defs.ECLIPSE:
 			bosses_killed += 1
 			events.append([EV_BOSS_DOWN, type, x, y])
@@ -3098,8 +3355,9 @@ func _on_death(i: int) -> void:
 				events.append([EV_WIN])
 	if elite:
 		_drop_pickup("chest", x, y)
-		# The first elite of a run guards a relic.
-		if elite_kills == 1:
+		# The first elite of a run guards a relic (unless the Leviathan's cache already did).
+		if not relic_given:
+			relic_given = true
 			pickups[pickups.size() - 1].relic = true
 	elif type < Defs.WARDEN:
 		var roll := rng.unit()

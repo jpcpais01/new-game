@@ -2,10 +2,11 @@
 
 **Survive the swarm. Become the light.** A neon arena survivor for Android:
 drag to steer a ship of light, your weapons fire on their own, every level-up
-offers three upgrade cards, and three bosses (the Warden, the Seraph and the
-Eclipse) stand between you and the dawn at 8:00. Kill without getting hit to
+offers three upgrade cards, and four bosses (the Leviathan, a serpent of light
+that coils around you, then the Warden, the Seraph and the Eclipse) stand
+between you and the dawn at 8:00. Kill without getting hit to
 build a Chain that multiplies your score. Elites and bosses drop Prism Caches: max a weapon, carry its catalyst
-system, and a cache evolves it into one of nine evolved forms. The first elite and every boss also guard a
+system, and a cache evolves it into one of nine evolved forms. Every boss also guards a
 relic: pick one of three rule-bending powers that last the whole run. Pick one of eight
 ships in the Hangar, each with its own starting weapon, quirk and an
 Overdrive you charge with kills and unleash with a tap. Missions unlock new
@@ -18,8 +19,9 @@ Radiance unlocks: ten ascension levels, each adding a rule and raising the
 score, and every ship remembers the highest Radiance it has cleared. Any
 level-up card can be banished from the run. About once a minute a rift opens
 somewhere in the arena: light a Beacon, catch a fleeing Prism Wisp, weather a
-Starfall of meteors or win an Umbral Trial for an Umbral relic, power at a price. Built with
-Godot 4.7 (GDScript, Mobile renderer).
+Starfall of meteors or win an Umbral Trial for an Umbral relic, power at a price. Every ship streams a
+light trail that grows from an ember to a prismatic ribbon as you master it.
+Built with Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
 [Releases](../../releases/latest). Every merge to `main` builds, signs and
@@ -34,7 +36,7 @@ publishes a new release automatically.
 | `src/ui/` | Screens: title (live autopilot demo behind it), game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex, Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |
 | `assets/` | Generated sprites/icons/audio (see `tools/`) and fonts (Orbitron, Rajdhani; OFL). |
-| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `shots.tscn` (screenshots). |
+| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `levi_probe.gd` (how the bot fares against the Leviathan), `shots.tscn` (screenshots). |
 
 ```sh
 godot --headless --path . --import

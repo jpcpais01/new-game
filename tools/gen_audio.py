@@ -673,6 +673,44 @@ def sfx_ricochet():
     write_wav("starfall", x, 0.8)
 
 
+def sfx_leviathan():
+    """The Leviathan: its roar, the lunge, a shed scale, a hiss as it coils (own RNG)."""
+    global rng
+    rng = np.random.default_rng(293)
+    # Roar: a growling, detuned saw cluster sliding down over a sub swell, with breath noise.
+    n = int(2.0 * SR)
+    tt = np.arange(n) / SR
+    growl = 1 + 0.25 * np.sin(2 * np.pi * 31 * tt) * env(n, 0.3, 1.2)
+    x = np.zeros(n)
+    for f0, f1, a in [(196, 92, 0.22), (147, 69, 0.22), (233, 104, 0.14)]:
+        ph = sweep_phase(f0, f1, n, 0.7) * growl
+        x += lowpass(saw_from_phase(ph, 14), 2600) * env(n, 0.12, 0.9, 0.35, 0.8, 0.15) * a
+    x += np.sin(sweep_phase(70, 34, n, 0.5)) * env(n, 0.3, 0.9, 0.3, 0.7) * 0.6
+    x += lowpass(highpass(noise(n), 500), 3200) * env(n, 0.2, 1.0, 0.2, 0.6) * 0.3
+    write_wav("levi_roar", x, 0.9)
+    # Lunge: a heavy rushing whoosh with a low thump at the start.
+    n = int(0.6 * SR)
+    x = lowpass(highpass(noise(n), 220), 1800) * env(n, 0.04, 0.0, 1.0, 0.5, 0.06) * 0.9
+    x += np.sin(sweep_phase(90, 40, n, 0.5)) * expdecay(n, 8) * 0.7
+    x += np.sin(sweep_phase(420, 160, n, 0.6)) * env(n, 0.03, 0.4) * 0.2
+    write_wav("lunge", x, 0.85)
+    # Shed: a glassy crack and a scatter of shards.
+    n = int(0.55 * SR)
+    tt = np.arange(n) / SR
+    x = highpass(noise(n), 2200) * expdecay(n, 28) * 0.8
+    for f, a in [(1760, 0.3), (2490, 0.22), (3320, 0.16)]:
+        x += np.sin(2 * np.pi * f * tt) * expdecay(n, 14) * a
+    x += np.sin(sweep_phase(160, 60, n, 0.5)) * expdecay(n, 10) * 0.5
+    write_wav("shed", x, 0.8)
+    # Coil: a long rising hiss with a rattle.
+    n = int(1.1 * SR)
+    tt = np.arange(n) / SR
+    rattle = 0.5 + 0.5 * np.sign(np.sin(2 * np.pi * 22 * tt))
+    x = highpass(noise(n), 3800) * env(n, 0.25, 0.0, 1.0, 0.45, 0.4) * (0.55 + 0.45 * rattle) * 0.7
+    x += np.sin(sweep_phase(300, 520, n, 1.2)) * env(n, 0.3, 0.7) * 0.1
+    write_wav("coil", x, 0.6)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -699,6 +737,10 @@ if __name__ == "__main__":
         sfx_ricochet()
         print("ricochet audio ok")
         sys.exit(0)
+    if "--leviathan" in sys.argv:
+        sfx_leviathan()
+        print("leviathan audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -712,4 +754,5 @@ if __name__ == "__main__":
     sfx_radiance()
     sfx_rifts()
     sfx_ricochet()
+    sfx_leviathan()
     print("audio ok")

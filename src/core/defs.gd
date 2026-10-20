@@ -4,7 +4,7 @@ extends RefCounted
 ## the Forge (permanent upgrades). Pure data, shared by the sim and the views.
 
 enum { DRIFTER, DART, SPLITTER, MITE, WEAVER, BRUTE, SPITTER, BOMBER, PHANTOM, SENTINEL, BASTION,
-		WARDEN, ECLIPSE, SERAPH }
+		WARDEN, ECLIPSE, SERAPH, LEVIATHAN }
 
 ## hp, speed (px/s), r (px), dmg (contact), xp, kb (knockback taken 0..1)
 const ENEMY := [
@@ -22,13 +22,14 @@ const ENEMY := [
 	{"name": "warden", "hp": 1700.0, "speed": 70.0, "r": 74.0, "dmg": 24.0, "xp": 60, "kb": 0.0},
 	{"name": "eclipse", "hp": 8500.0, "speed": 48.0, "r": 92.0, "dmg": 30.0, "xp": 0, "kb": 0.0},
 	{"name": "seraph", "hp": 6000.0, "speed": 60.0, "r": 82.0, "dmg": 26.0, "xp": 0, "kb": 0.0},
+	{"name": "leviathan", "hp": 2100.0, "speed": 265.0, "r": 54.0, "dmg": 18.0, "xp": 0, "kb": 0.0},
 ]
 
 const ENEMY_COLOR := [
 	Color(1.0, 0.3, 0.65), Color(1.0, 0.84, 0.22), Color(0.35, 1.0, 0.45), Color(0.72, 1.0, 0.3),
 	Color(0.6, 0.48, 1.0), Color(1.0, 0.55, 0.18), Color(0.88, 0.35, 1.0), Color(1.0, 0.24, 0.24),
 	Color(0.55, 0.95, 1.0), Color(1.0, 0.42, 0.2), Color(0.35, 0.6, 1.0),
-	Color(1.0, 0.8, 0.35), Color(1.0, 0.3, 0.88), Color(0.4, 1.0, 0.85),
+	Color(1.0, 0.8, 0.35), Color(1.0, 0.3, 0.88), Color(0.4, 1.0, 0.85), Color(0.52, 0.46, 1.0),
 ]
 
 ## Weapons: one spec per level (index 0 = level 1). cd in ticks (60/s).
@@ -198,8 +199,8 @@ const EXTRAS := {
 	"flux": {"name": "Flux Cache", "color": Color(1.0, 0.5, 1.0), "text": "+25 Flux for the Forge."},
 }
 
-## Relics: one of three is offered when you open the first elite's Prism Cache
-## and every boss's.
+## Relics: one of three is offered when you open every boss's Prism Cache (the
+## Leviathan's, or the first elite's if it escaped).
 ## Each bends the rules for the rest of the run. Applied inside Sim.
 const RELICS := {
 	"halo": {"name": "Guardian Halo", "color": Color(1.0, 0.92, 0.55),
@@ -411,6 +412,26 @@ const SHIPS := [
 		"stats": {"hp": -10.0}},
 ]
 
+## Light trails: every ship streams one, and it grows with the ship's mastery
+## (the highest Radiance it has carried to the dawn, -1 before its first).
+## [mastery needed, name, how to earn it]
+const TRAILS := [
+	[-1, "Ember", "A thin stream of light."],
+	[0, "Comet", "Reach the dawn with this ship."],
+	[3, "Starwake", "Reach the dawn at Radiance 3 with this ship."],
+	[6, "Helix", "Reach the dawn at Radiance 6 with this ship."],
+	[10, "Prism", "Reach the dawn at Radiance 10 with this ship."],
+]
+
+
+static func trail_tier(mastery: int) -> int:
+	var tier := 0
+	for k in TRAILS.size():
+		if mastery >= int(TRAILS[k][0]):
+			tier = k
+	return tier
+
+
 ## Overdrive: kills charge the meter; each use makes the next one costlier.
 const OD_BASE := 140.0
 const OD_GROWTH := 0.3
@@ -465,7 +486,7 @@ const MISSIONS := [
 		"flux": 250},
 	{"id": "afterdark", "name": "Into the Afterdark", "text": "Survive 3:00 past the dawn.", "kind": "afterdark",
 		"goal": 180, "flux": 300},
-	{"id": "nightmare", "name": "Nightmare", "text": "Defeat 5 bosses in one run.", "kind": "bosses", "goal": 5,
+	{"id": "nightmare", "name": "Nightmare", "text": "Defeat 6 bosses in one run.", "kind": "bosses", "goal": 6,
 		"flux": 400},
 	{"id": "seraphfall", "name": "Seraphfall", "text": "Defeat the Seraph.", "kind": "seraph", "goal": 1,
 		"flux": 180},
@@ -487,6 +508,10 @@ const MISSIONS := [
 		"goal": 1, "flux": 150},
 	{"id": "ricochet", "name": "Ricochet", "text": "Land 40 ricochets with one throw of a glaive.",
 		"kind": "ricochet", "goal": 40, "flux": 250},
+	{"id": "serpentfall", "name": "Serpentfall", "text": "Defeat the Leviathan.", "kind": "leviathan", "goal": 1,
+		"flux": 120},
+	{"id": "charmer", "name": "Snake Charmer", "text": "Defeat the Leviathan without it ever touching you.",
+		"kind": "charmer", "goal": 1, "flux": 300},
 	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
 		"flux": 300},
 	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,
@@ -520,7 +545,7 @@ const MUTATORS := {
 	"bloodlight": {"name": "Bloodlight", "boon": false, "score": 0.2, "color": Color(0.9, 0.15, 0.3),
 		"text": "Hearts never drop and Renewal is gone. Every kill restores 0.25 HP."},
 	"dusk": {"name": "Short Night", "boon": false, "score": 0.35, "color": Color(0.75, 0.45, 1.0),
-		"text": "The night runs a quarter faster: the bosses arrive at 3:00, 4:30 and 6:00."},
+		"text": "The night runs a quarter faster: the bosses arrive at 1:30, 3:00, 4:30 and 6:00."},
 }
 const BOONS := ["volatile", "lucky", "overcharged", "gravity", "gilded"]
 const BANES := ["glass", "horde", "frenzy", "giants", "bloodlight", "dusk"]
@@ -528,10 +553,16 @@ const BANES := ["glass", "horde", "frenzy", "giants", "bloodlight", "dusk"]
 ## Afterdark: after the dawn you may fly on. Bosses return stronger.
 const NIGHT_BOSS_EVERY := 90
 const NIGHT_BOSS_GROWTH := 0.75
-const NIGHT_BOSSES := [WARDEN, SERAPH, ECLIPSE]
+const NIGHT_BOSSES := [WARDEN, LEVIATHAN, SERAPH, ECLIPSE]
 ## Each night the swarm also grows denser and tougher.
 const NIGHT_SWARM := 0.22
 const NIGHT_TOUGH := 0.18
+
+## The Leviathan: a serpent of light whose body trails its head. Only the
+## head can be hurt; the body burns. It escapes if it lives too long.
+const LEVI_SEGS := 26
+const LEVI_GAP := 38.0
+const LEVI_SHED := 4           # segments it sheds at 75%, 50% and 25% HP
 
 ## Chain: kills within CHAIN_TICKS of each other build it; taking damage
 ## breaks it. Every CHAIN_STEP kills add CHAIN_BONUS to each kill's score.

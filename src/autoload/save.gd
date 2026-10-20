@@ -248,6 +248,8 @@ func record_run(sim: Sim) -> Dictionary:
 	rec.dawn = bool(rec.get("dawn", false)) or sim.dawn
 	rec.radiance = maxi(ship_rad, sim.radiance) if sim.dawn else ship_rad
 	sb[sim.ship_id] = rec
+	if Defs.trail_tier(int(rec.radiance)) > Defs.trail_tier(ship_rad):
+		beat.trail = Defs.trail_tier(int(rec.radiance))
 	# Radiance: every dawn at your highest level unlocks the next one.
 	if sim.dawn and sim.radiance > int(data.radiance_cleared):
 		var old_max := radiance_max()

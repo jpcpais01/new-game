@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 07:00 UTC
+
+- **A new boss: the Leviathan.** At 2:00 a serpent of living light slithers out of the dark, a head trailed by twenty-six burning scales. Only its head can be hurt, and its body burns whatever it touches. It hunts where you are going, coils around you while its scales fire inward (slip out through the gap before the ring closes), then rears back, flashes white and lunges along a warning line. Wounded, it sheds its tail in a burst of shards at 75%, 50% and 25%. Kill it and its body bursts scale by scale into light and gems, leaving your first relic cache and a core. Take longer than a minute and it escapes with its prize.
+- **A deeper Afterdark.** The Leviathan joins the night bosses, so the nights now rotate through the Warden, the Leviathan, the Seraph and the Eclipse.
+- **Light trails.** Every ship now streams a ribbon of light, and it grows as you master the ship: an Ember at first, a Comet once that ship reaches the dawn, a Starwake that sheds stars at Radiance 3, a braided Helix at Radiance 6 and a Prism of every colour at Radiance 10. The Hangar shows each ship's trail and what earns the next one.
+- **Two new missions.** Serpentfall (defeat the Leviathan) and Snake Charmer (defeat it without ever being touched). Nightmare now asks for six bosses in one run, and the Short Night mutator brings the Leviathan in at 1:30.
+- **Boss entrances.** Every boss now arrives with a title card: the screen letterboxes, time slows, and its name and epithet burn in, from the Leviathan, Serpent of the Deep Dark, to the Eclipse, the Last Dark Before Dawn. The Leviathan brings its own roar, coiling hiss, lunge and shattering scales, and a Codex entry.
+
 ## Oct 20, 2026 · 03:00 UTC
 
 - **New weapon: the Ricochet Glaive.** Throw a spinning glaive that leaps from enemy to enemy with a bright ricochet, then flies home through everything in its way. It is thrown again only once it is back in your hand, so fighting close to the swarm means faster throws. Levels add ricochets and more glaives, up to three at once.

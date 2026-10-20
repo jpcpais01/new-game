@@ -62,6 +62,11 @@ var _slash_spin := 1.0
 var warp := 0.0
 var _aberr := 0.0
 var _zoom := 0.0
+## The ship's light trail: recent positions [Vector2], their times, and the
+## style its mastery has earned (Defs.TRAILS).
+var trail_pts := PackedVector2Array()
+var _trail_t := PackedFloat32Array()
+var trail_tier := 0
 
 
 func _ready() -> void:
@@ -87,6 +92,9 @@ func start(new_sim: Sim, is_demo: bool) -> void:
 	paused = false
 	burst_request = false
 	ship_color = Defs.ship(sim.ship_id).color
+	trail_tier = Defs.trail_tier(Save.ship_radiance(sim.ship_id))
+	trail_pts.clear()
+	_trail_t.clear()
 	_acc = 0.0
 	_slow = 1.0
 	_hitstop = 0.0
@@ -251,6 +259,7 @@ func _update_view(delta: float) -> void:
 					1.1, Color(0.9, 0.5, 1.8), 0, 4.0)
 	if not paused and sim.state == Sim.RUNNING:
 		_rift_particles(p)
+	_update_trail(p)
 	# Camera: follow with a little look-ahead, plus trauma shake.
 	var look := mv * 70.0
 	_cam_pos = _cam_pos.lerp(p + look, clampf(delta * 6.0, 0.0, 1.0))
@@ -282,6 +291,29 @@ func _update_view(delta: float) -> void:
 		Sfx.set_intensity(clampf(float(sim.en) / 160.0 + (0.6 if sim.boss_index() >= 0 else 0.0), 0.0, 1.0))
 	fx.update_fx(delta * (_slow if _hitstop <= 0.0 else 0.15))
 	_update_bg(delta, p)
+
+
+## Samples the ship's path for its light trail; Starwake and Prism shed stars.
+func _update_trail(p: Vector2) -> void:
+	if sim.state == Sim.DEAD:
+		trail_pts.clear()
+		_trail_t.clear()
+		return
+	var n := trail_pts.size()
+	if n == 0 or trail_pts[n - 1].distance_squared_to(p) > 9.0:
+		trail_pts.append(p)
+		_trail_t.append(vtime)
+	elif n > 0:
+		trail_pts[n - 1] = p
+	var life := 0.35 if trail_tier == 0 else 0.6
+	while _trail_t.size() > 0 and vtime - _trail_t[0] > life:
+		trail_pts.remove_at(0)
+		_trail_t.remove_at(0)
+	if trail_tier >= 2 and not paused and trail_pts.size() > 4 and randf() < 0.5:
+		var q := trail_pts[randi() % (trail_pts.size() - 2)]
+		var sc := ship_color if trail_tier < 4 else Color.from_hsv(randf(), 0.5, 1.0)
+		fx.particle(q.x + randf_range(-8, 8), q.y + randf_range(-8, 8), randf_range(-30, 30), randf_range(-30, 30),
+				0.5, 0.7, sc * 1.8, 0, 2.5)
 
 
 ## The impact pass costs a full-screen read, so it only runs while a hit or an
@@ -449,12 +481,17 @@ func handle_events() -> void:
 			Sim.EV_BOSS:
 				if loud:
 					coach.emit("boss")
-				banner.emit("NIGHT %d" % sim.night if sim.endless else "WARNING", UiKit.RED)
 				boss_started.emit(e[1])
 				shake(0.4)
 				if loud:
+					slowmo(0.45, 0.8)
+					_zoom = maxf(_zoom, 0.35)
+				if loud:
 					Sfx.play("alarm")
 					Sfx.buzz(120)
+					if e[1] == Defs.LEVIATHAN:
+						coach.emit("leviathan")
+						Sfx.play("levi_roar")
 			Sim.EV_BOSS_DOWN:
 				var col: Color = Defs.ENEMY_COLOR[e[1]]
 				for k in 3:
@@ -641,11 +678,64 @@ func handle_events() -> void:
 					Sfx.play("ricochet", randf_range(0.9, 1.25))
 			Sim.EV_METEOR:
 				_on_meteor(e, loud)
+			Sim.EV_LEVI:
+				_on_levi(e, loud)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
 					fx.spray(e[1], e[2], ship_color * 1.6, 6, randf() * TAU, TAU, 420.0, 0.8, 0.25)
 	sim.events.clear()
+
+
+## The Leviathan: coils, rears, lunges, sheds its tail, escapes, and after it
+## falls, bursts segment by segment.
+func _on_levi(e: Array, loud: bool) -> void:
+	var x: float = e[1]
+	var y: float = e[2]
+	var col: Color = Defs.ENEMY_COLOR[Defs.LEVIATHAN]
+	match int(e[3]):
+		0:
+			fx.ring(x, y, 20.0, 260.0, 0.45, col, 1.4)
+			shake(0.15)
+			if loud:
+				Sfx.play("coil")
+		1:
+			fx.flash(x, y, 200.0, 0.3, Color(1.0, 0.85, 1.0))
+			fx.ring(x, y, 120.0, 30.0, 0.35, Color(1.0, 0.8, 1.0), 1.2)
+		2:
+			fx.burst(x, y, col * 1.8, 30, 700.0, 1.2, 0.5)
+			add_wave(x, y, 1.4, 1100.0)
+			shake(0.3)
+			if loud:
+				Sfx.play("lunge")
+				Sfx.buzz(40)
+		3:
+			var tail := Color(1.0, 0.36, 0.78)
+			fx.flash(x, y, 160.0, 0.3, tail)
+			fx.ring(x, y, 10.0, 140.0, 0.35, tail, 1.3)
+			fx.burst(x, y, tail * 1.8, 22, 600.0, 1.1, 0.5)
+			shake(0.15)
+			if loud:
+				Sfx.play("shed", randf_range(0.9, 1.15))
+		4:
+			# Escaped: the whole body sinks into the dark in a trail of sparks.
+			var n: int = e[4]
+			for k in n:
+				fx.burst(sim.lv_x[k], sim.lv_y[k], col * 1.4, 6, 300.0, 0.8, 0.6)
+			fx.ring(x, y, 20.0, 400.0, 0.6, col, 1.4)
+			if loud:
+				banner.emit("THE LEVIATHAN ESCAPED", col)
+				Sfx.play("levi_roar", 1.25)
+		5:
+			var k5: int = e[4]
+			var f := float(k5) / float(Defs.LEVI_SEGS - 1)
+			var c5 := col.lerp(Color(1.0, 0.36, 0.78), f)
+			fx.flash(x, y, 150.0, 0.25, c5)
+			fx.burst(x, y, c5 * 2.0, 14, 520.0, 1.1, 0.45)
+			fx.ring(x, y, 10.0, 110.0, 0.3, c5, 1.2)
+			shake(0.06)
+			if loud:
+				Sfx.play("boom", 0.8 + 0.6 * f)
 
 
 ## Rifts: opened, taken on, completed or closed.

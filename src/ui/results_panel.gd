@@ -47,6 +47,7 @@ func build() -> void:
 	body.add_child(cc)
 	_score_box()
 	_radiance()
+	_trail()
 	_evolutions()
 	_missions()
 	var flux_box := PanelContainer.new()
@@ -80,6 +81,17 @@ func build() -> void:
 	h.pressed.connect(func(): home.emit())
 	row.add_child(h)
 	body.add_child(row)
+
+
+## A brighter light trail earned for this ship.
+func _trail() -> void:
+	if not beat.has("trail"):
+		return
+	var tier := int(beat.trail)
+	var col: Color = Defs.ship(sim.ship_id).color
+	var l := UiKit.glow_label("NEW LIGHT TRAIL  ·  %s" % String(Defs.TRAILS[tier][1]).to_upper(), 32, col)
+	body.add_child(l)
+	UiKit.pop_in(l, 0.75, 20)
 
 
 ## Radiance cleared, and the next level unlocked.

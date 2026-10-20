@@ -124,6 +124,7 @@ func _show(i: int, dir: int) -> void:
 	var unlocked := Save.ship_unlocked(sd.id)
 	var col: Color = sd.color
 	_preview.show_ship(sd.id, unlocked, dir)
+	_preview.tier = Defs.trail_tier(Save.ship_radiance(sd.id))
 	if dir != 0:
 		Sfx.play("card", 1.0 + 0.04 * _index)
 	_name.text = String(sd.name).to_upper() if unlocked else "LOCKED"
@@ -158,6 +159,7 @@ func _show(i: int, dir: int) -> void:
 				line += "   ·   DAWN ✓"
 			_info.add_child(UiKit.label(line, 28, UiKit.GOLD if bool(rec.get("dawn", false)) else UiKit.DIM,
 					UiKit.display_light()))
+		_info.add_child(_trail_line(sd.id, col))
 		var w: String = sd.weapon
 		_info.add_child(_section("STARTS WITH", w, String(Defs.WEAPONS[w].name),
 				String(Defs.WEAPONS[w].blurb), Defs.WEAPONS[w].color))
@@ -174,6 +176,18 @@ func _show(i: int, dir: int) -> void:
 		_launch.disabled = true
 		_launch.text = "LOCKED"
 	UiKit.pop_in(_info, 0.0, 16)
+
+
+## The light trail this ship has earned, and how to earn the next one.
+func _trail_line(id: String, col: Color) -> Control:
+	var tier := Defs.trail_tier(Save.ship_radiance(id))
+	var text := "LIGHT TRAIL  ·  %s" % String(Defs.TRAILS[tier][1]).to_upper()
+	if tier + 1 < Defs.TRAILS.size():
+		text += "      NEXT: %s, %s" % [String(Defs.TRAILS[tier + 1][1]).to_upper(),
+				String(Defs.TRAILS[tier + 1][2]).trim_suffix(" with this ship.").to_lower()]
+	var l := UiKit.label(text, 26, col.lerp(Color.WHITE, 0.35), UiKit.display_light())
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return l
 
 
 ## Radiance: pick how bright the night burns. Locked until the first dawn.
@@ -320,6 +334,7 @@ func on_back() -> void:
 class ShipPreview extends Control:
 	var id := "lumen"
 	var unlocked := true
+	var tier := 0
 	var _t := 0.0
 	var _slide := 0.0
 
@@ -352,6 +367,14 @@ class ShipPreview extends Control:
 					5.0 - k, true)
 		draw_set_transform(c, _t * 0.4, Vector2(2.2, 2.2))
 		draw_texture(ring, Vector2(-128, -128), Color(lc, 0.25 * a))
+		if unlocked:
+			# Its light trail streams down from the engines.
+			var pts := PackedVector2Array()
+			for k in 24:
+				var f := 1.0 - float(k) / 23.0
+				pts.append(c + Vector2(sin(_t * 2.2 + f * 5.0) * 22.0 * f, 90.0 + 290.0 * f))
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			TrailArt.draw(self, pts, Color(lc, a), tier, _t, 2.2, 2.0 * a)
 		var tilt := 1.0 - 0.12 * absf(sin(_t * 0.9))
 		draw_set_transform(c, -PI * 0.5 + sin(_t * 0.9) * 0.12, Vector2(1.25, 1.25 * tilt))
 		var mod := Color(1.5, 1.5, 1.5, a) if unlocked else Color(0.32, 0.3, 0.42, a)

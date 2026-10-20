@@ -20,6 +20,7 @@ const LORE := [
 	["The Warden", "Arrives at 4:00. Radial bursts and summoned drifters. Overloads if you stall."],
 	["Eclipse", "Arrives at 8:00. Spiral streams, dashes and swarms. Defeat it to reach the dawn."],
 	["The Seraph", "Arrives at 6:00. A turning wheel of lasers, aimed lances, and it blinks to your side in a ring of fire. Ride the gaps between its arms."],
+	["The Leviathan", "Arrives at 2:00. A serpent of light: only its head can be hurt, and its body burns. It coils around you as its scales fire inward, then rears back and lunges. Wounded, it sheds its tail. Kill it fast, or it escapes with its relic."],
 ]
 
 
@@ -63,7 +64,7 @@ func _ready() -> void:
 		grid.add_child(card)
 		UiKit.pop_in(card, 0.05 * k, 20)
 		k += 1
-	list.add_child(UiKit.label("RELICS  ·  FROM THE FIRST ELITE AND EVERY BOSS", 30, Color(0.78, 0.55, 1.0),
+	list.add_child(UiKit.label("RELICS  ·  FROM EVERY BOSS (OR THE FIRST ELITE)", 30, Color(0.78, 0.55, 1.0),
 			UiKit.display()))
 	for id in Defs.RELIC_ORDER:
 		list.add_child(_relic_row(id))
