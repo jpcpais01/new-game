@@ -40,6 +40,13 @@ var _tracks := {}   # run track id -> [base, drive] players ("" is the Neon Grid
 var _track := ""
 var _intensity := 0.0
 var _mode := ""
+var _bosses := {}   # boss id -> [theme, fury] players
+var _boss := ""     # the boss whose theme is playing ("" none)
+var _boss_base: AudioStreamPlayer
+var _boss_fury: AudioStreamPlayer
+var _fury := 0.0
+var _ducked := false
+var _fades := {}    # player -> its running fade
 
 
 func _ready() -> void:
@@ -128,11 +135,64 @@ func _track_players(id: String) -> Array:
 	return _tracks[id]
 
 
+## A boss theme's players (theme + fury layer), or [] if it has none.
+func _boss_players(id: String) -> Array:
+	if not _bosses.has(id):
+		if not ResourceLoader.exists("res://assets/audio/music_boss_%s.ogg" % id):
+			return []
+		_bosses[id] = [_music_player("music_boss_" + id), _music_player("music_fury_" + id)]
+	return _bosses[id]
+
+
+## The boss on the field ("" when none) and how wounded it is (fury 0..1: the
+## fury layer joins in as it nears 1). The run bed sinks under a boss theme and
+## swells back once the boss falls or escapes.
+func boss_theme(id: String, fury: float) -> void:
+	_fury = clampf(fury, 0.0, 1.0)
+	if id == _boss or _mode != "run":
+		return
+	if _boss != "":
+		_fade(_boss_base, -80.0, 1.4)
+		_fade(_boss_fury, -80.0, 1.0)
+	_boss = id
+	var pair := _boss_players(id) if id != "" else []
+	if pair.is_empty():
+		_boss = ""
+		_boss_base = null
+		_boss_fury = null
+		var old: Tween = _fades.get(_run)
+		if old != null and old.is_valid():
+			old.kill()
+		var tw := create_tween()
+		_fades[_run] = tw
+		tw.tween_interval(0.9)
+		tw.tween_property(_run, "volume_db", -14.0 if _ducked else -6.0, 1.6)
+		return
+	_boss_base = pair[0]
+	_boss_fury = pair[1]
+	_fade(_run, -60.0, 0.5)
+	_boss_base.play(0.0)
+	_boss_fury.play(0.0)
+	_boss_base.volume_db = -24.0
+	_fade(_boss_base, -12.0 if _ducked else -4.0, 0.35)
+	_boss_fury.volume_db = -80.0
+
+
+func _stop_boss() -> void:
+	if _boss_base != null:
+		_fade(_boss_base, -80.0, 0.8)
+		_fade(_boss_fury, -80.0, 0.8)
+	_boss = ""
+	_boss_base = null
+	_boss_fury = null
+
+
 ## "menu" or "run" (with the sector's track id). Crossfades between the music
 ## beds.
 func music(mode: String, track := "") -> void:
 	if mode == _mode and (mode != "run" or track == _track):
 		return
+	_stop_boss()
 	_mode = mode
 	if mode == "run":
 		_fade(_menu, -80.0, 0.8)
@@ -164,14 +224,23 @@ func set_intensity(v: float) -> void:
 
 
 func duck(on: bool) -> void:
-	var target := -14.0 if on else -6.0
-	if _mode == "run":
-		_fade(_run, target, 0.3)
+	_ducked = on
+	if _mode != "run":
+		return
+	if _boss_base != null:
+		_fade(_boss_base, -12.0 if on else -4.0, 0.3)
+	else:
+		_fade(_run, -14.0 if on else -6.0, 0.3)
 
 
 func _process(delta: float) -> void:
+	if _boss_fury != null and _boss_fury.playing:
+		var ft := lerpf(-40.0, -12.0 if _ducked else -4.0, _fury) if _fury > 0.0 else -80.0
+		_boss_fury.volume_db = lerpf(_boss_fury.volume_db, ft, clampf(delta * 2.0, 0.0, 1.0))
+		if absf(_boss_fury.get_playback_position() - _boss_base.get_playback_position()) > 0.08:
+			_boss_fury.seek(_boss_base.get_playback_position())
 	if _mode == "run" and _drive.playing:
-		var target := lerpf(-40.0, -5.0, sqrt(_intensity))
+		var target := lerpf(-40.0, -5.0, sqrt(_intensity)) if _boss == "" else -80.0
 		_drive.volume_db = lerpf(_drive.volume_db, target, clampf(delta * 1.5, 0.0, 1.0))
 		# Keep the layers locked together.
 		if absf(_drive.get_playback_position() - _run.get_playback_position()) > 0.08:
@@ -181,7 +250,13 @@ func _process(delta: float) -> void:
 func _fade(p: AudioStreamPlayer, db: float, t: float) -> void:
 	if p.stream == null:
 		return
+	# One fade per player: a newer fade replaces an older one (so a fade-out
+	# can't stop a theme that has just been brought back).
+	var old: Tween = _fades.get(p)
+	if old != null and old.is_valid():
+		old.kill()
 	var tw := create_tween()
+	_fades[p] = tw
 	tw.tween_property(p, "volume_db", db, t)
 	if db <= -79.0:
 		tw.tween_callback(p.stop)

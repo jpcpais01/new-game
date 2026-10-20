@@ -191,6 +191,8 @@ func _daily_button() -> Control:
 	if streak > 0:
 		sub += "  ·  STREAK %d" % streak
 	v.add_child(UiKit.label(sub, 24, UiKit.DIM, UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT))
+	if int(dd.sector) > 0:
+		h.add_child(UiKit.icon_rect("sector_" + String(Defs.sector(int(dd.sector)).id), 52))
 	for id in dd.mods:
 		h.add_child(UiKit.icon_rect("mod_" + String(id), 52))
 	h.add_child(UiKit.icon_rect("ship_" + String(dd.ship), 64))

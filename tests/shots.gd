@@ -63,6 +63,10 @@ func _ready() -> void:
 		await _shard_shots()
 		get_tree().quit()
 		return
+	if args.has("report"):
+		await _report_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -802,6 +806,64 @@ func _resonance_shots() -> void:
 		sc[0].scroll_vertical = 1900
 	await _wait(0.4)
 	await _shot("r7_codex_list")
+
+
+## The after-action report: a long autopiloted run, the results strip, the
+## full report (scrolled to the timeline and highlights) and the live one in pause.
+func _report_shots() -> void:
+	main.start_run()
+	await _wait(1.0)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	# No i-frames here: the hull line should show the hits.
+	while s.seconds() < 300.0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.step(m.x, m.y, Autopilot.burst(s))
+		s.events.clear()
+	s.state = Sim.RUNNING
+	s.hp = maxf(s.hp, 1.0)
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(1.0)
+	main.arena.demo = false
+	gs.open_pause()
+	await _wait(0.5)
+	var rp := ReportPanel.new()
+	rp.sim = s
+	rp.live = true
+	gs._pause.add_child(rp)
+	await _wait(2.2)
+	await _shot("x1_live_report")
+	rp.close()
+	gs._pause.close()
+	gs._resume()
+	await _wait(0.3)
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(2.0)
+	var sc: Array = gs.find_children("*", "ScrollContainer", true, false)
+	if not sc.is_empty():
+		sc[sc.size() - 1].scroll_vertical = 420
+	await _wait(0.6)
+	await _shot("x2_results")
+	var full := ReportPanel.new()
+	full.sim = s
+	gs.add_child(full)
+	await _wait(2.4)
+	await _shot("x3_report")
+	var sc2: Array = full.find_children("*", "ScrollContainer", true, false)
+	if not sc2.is_empty():
+		sc2[0].scroll_vertical = 1100
+	await _wait(1.8)
+	await _shot("x4_timeline")
+	if not sc2.is_empty():
+		sc2[0].scroll_vertical = 3000
+	await _wait(0.8)
+	await _shot("x5_highlights")
 
 
 func _wait(t: float) -> void:

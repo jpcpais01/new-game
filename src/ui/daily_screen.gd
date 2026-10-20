@@ -44,13 +44,16 @@ func _ready() -> void:
 	scroll.add_child(list)
 
 	list.add_child(_ship_card(sd))
+	if int(d.sector) > 0:
+		list.add_child(_sector_card(int(d.sector)))
 	var k := 0
 	for id in d.mods:
 		var row := _mod_row(String(id))
 		list.add_child(row)
 		UiKit.pop_in(row, 0.1 + 0.08 * k, 16)
 		k += 1
-	var same := UiKit.label("The same run for every pilot, no Forge upgrades. Score x%.2f." % Daily.multiplier(d.mods),
+	var same := UiKit.label("The same run for every pilot, no Forge upgrades. Score x%.2f." % (Daily.multiplier(d.mods)
+			* float(Defs.sector(int(d.sector)).score)),
 			28, UiKit.DIM, UiKit.body())
 	same.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	list.add_child(same)
@@ -122,6 +125,32 @@ func _ship_card(sd: Dictionary) -> Control:
 	l.custom_minimum_size = Vector2(620, 0)
 	v.add_child(l)
 	UiKit.pop_in(p, 0.0, 20)
+	return p
+
+
+## Today's sector (from Oct 21, 2026 the Daily Run rotates through them).
+func _sector_card(k: int) -> Control:
+	var sd := Defs.sector(k)
+	var col: Color = sd.color
+	var p := _panel(col)
+	var h := HBoxContainer.new()
+	h.add_theme_constant_override("separation", 18)
+	p.add_child(h)
+	h.add_child(UiKit.icon_rect("sector_" + String(sd.id), 92))
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 0)
+	h.add_child(v)
+	v.add_child(UiKit.label("TODAY'S SECTOR", 22, UiKit.DIM, UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT))
+	v.add_child(UiKit.label(String(sd.name).to_upper(), 40, col, UiKit.display(), HORIZONTAL_ALIGNMENT_LEFT))
+	var t := String(sd.text)
+	if not Save.sector_unlocked(k):
+		t = "Not unlocked yet: today you fly it anyway.  " + t
+	var l := UiKit.label(t, 26, Color(0.9, 0.9, 1.0, 0.85), UiKit.body(), HORIZONTAL_ALIGNMENT_LEFT)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(640, 0)
+	v.add_child(l)
+	UiKit.pop_in(p, 0.05, 18)
 	return p
 
 

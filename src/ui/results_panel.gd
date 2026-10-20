@@ -49,6 +49,7 @@ func build() -> void:
 	cc.add_child(grid)
 	body.add_child(cc)
 	_score_box()
+	_damage()
 	_sector()
 	_radiance()
 	_trail()
@@ -56,6 +57,30 @@ func build() -> void:
 	_missions()
 	_new_sectors()
 	_footer()
+
+
+## The three biggest damage dealers, and the way into the full report.
+func _damage() -> void:
+	var head := HBoxContainer.new()
+	head.add_child(UiKit.label("TOP DAMAGE", 26, UiKit.CYAN, UiKit.display(), HORIZONTAL_ALIGNMENT_LEFT))
+	var pad := Control.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(pad)
+	var more := UiKit.button("FULL REPORT  ›", UiKit.MAGENTA, 26)
+	for st in ["normal", "hover", "pressed", "hover_pressed"]:
+		var b := (more.get_theme_stylebox(st).duplicate() as StyleBoxFlat)
+		b.content_margin_top = 10
+		b.content_margin_bottom = 10
+		b.content_margin_left = 22
+		b.content_margin_right = 22
+		more.add_theme_stylebox_override(st, b)
+	more.pressed.connect(func():
+		var r := ReportPanel.new()
+		r.sim = sim
+		add_child(r))
+	head.add_child(more)
+	body.add_child(head)
+	body.add_child(RunReport.rows(sim, 3, 772.0, 0.5))
 
 
 ## Flux earned (counting up) and the buttons.
@@ -147,6 +172,7 @@ func _build_gauntlet() -> void:
 		tw2.tween_property(r, "modulate:a", 1.0, 0.5)
 	body.add_child(v)
 	UiKit.pop_in(v, 0.55, 20)
+	_damage()
 	_evolutions()
 	_missions()
 	_footer()
@@ -263,7 +289,7 @@ func _new_sectors() -> void:
 		h.add_child(UiKit.icon_rect("sector_" + String(sd.id), 90))
 		var v := VBoxContainer.new()
 		v.add_theme_constant_override("separation", 0)
-		v.add_child(UiKit.label("NEW SECTOR UNLOCKED  ·  PICK IT IN THE HANGAR", 24, Color(1, 1, 1, 0.75),
+		v.add_child(UiKit.label("NEW SECTOR  ·  PICK IT IN THE HANGAR", 20, Color(1, 1, 1, 0.75),
 				UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT))
 		v.add_child(UiKit.glow_label(String(sd.name).to_upper(), 50, col))
 		h.add_child(v)

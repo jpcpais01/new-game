@@ -124,9 +124,21 @@ func build() -> void:
 		resume.emit()
 		close())
 	body.add_child(res)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 24)
+	var rep := UiKit.button("REPORT", UiKit.CYAN, 38)
+	rep.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rep.pressed.connect(func():
+		var r := ReportPanel.new()
+		r.sim = sim
+		r.live = true
+		add_child(r))
+	row.add_child(rep)
 	var set := UiKit.button("SETTINGS", UiKit.MAGENTA, 38)
+	set.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	set.pressed.connect(func(): add_child(SettingsPanel.new()))
-	body.add_child(set)
+	row.add_child(set)
+	body.add_child(row)
 	var q := UiKit.button("ABANDON RUN", UiKit.RED, 34)
 	var armed := [false]
 	q.pressed.connect(func():
