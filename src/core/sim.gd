@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 7
+const RULES_VERSION := 8
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -75,6 +75,7 @@ const EV_RELIC := 36      # relic id (taken)
 const EV_HALO := 37       # x, y (the Guardian Halo blocks a hit)
 const EV_RELIC_OFFER := 38
 const EV_BANISH := 39      # card id banished, slot, new card id
+const EV_RIFT := 40       # kind, x, y, phase (0 opened, 1 taken on, 2 completed, 3 faded untouched, 4 failed)
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -200,6 +201,19 @@ var overload_ticks := OVERLOAD_TICKS
 var banishes := 0
 var banished := {}            # card id -> true: never offered again this run
 
+# --- rifts and Umbral relics -----------------------------------------------------
+var rift := {}                # the open rift, {} when none: kind, x, y, ox, oy, life, on, prog, k0, goal
+var rift_next := Defs.RIFT_FIRST * TPS
+var rift_last := -1           # kind of the previous rift (-1 before the first)
+var rifts_done := 0
+var pending_umbral := 0
+var umbral_choice := false    # the open choice offers Umbral relics (and can be declined)
+var r_sun := false
+var r_hunger := false
+var r_frenzy := false
+var r_gambit := false
+var r_crown := false
+
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
 var sched_i := 0
@@ -284,7 +298,7 @@ var _blasts: Array = []
 
 # --- replay log ---------------------------------------------------------------------
 var log_moves := PackedInt32Array()    # RLE pairs: code, count
-var log_actions := PackedInt32Array()  # pairs: tick, action (0..2 pick, 8 night, 9 reroll, 10..12 banish)
+var log_actions := PackedInt32Array()  # pairs: tick, action (0..2 pick, 7 decline, 8 night, 9 reroll, 10..12 banish)
 
 
 func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
@@ -365,6 +379,7 @@ func step(ix: int, iy: int, burst := false) -> void:
 	_snapshot()
 	_move_player(ix, iy)
 	_director()
+	_update_rift()
 	_update_enemies()
 	_grid_build()
 	_separate()
@@ -387,6 +402,9 @@ func step(ix: int, iy: int, burst := false) -> void:
 	if state == RUNNING:
 		if pending_relics > 0:
 			_start_relic()
+		elif pending_umbral > 0:
+			state = CHOOSING
+			_next_choice()
 		elif pending_levels > 0:
 			_start_choice()
 
@@ -399,21 +417,51 @@ func choose(k: int) -> void:
 	log_actions.append(tick)
 	log_actions.append(k)
 	var id: String = choices[k]
-	if relic_choice:
+	if umbral_choice:
+		_take_relic(id)
+		pending_umbral -= 1
+	elif relic_choice:
 		_take_relic(id)
 		pending_relics -= 1
 	else:
 		_apply_card(id)
 		pending_levels -= 1
+	_next_choice()
+
+
+## Refuse an Umbral relic offer: a Prism Cache drops in its place.
+func decline() -> void:
+	if state != CHOOSING or not umbral_choice:
+		return
+	events.clear()
+	log_actions.append(tick)
+	log_actions.append(7)
+	pending_umbral -= 1
+	_drop_pickup("chest", px, py)
+	_next_choice()
+
+
+## After a pick: the next offer in line (relics, Umbral relics, level-up
+## cards), or back to the run.
+func _next_choice() -> void:
 	if pending_relics > 0:
+		relic_choice = true
+		umbral_choice = false
 		choices = _roll_relics()
+		events.append([EV_RELIC_OFFER])
+	elif pending_umbral > 0:
+		relic_choice = true
+		umbral_choice = true
+		choices = _roll_umbrals()
 		events.append([EV_RELIC_OFFER])
 	elif pending_levels > 0:
 		relic_choice = false
+		umbral_choice = false
 		choices = _roll_choices()
 		events.append([EV_LEVEL, level])
 	else:
 		relic_choice = false
+		umbral_choice = false
 		choices = []
 		state = RUNNING
 
@@ -464,7 +512,12 @@ func reroll() -> void:
 	log_actions.append(tick)
 	log_actions.append(9)
 	rerolls -= 1
-	choices = _roll_relics() if relic_choice else _roll_choices()
+	if umbral_choice:
+		choices = _roll_umbrals()
+	elif relic_choice:
+		choices = _roll_relics()
+	else:
+		choices = _roll_choices()
 
 
 func weapon_level(id: String) -> int:
@@ -541,7 +594,8 @@ func flux_earned() -> int:
 
 ## The run's score: what the Daily Run ranks by. Banes multiply it.
 func score() -> int:
-	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50 + chain_score
+	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50 + chain_score \
+			+ rifts_done * Defs.RIFT_SCORE
 	if dawn:
 		base += 10000
 	return int(float(base) * score_mult())
@@ -596,6 +650,8 @@ static func from_replay(data: Dictionary, upto_tick: int = -1) -> Sim:
 			ai += 2
 			if act == 9:
 				s.reroll()
+			elif act == 7:
+				s.decline()
 			elif act >= 10:
 				s.banish(act - 10)
 			else:
@@ -700,6 +756,8 @@ func _director() -> void:
 		rate *= 0.55
 	if tick < surge_until:
 		rate *= 1.8
+	if not rift.is_empty() and rift.on and int(rift.kind) == Defs.RIFT_TRIAL:
+		rate *= 1.6
 	if endless:
 		rate *= 1.0 + Defs.NIGHT_SWARM * float(night)
 	if tick >= elite_next:
@@ -740,7 +798,231 @@ func _night_boss() -> void:
 	surge_until = tick + 20 * TPS
 
 
+# --- rifts ----------------------------------------------------------------------------
+
+## Every minute or so a rift opens: a Light Beacon to hold, a Prism Wisp to
+## catch or an Umbral Trial to win. Never while a boss is up.
+func _update_rift() -> void:
+	if rift.is_empty():
+		if tick >= rift_next and boss_index() < 0:
+			_open_rift()
+		return
+	rift.ox = rift.x
+	rift.oy = rift.y
+	match int(rift.kind):
+		Defs.RIFT_BEACON:
+			_beacon()
+		Defs.RIFT_WISP:
+			_wisp()
+		Defs.RIFT_TRIAL:
+			_trial()
+	if not rift.is_empty():
+		rift.life -= 1
+		if rift.life <= 0:
+			_close_rift(false)
+
+
+func _open_rift() -> void:
+	var kind := Defs.RIFT_BEACON
+	if rift_last >= 0:
+		var pool: Array = []
+		for k in Defs.RIFTS.size():
+			if k == rift_last or (k == Defs.RIFT_TRIAL and tick < Defs.TRIAL_FROM * TPS):
+				continue
+			pool.append(k)
+		kind = pool[rng.range_i(pool.size())]
+	# Out in the open, towards the middle of the arena when you hug a wall.
+	var a := rng.range_i(Trig.STEPS)
+	var pr := sqrt(px * px + py * py)
+	if pr > 600.0:
+		a = Trig.angle_of(-px, -py) + rng.range_i(Trig.HALF) - Trig.QUARTER
+	var dist := rng.range_f(720.0, 940.0)
+	var x := px + Trig.cos_i(a) * dist
+	var y := py + Trig.sin_i(a) * dist
+	var d := sqrt(x * x + y * y)
+	var lim := ARENA_R - 220.0
+	if d > lim:
+		x = x / d * lim
+		y = y / d * lim
+	rift = {"kind": kind, "x": x, "y": y, "ox": x, "oy": y, "life": int(Defs.RIFT_LIFE[kind]) * TPS, "on": false,
+			"prog": 0.0, "k0": 0, "goal": 0}
+	events.append([EV_RIFT, kind, x, y, 0])
+
+
+func _close_rift(done: bool) -> void:
+	var kind := int(rift.kind)
+	if done:
+		rifts_done += 1
+		events.append([EV_RIFT, kind, rift.x, rift.y, 2])
+	else:
+		events.append([EV_RIFT, kind, rift.x, rift.y, 4 if rift.on else 3])
+	rift_last = kind
+	rift = {}
+	rift_next = tick + (Defs.RIFT_GAP + rng.range_i(Defs.RIFT_GAP_RANGE)) * TPS
+
+
+## Light Beacon: stand in the ring to fill it; step out and it fades. The
+## swarm answers while it charges. Lit, it pays a Prism Cache and a shockwave.
+func _beacon() -> void:
+	var dx: float = px - rift.x
+	var dy: float = py - rift.y
+	var inside := dx * dx + dy * dy < Defs.BEACON_R * Defs.BEACON_R
+	if inside:
+		rift.prog += 1.0
+		if not rift.on:
+			rift.on = true
+			events.append([EV_RIFT, Defs.RIFT_BEACON, rift.x, rift.y, 1])
+		if tick % 45 == 0:
+			var tm := seconds() / 60.0
+			for k in 2:
+				var a := rng.range_i(Trig.STEPS)
+				_spawn_at_safe(_pick_type(tm), rift.x + Trig.cos_i(a) * 640.0, rift.y + Trig.sin_i(a) * 640.0,
+						false, 40)
+	elif rift.prog > 0.0:
+		rift.prog = maxf(0.0, rift.prog - 0.5)
+	if rift.prog > 0.0:
+		rift.life += 1
+	if rift.prog >= float(Defs.BEACON_TICKS):
+		_drop_pickup("chest", rift.x, rift.y)
+		var r := 460.0
+		novas.append({"x": rift.x, "y": rift.y, "r": 0.0, "max": r, "step": r / 16.0, "dmg": 30.0 * _od_scale(),
+				"hit": {}})
+		events.append([EV_NOVA, rift.x, rift.y, r])
+		_close_rift(true)
+
+
+## Prism Wisp: drifts until you come close, then bolts away from you, weaving
+## and shedding gems. Always a little slower than your ship.
+func _wisp() -> void:
+	var dx: float = rift.x - px
+	var dy: float = rift.y - py
+	var d := sqrt(dx * dx + dy * dy) + 0.0001
+	if d < PLAYER_R + Defs.WISP_R:
+		_catch_wisp()
+		return
+	var vx := 0.0
+	var vy := 0.0
+	if d < Defs.WISP_SIGHT:
+		if not rift.on:
+			rift.on = true
+			events.append([EV_RIFT, Defs.RIFT_WISP, rift.x, rift.y, 1])
+		var ux := dx / d
+		var uy := dy / d
+		var wv := Trig.sin_i(tick * 6) * 0.55
+		vx = ux - uy * wv
+		vy = uy + ux * wv
+		var l := sqrt(vx * vx + vy * vy) + 0.0001
+		# It tires: every five seconds of flight it flickers and slows.
+		rift.k0 += 1
+		var spd := st_speed * (0.9 if int(rift.k0) % 300 < 210 else 0.5)
+		vx = vx / l * spd
+		vy = vy / l * spd
+		if tick % 20 == 0:
+			_drop_gem(rift.x, rift.y, 1.0 + seconds() / 120.0)
+	else:
+		var a := tick * 3
+		vx = Trig.cos_i(a) * 60.0
+		vy = Trig.sin_i(a) * 60.0
+	# Near the wall it veers along it, back into the open.
+	var r := sqrt(rift.x * rift.x + rift.y * rift.y) + 0.0001
+	if r > ARENA_R - 450.0:
+		var nx: float = rift.x / r
+		var ny: float = rift.y / r
+		var out := vx * nx + vy * ny
+		if out > 0.0:
+			var near := clampf((r - (ARENA_R - 450.0)) / 300.0, 0.0, 1.0)
+			var tx := -ny
+			var ty := nx
+			var sgn := 1.0 if vx * tx + vy * ty >= 0.0 else -1.0
+			vx += -nx * out * (1.0 + 0.6 * near) + tx * out * sgn
+			vy += -ny * out * (1.0 + 0.6 * near) + ty * out * sgn
+	rift.x += vx * DT
+	rift.y += vy * DT
+	var r2 := sqrt(rift.x * rift.x + rift.y * rift.y)
+	var lim := ARENA_R - 60.0
+	if r2 > lim:
+		rift.x = rift.x / r2 * lim
+		rift.y = rift.y / r2 * lim
+
+
+func _catch_wisp() -> void:
+	if od_t <= 0 and od < od_need:
+		od = od_need
+		events.append([EV_OD_READY])
+	_heal(25.0)
+	flux_bonus += 15
+	var v := 2.0 + seconds() / 60.0
+	for k in 14:
+		var a := k * Trig.STEPS / 14
+		_drop_gem(rift.x + Trig.cos_i(a) * 70.0, rift.y + Trig.sin_i(a) * 70.0, v)
+	for g in gn:
+		g_mag[g] = 1
+	_close_rift(true)
+
+
+## Umbral Trial: touch the rift and it releases a ring of the swarm; destroy
+## enough of it before the timer runs out to earn an Umbral relic offer.
+func _trial() -> void:
+	if not rift.on:
+		var dx: float = px - rift.x
+		var dy: float = py - rift.y
+		if dx * dx + dy * dy < Defs.TRIAL_R * Defs.TRIAL_R:
+			var tm := seconds() / 60.0
+			rift.on = true
+			rift.life = Defs.TRIAL_TICKS
+			rift.k0 = kills
+			rift.goal = trial_goal()
+			var n := mini(30, 18 + int(2.5 * tm))
+			var base := rng.range_i(Trig.STEPS)
+			for k in n:
+				var a := base + k * Trig.STEPS / n
+				_spawn_at_safe(_pick_type(tm), px + Trig.cos_i(a) * 480.0, py + Trig.sin_i(a) * 480.0, false, 50)
+			events.append([EV_RIFT, Defs.RIFT_TRIAL, rift.x, rift.y, 1])
+		return
+	if kills - int(rift.k0) >= int(rift.goal):
+		if umbrals_left() > 0:
+			pending_umbral += 1
+		else:
+			_drop_pickup("bigchest", px, py)
+		_close_rift(true)
+
+
+## Kills an Umbral Trial asks for, started now.
+func trial_goal() -> int:
+	return 50 + int(16.0 * seconds() / 60.0)
+
+
+## Progress of the open rift 0..1 (beacon charge, trial kills), -1 for none.
+func rift_frac() -> float:
+	if rift.is_empty():
+		return -1.0
+	match int(rift.kind):
+		Defs.RIFT_BEACON:
+			return clampf(float(rift.prog) / float(Defs.BEACON_TICKS), 0.0, 1.0)
+		Defs.RIFT_TRIAL:
+			if rift.on:
+				return clampf(float(kills - int(rift.k0)) / float(maxi(1, int(rift.goal))), 0.0, 1.0)
+	return 0.0
+
+
+## The Chain's current score multiplier.
+func chain_mult() -> float:
+	return Defs.chain_mult(chain, r_crown)
+
+
+func chain_cap() -> float:
+	return Defs.CROWN_MAX_MULT if r_crown else Defs.CHAIN_MAX_MULT
+
+
 func _spawn_random(tm: float) -> void:
+	var type := _pick_type(tm)
+	var a := rng.range_i(Trig.STEPS)
+	var dist := rng.range_f(820.0, 1100.0)
+	_spawn_at_safe(type, px + Trig.cos_i(a) * dist, py + Trig.sin_i(a) * dist, false, 36)
+
+
+## A swarm enemy type for this moment of the run, by weight.
+func _pick_type(tm: float) -> int:
 	var w := [10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 	if tm >= 0.6:
 		w[Defs.DART] = 3.5 + tm * 0.4
@@ -770,9 +1052,7 @@ func _spawn_random(tm: float) -> void:
 		if r < 0.0:
 			type = k
 			break
-	var a := rng.range_i(Trig.STEPS)
-	var dist := rng.range_f(820.0, 1100.0)
-	_spawn_at_safe(type, px + Trig.cos_i(a) * dist, py + Trig.sin_i(a) * dist, false, 36)
+	return type
 
 
 func _scheduled(ev: Array) -> void:
@@ -855,6 +1135,8 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 			spm *= 1.2
 		if endless:
 			hpm *= 1.0 + Defs.NIGHT_TOUGH * float(night)
+		if r_hunger:
+			hpm *= 1.25
 	var i := en
 	en += 1
 	e_type[i] = type
@@ -1952,6 +2234,37 @@ func _roll_relics() -> Array:
 	return out
 
 
+func _roll_umbrals() -> Array:
+	var pool: Array = []
+	for id in Defs.UMBRAL_ORDER:
+		if not relics.has(id):
+			pool.append(id)
+	var out: Array = []
+	while out.size() < 3 and not pool.is_empty():
+		var k := rng.range_i(pool.size())
+		out.append(pool[k])
+		pool.remove_at(k)
+	return out
+
+
+## Umbral relics not yet held or already promised.
+func umbrals_left() -> int:
+	var n := 0
+	for id in Defs.UMBRAL_ORDER:
+		if not relics.has(id):
+			n += 1
+	return n - pending_umbral
+
+
+## Relics from RELIC_ORDER held so far (Umbral ones not counted).
+func light_relics() -> int:
+	var n := 0
+	for id in relics:
+		if not Defs.is_umbral(id):
+			n += 1
+	return n
+
+
 func _take_relic(id: String) -> void:
 	if relics.has(id) or not Defs.is_relic(id):
 		return
@@ -1970,6 +2283,11 @@ func _take_relic(id: String) -> void:
 	r_over = relics.has("overcharge")
 	r_midas = relics.has("midas")
 	r_wrath = relics.has("wrath")
+	r_sun = relics.has("u_sun")
+	r_hunger = relics.has("u_hunger")
+	r_frenzy = relics.has("u_frenzy")
+	r_gambit = relics.has("u_gambit")
+	r_crown = relics.has("u_crown")
 	_recompute()
 	events.append([EV_RELIC, id])
 	events.append([EV_PICK, id, 1])
@@ -2257,7 +2575,9 @@ func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 	var crit := rng.unit() < st_crit
 	var dd := dmg * st_might
 	if crit:
-		dd *= (3.0 if ship_id == "aurora" else 2.0) + (1.0 if r_supercrit else 0.0)
+		dd *= (3.0 if ship_id == "aurora" else 2.0) + (1.0 if r_supercrit else 0.0) + (1.0 if r_gambit else 0.0)
+	elif r_gambit:
+		dd *= 0.7
 	if r_star and (e_elite[i] == 1 or e_type[i] >= Defs.WARDEN):
 		dd *= 1.6
 	if r_wrath and hp < max_hp * 0.5:
@@ -2310,6 +2630,10 @@ func _hurt(dmg: float) -> void:
 		events.append([EV_HALO, px, py])
 		_shove(px, py, 170.0, 420.0)
 		return
+	if r_frenzy:
+		dmg *= 1.35
+	if r_crown and chain >= 25:
+		dmg += 15.0
 	var d := maxf(1.0, dmg - st_armor)
 	hp -= d
 	iframes = 42
@@ -2401,7 +2725,7 @@ func _on_death(i: int) -> void:
 	chain_t = Defs.CHAIN_TICKS
 	chain_best = maxi(chain_best, chain)
 	var worth := 10.0 + (250.0 if elite else 0.0) + (2500.0 if type >= Defs.WARDEN else 0.0)
-	chain_score += int(worth * (Defs.chain_mult(chain) - 1.0) + 0.5)
+	chain_score += int(worth * (Defs.chain_mult(chain, r_crown) - 1.0) + 0.5)
 	for tier in Defs.CHAIN_TIERS:
 		if chain == int(tier[0]):
 			events.append([EV_CHAIN, chain, tier[1]])
@@ -2623,7 +2947,7 @@ func _open_chest(big: bool, x: float, y: float, relic := false) -> void:
 	if r_midas:
 		fl *= 3
 	# Boss caches (and the first elite's) also hold a relic.
-	if (big or relic) and relics.size() + pending_relics < Defs.RELIC_ORDER.size():
+	if (big or relic) and light_relics() + pending_relics < Defs.RELIC_ORDER.size():
 		pending_relics += 1
 	flux_bonus += fl
 	rewards.append(["flux", fl])
@@ -2723,6 +3047,8 @@ func _recompute() -> void:
 	var new_max: float = 100.0 + sh.call("hp", 0.0) + 20.0 * lv.call("vitality") + 12.0 * fl.call("hull")
 	if mods.has("glass"):
 		new_max *= 0.5
+	if relics.has("u_sun"):
+		new_max *= 0.7
 	if new_max > max_hp:
 		hp += new_max - max_hp
 	max_hp = new_max
@@ -2732,9 +3058,13 @@ func _recompute() -> void:
 	if mods.has("gravity"):
 		st_magnet *= 3.0
 	st_haste = 1.0 - 0.08 * lv.call("overclock")
+	if relics.has("u_frenzy"):
+		st_haste *= 0.75
 	st_might = 1.0 + sh.call("might", 0.0) + 0.12 * lv.call("amplifier") + 0.06 * fl.call("power")
 	if mods.has("glass"):
 		st_might += 0.4
+	if relics.has("u_sun"):
+		st_might += 0.5
 	st_area = 1.0 + 0.12 * lv.call("lens")
 	st_armor = sh.call("armor", 0.0) + 2.0 * lv.call("plating")
 	st_crit = 0.05 + sh.call("crit", 0.0) + 0.07 * lv.call("fortune")
@@ -2742,5 +3072,8 @@ func _recompute() -> void:
 		st_crit += 0.15
 	if relics.has("supercrit"):
 		st_crit += 0.1
-	st_xp = 1.0 + sh.call("xp", 0.0) + 0.12 * lv.call("scholar") + (0.25 if relics.has("midas") else 0.0)
+	if relics.has("u_gambit"):
+		st_crit += 0.2
+	st_xp = 1.0 + sh.call("xp", 0.0) + 0.12 * lv.call("scholar") + (0.25 if relics.has("midas") else 0.0) \
+			+ (0.4 if relics.has("u_hunger") else 0.0)
 	st_regen = 0.4 * lv.call("renewal")

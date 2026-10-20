@@ -11,6 +11,7 @@ const DEFAULTS := {
 	"runs": 0,
 	"wins": 0,
 	"total_kills": 0,
+	"total_rifts": 0,
 	"total_flux": 0,
 	"tutorial_done": false,
 	"evolved": [],
@@ -261,6 +262,7 @@ func record_run(sim: Sim) -> Dictionary:
 	data.total_flux = int(data.total_flux) + earned
 	data.runs = int(data.runs) + 1
 	data.total_kills = int(data.total_kills) + sim.kills
+	data.total_rifts = int(data.get("total_rifts", 0)) + sim.rifts_done
 	if sim.dawn:
 		data.wins = int(data.wins) + 1
 		var won: Array = data.ships_won

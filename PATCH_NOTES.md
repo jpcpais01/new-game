@@ -1,5 +1,12 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 01:00 UTC
+
+- **Rifts.** About once a minute a rift tears open somewhere in the arena, with an arrow pointing the way and a tracker under your loadout. Each one waits only so long, so you decide whether the detour is worth it. Every rift you complete adds 750 to your score.
+- **Light Beacons, Prism Wisps and Umbral Trials.** Hold your ground inside a Beacon's ring while the swarm closes in, and it blazes into a Prism Cache and a shockwave. Chase down a Wisp that flees and sheds gems as it runs (it tires every few seconds), and it fills your Overdrive, repairs your hull and bursts into light. Touch an Umbral Rift and it releases a ring of the swarm: destroy enough of it before the timer runs out to win the trial.
+- **Umbral relics.** A won trial offers three of five new relics that give great power at a price: Shattered Sun (+50% damage, a weaker hull), Hunger (+40% experience, a tougher swarm), Frenzy Engine (faster weapons, harder hits), Gambler's Prism (bigger crits, weaker everything else) and Chain Crown (a Chain multiplier up to x6, but a broken Chain hurts). Not tempted? Refuse all three and take a Prism Cache instead.
+- **Three new missions and a bigger Codex.** Riftwalker (3 rifts in one run), Pathfinder (40 rifts in total) and Umbral Pact (hold 2 Umbral relics at once). The Codex now lists every rift and Umbral relic.
+
 ## Oct 19, 2026 · 22:00 UTC
 
 - **Radiance.** Reach the dawn once and Radiance unlocks: ten levels of a brighter, harder night, chosen in the Hangar. Each level adds a rule on top of the last (Kindled, Restless, Hunted, Sharp, Titans, Scarcity, Swift, Legion, Impatient and Eventide) and raises your score by 15% and your Flux by 10%. Reach the dawn at your highest level to unlock the next one.

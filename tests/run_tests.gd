@@ -27,6 +27,8 @@ func _init() -> void:
 	_test_relics()
 	_test_radiance()
 	_test_banish()
+	_test_rifts()
+	_test_umbrals()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -450,6 +452,7 @@ func _quiet(seed_v: int) -> Sim:
 	s.spawn_acc = -1e9
 	s.elite_next = 1 << 30
 	s.sched_i = Sim.SCHEDULE.size()
+	s.rift_next = 1 << 30
 	return s
 
 
@@ -842,6 +845,214 @@ func _test_banish() -> void:
 	check(r.banished.size() == 3, "the run banished three cards (%d)" % r.banished.size())
 	var rp := Sim.from_replay(r.to_replay())
 	check(rp.checksum() == r.checksum() and rp.banished == r.banished, "banishes replay")
+
+
+func _rift_at(s: Sim, kind: int, x: float, y: float) -> void:
+	s.rift = {"kind": kind, "x": x, "y": y, "ox": x, "oy": y, "life": int(Defs.RIFT_LIFE[kind]) * Sim.TPS,
+			"on": false, "prog": 0.0, "k0": 0, "goal": 0}
+
+
+func _test_rifts() -> void:
+	# The first rift is a beacon at 0:50.
+	var s := _quiet(201)
+	s.rift_next = Defs.RIFT_FIRST * Sim.TPS
+	while s.tick < Defs.RIFT_FIRST * Sim.TPS:
+		s.step(0, 0)
+	check(not s.rift.is_empty() and int(s.rift.kind) == Defs.RIFT_BEACON and _has_event(s, Sim.EV_RIFT),
+			"the first rift is a beacon at 0:50")
+	var d := sqrt(pow(float(s.rift.x) - s.px, 2) + pow(float(s.rift.y) - s.py, 2))
+	check(d > 500.0 and sqrt(pow(float(s.rift.x), 2) + pow(float(s.rift.y), 2)) < Sim.ARENA_R - 200.0,
+			"rifts open out in the open, away from the ship")
+	# Standing inside lights it; the swarm answers while it charges.
+	s.px = float(s.rift.x) + 20.0
+	s.py = float(s.rift.y)
+	var en0 := s.en
+	for t in Defs.BEACON_TICKS + 2:
+		s.iframes = 2
+		s.step(0, 0)
+	check(s.rift.is_empty() and s.rifts_done == 1, "a beacon is lit by holding the ring")
+	check(s.en > en0, "the swarm closes in on a charging beacon")
+	for t in 30:
+		s.step(0, 0)
+	check(s.caches_opened == 1, "a lit beacon pays a Prism Cache")
+	check(s.rift_next > s.tick, "the next rift is scheduled")
+	# Stepping out drains the charge; an untouched rift fades.
+	var b := _quiet(202)
+	_rift_at(b, Defs.RIFT_BEACON, b.px, b.py)
+	for t in 100:
+		b.step(0, 0)
+	b.px += 400.0
+	for t in 60:
+		b.step(0, 0)
+	check(absf(float(b.rift.prog) - 70.0) < 1.5, "the charge drains outside the ring (%.1f)" % float(b.rift.prog))
+	var f := _quiet(203)
+	_rift_at(f, Defs.RIFT_TRIAL, f.px + 900.0, f.py)
+	var faded := false
+	for t in int(Defs.RIFT_LIFE[Defs.RIFT_TRIAL]) * Sim.TPS + 2:
+		f.step(0, 0)
+		for e in f.events:
+			if int(e[0]) == Sim.EV_RIFT and int(e[4]) == 3:
+				faded = true
+	check(faded and f.rift.is_empty() and f.rifts_done == 0, "an untouched rift fades")
+	# No rift opens while a boss is up.
+	var bo := _quiet(204)
+	bo.rift_next = 10
+	bo._spawn(Defs.WARDEN, bo.px + 900.0, bo.py, false, 0)
+	for t in 20:
+		bo.iframes = 2
+		bo.step(0, 0)
+	check(bo.rift.is_empty(), "rifts wait for the boss to fall")
+	# The Prism Wisp flees when you come close, but you can run it down.
+	var w := _quiet(205)
+	_rift_at(w, Defs.RIFT_WISP, w.px + 320.0, w.py)
+	for t in 20:
+		w.step(0, 0)
+	check(w.rift.on and float(w.rift.x) > w.px + 330.0, "the wisp bolts")
+	var caught := false
+	for t in 30 * Sim.TPS:
+		if w.rift.is_empty():
+			caught = true
+			break
+		var dx: float = float(w.rift.x) - w.px
+		var dy: float = float(w.rift.y) - w.py
+		var l := sqrt(dx * dx + dy * dy) + 0.001
+		w.iframes = 2
+		w.step(int(dx / l * 100.0), int(dy / l * 100.0))
+	check(caught and w.rifts_done == 1, "a chased wisp is caught")
+	check(w.od_ready() and w.gn > 0, "the wisp fills the Overdrive and showers light")
+	# Umbral Trial: touch it, destroy enough of the swarm in time.
+	var tr := _quiet(206)
+	tr.tick = 180 * Sim.TPS
+	_rift_at(tr, Defs.RIFT_TRIAL, tr.px + 30.0, tr.py)
+	tr.step(0, 0)
+	check(tr.rift.on and int(tr.rift.goal) == tr.trial_goal() and tr.en >= 18, "touching the rift starts a trial")
+	check(_has_event(tr, Sim.EV_RIFT), "trial event")
+	tr.kills += int(tr.rift.goal)
+	tr.iframes = 2
+	tr.step(0, 0)
+	check(tr.state == Sim.CHOOSING and tr.relic_choice and tr.umbral_choice and tr.rifts_done == 1,
+			"a won trial offers Umbral relics")
+	var ok := tr.choices.size() == 3
+	for c in tr.choices:
+		ok = ok and Defs.is_umbral(c)
+	check(ok, "the offer holds three Umbral relics")
+	tr.rerolls = 1
+	tr.reroll()
+	ok = tr.umbral_choice
+	for c in tr.choices:
+		ok = ok and Defs.is_umbral(c)
+	check(ok, "a reroll keeps it an Umbral offer")
+	tr.banishes = 1
+	tr.banish(0)
+	check(tr.banishes == 1, "Umbral relics cannot be banished")
+	var pick: String = tr.choices[1]
+	tr.choose(1)
+	check(tr.relics.has(pick) and tr.state == Sim.RUNNING and not tr.umbral_choice, "an Umbral relic is taken")
+	# Refusing drops a Prism Cache instead.
+	var de := _quiet(207)
+	de.pending_umbral = 1
+	de.step(0, 0)
+	check(de.state == Sim.CHOOSING and de.umbral_choice, "an Umbral offer opens")
+	de.decline()
+	check(de.state == Sim.RUNNING and de.relics.is_empty() and de.pickups.size() == 1, "refusing drops a cache")
+	de.step(0, 0)
+	check(de.caches_opened == 1, "the refused offer's cache opens")
+	de.choose(0)
+	de.decline()
+	check(de.state == Sim.RUNNING, "decline only works on an Umbral offer")
+	# A trial that runs out of time fails without a prize.
+	var fa := _quiet(208)
+	_rift_at(fa, Defs.RIFT_TRIAL, fa.px, fa.py)
+	fa.step(0, 0)
+	fa.rift.life = 2
+	var failed := false
+	for t in 4:
+		fa.iframes = 2
+		fa.step(0, 0)
+		for e in fa.events:
+			if int(e[0]) == Sim.EV_RIFT and int(e[4]) == 4:
+				failed = true
+	check(failed and fa.rift.is_empty() and fa.rifts_done == 0 and fa.pending_umbral == 0, "a timed-out trial fails")
+	# Once every Umbral relic is held, a trial pays a boss cache instead.
+	var all := _quiet(209)
+	for id in Defs.UMBRAL_ORDER:
+		all._take_relic(id)
+	_rift_at(all, Defs.RIFT_TRIAL, all.px, all.py)
+	all.step(0, 0)
+	all.kills += 999
+	all.iframes = 2
+	all.step(0, 0)
+	check(all.pending_umbral == 0 and all.state == Sim.CHOOSING and all.relic_choice and not all.umbral_choice,
+			"with every Umbral relic held a trial pays a boss cache (and its relic)")
+	check(all.score() >= Defs.RIFT_SCORE, "rifts add to the score")
+	# Missions.
+	check(Missions.progress(_find_mission("riftwalker"), all, {}) == 1, "Riftwalker counts rifts")
+	check(Missions.done(_find_mission("umbral_pact"), all, {}), "Umbral Pact counts Umbral relics")
+	check(Missions.done(_find_mission("pathfinder"), null, {"total_rifts": 40}), "Pathfinder reads the save")
+	# A bot run that refuses every Umbral offer replays exactly.
+	var r := Sim.new(1, {"hull": 5, "power": 3})
+	var declines := 0
+	while r.tick < 330 * Sim.TPS and (r.state == Sim.RUNNING or r.state == Sim.CHOOSING):
+		if r.state == Sim.CHOOSING:
+			if r.umbral_choice:
+				r.decline()
+				declines += 1
+			else:
+				r.choose(Autopilot.pick(r))
+			continue
+		var mv := Autopilot.move(r)
+		r.step(mv.x, mv.y, Autopilot.burst(r))
+	check(r.rifts_done >= 2, "the bot completes rifts (%d)" % r.rifts_done)
+	var rp := Sim.from_replay(r.to_replay())
+	check(rp.checksum() == r.checksum() and rp.rifts_done == r.rifts_done, "rifts and refusals replay (%d refused)"
+			% declines)
+
+
+func _test_umbrals() -> void:
+	var base := _quiet(221)
+	var s := _quiet(221)
+	s._take_relic("u_sun")
+	check(absf(s.max_hp - base.max_hp * 0.7) < 1e-9 and absf(s.st_might - base.st_might - 0.5) < 1e-9,
+			"Shattered Sun: +50% damage, less hull")
+	s._take_relic("u_hunger")
+	check(absf(s.st_xp - base.st_xp - 0.4) < 1e-9, "Hunger: more experience")
+	var e0 := base._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	var e1 := s._spawn(Defs.DRIFTER, 300.0, 0.0, false, 0)
+	check(absf(s.e_maxhp[e1] / base.e_maxhp[e0] - 1.25) < 1e-6, "Hunger: a tougher swarm")
+	var fr := _quiet(222)
+	fr._take_relic("u_frenzy")
+	check(absf(fr.st_haste - 0.75) < 1e-9, "Frenzy Engine: faster weapons")
+	var hp0 := fr.hp
+	fr._hurt(20.0)
+	check(absf(hp0 - fr.hp - 27.0) < 1e-9, "Frenzy Engine: hits hurt more")
+	var g := _quiet(223)
+	g._take_relic("u_gambit")
+	check(absf(g.st_crit - 0.25) < 1e-9, "Gambler's Prism: more crits")
+	var ge := g._spawn(Defs.BRUTE, g.px + 800.0, g.py, false, 0)
+	g.st_crit = 0.0
+	g._damage(ge, 10.0, 0.0, 0.0)
+	check(absf(g.e_maxhp[ge] - g.e_hp[ge] - 7.0) < 1e-9, "Gambler's Prism: plain hits are weaker")
+	g.st_crit = 1.0
+	var h0 := g.e_hp[ge]
+	g._damage(ge, 10.0, 0.0, 0.0)
+	check(absf(h0 - g.e_hp[ge] - 30.0) < 1e-9, "Gambler's Prism: crits hit x3")
+	var c := _quiet(224)
+	c._take_relic("u_crown")
+	check(absf(Defs.chain_mult(50, true) - 1.4) < 1e-9 and Defs.chain_mult(100000, true) == Defs.CROWN_MAX_MULT,
+			"Chain Crown climbs twice as fast to x6")
+	check(c.chain_mult() == 1.0 and c.chain_cap() == Defs.CROWN_MAX_MULT, "Chain Crown on the sim")
+	c.chain = 30
+	var c0 := c.hp
+	c._hurt(10.0)
+	check(absf(c0 - c.hp - 25.0) < 1e-9 and c.chain == 0, "Chain Crown: breaking a long Chain costs more")
+	check(c.umbrals_left() == Defs.UMBRAL_ORDER.size() - 1, "Umbral relics left")
+	# Umbral relics never crowd out the light ones.
+	var l := _quiet(225)
+	for id in Defs.UMBRAL_ORDER:
+		l._take_relic(id)
+	_give_chest(l, "bigchest")
+	l.step(0, 0)
+	check(l.relic_choice and not l.umbral_choice and l.light_relics() == 0, "boss caches still offer relics")
 
 
 func _test_runs() -> void:

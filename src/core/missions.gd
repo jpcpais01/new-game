@@ -57,6 +57,15 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 			v = run.od_uses if run != null else 0
 		"relics":
 			v = run.relics.size() if run != null else 0
+		"rifts":
+			v = run.rifts_done if run != null else 0
+		"total_rifts":
+			v = int(data.get("total_rifts", 0))
+		"umbrals":
+			if run != null:
+				for id in run.relics:
+					if Defs.is_umbral(id):
+						v += 1
 		"caches":
 			v = run.caches_opened if run != null else 0
 		"dailies":

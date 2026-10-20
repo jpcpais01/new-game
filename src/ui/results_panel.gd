@@ -183,7 +183,7 @@ func _evolutions() -> void:
 		var rc := VBoxContainer.new()
 		rc.add_theme_constant_override("separation", 0)
 		rc.add_child(UiKit.icon_rect(id, 84))
-		rc.add_child(UiKit.label("RELIC", 18, Defs.RELICS[id].color, UiKit.display()))
+		rc.add_child(UiKit.label("UMBRAL" if Defs.is_umbral(id) else "RELIC", 18, Art.card_color(id), UiKit.display()))
 		row.add_child(rc)
 	if row.get_child_count() == 0:
 		row.free()

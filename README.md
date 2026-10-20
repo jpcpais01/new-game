@@ -16,7 +16,9 @@ the dawn you can fly on into the Afterdark, where the bosses return stronger
 every night and everything counts towards your score. Reach the dawn and
 Radiance unlocks: ten ascension levels, each adding a rule and raising the
 score, and every ship remembers the highest Radiance it has cleared. Any
-level-up card can be banished from the run. Built with
+level-up card can be banished from the run. About once a minute a rift opens
+somewhere in the arena: light a Beacon, catch a fleeing Prism Wisp or win an
+Umbral Trial for an Umbral relic, power at a price. Built with
 Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from

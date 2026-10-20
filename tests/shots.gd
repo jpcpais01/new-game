@@ -35,6 +35,10 @@ func _ready() -> void:
 		await _radiance_shots()
 		get_tree().quit()
 		return
+	if args.has("rifts"):
+		await _rift_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -362,6 +366,76 @@ func _radiance_shots() -> void:
 	gs._on_end(false)
 	await _wait(1.6)
 	await _shot("r8_results")
+
+
+## Round 8: a beacon from afar and charging, the wisp, an Umbral Trial, the
+## Umbral relic offer and the Codex.
+func _rift_shots() -> void:
+	main.start_run()
+	await _wait(1.0)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	while s.seconds() < 47.0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			s.iframes = 2
+			s.step(0, 0)
+		s.events.clear()
+	await _wait(3.6)
+	await _shot("k1_rift_opens")
+	await _wait(2.5)
+	s.px = float(s.rift.x) + 40.0
+	s.py = float(s.rift.y) + 30.0
+	s.ppx = s.px
+	s.ppy = s.py
+	main.arena.demo = true
+	s.rift.prog = 180.0
+	await _wait(1.0)
+	main.arena.demo = false
+	await _shot("k2_beacon")
+	s.rift.prog = 299.0
+	await _wait(1.6)
+	await _shot("k3_beacon_lit")
+	if gs._chest.visible:
+		gs._chest.visible = false
+		gs._on_chest_closed()
+	await _wait(0.5)
+	s.rift = {"kind": Defs.RIFT_WISP, "x": s.px + 300.0, "y": s.py - 200.0, "ox": s.px + 300.0, "oy": s.py - 200.0,
+			"life": 1500, "on": false, "prog": 0.0, "k0": 0, "goal": 0}
+	main.arena.demo = true
+	await _wait(1.4)
+	main.arena.demo = false
+	await _shot("k4_wisp")
+	s.rift = {"kind": Defs.RIFT_TRIAL, "x": s.px + 30.0, "y": s.py, "ox": s.px + 30.0, "oy": s.py,
+			"life": 1500, "on": false, "prog": 0.0, "k0": 0, "goal": 0}
+	await _wait(1.5)
+	await _shot("k5_trial")
+	s.kills += 9999
+	await _wait(1.6)
+	await _shot("k6_umbral_offer")
+	gs._cards.decline_pressed.emit()
+	await _wait(2.5)
+	await _shot("k7_refused")
+	if gs._chest.visible:
+		gs._chest.visible = false
+		gs._on_chest_closed()
+	s._take_relic("u_crown")
+	s._take_relic("u_sun")
+	gs._hud._rebuild_loadout()
+	await _wait(0.6)
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(1.6)
+	await _shot("k8_results")
+	main.go_codex()
+	await _wait(1.0)
+	var sc: Array = main.screen.find_children("*", "ScrollContainer", true, false)
+	if not sc.is_empty():
+		sc[0].scroll_vertical = 2600
+	await _wait(0.5)
+	await _shot("k9_codex")
 
 
 func _wait(t: float) -> void:

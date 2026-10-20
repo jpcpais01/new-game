@@ -39,6 +39,7 @@ func _ready() -> void:
 	_cards.picked.connect(_on_pick)
 	_cards.reroll_pressed.connect(_on_reroll)
 	_cards.banish_pressed.connect(_on_banish)
+	_cards.decline_pressed.connect(_on_decline)
 	add_child(_cards)
 	_chest = ChestPanel.new()
 	_chest.visible = false
@@ -159,6 +160,18 @@ func _on_banish(index: int) -> void:
 	_cards.replace_card(index)
 
 
+## Refused an Umbral offer: a Prism Cache drops at the ship instead.
+func _on_decline() -> void:
+	sim.decline()
+	arena.handle_events()
+	if sim.state == Sim.CHOOSING:
+		_cards.open(sim)
+	else:
+		_cards.close()
+		arena.paused = false
+		Sfx.duck(false)
+
+
 func _on_reroll() -> void:
 	sim.reroll()
 	arena.handle_events()
@@ -241,12 +254,16 @@ const COACH := {
 	"laser": ["LASERS", "A thin line warns you before a beam fires. Step out of it."],
 	"chain": ["THE CHAIN", "Kills in a row build your Chain and multiply your score. A hit breaks it."],
 	"low_hp": ["LOW HULL", "The swarm sometimes drops hearts. Repair cards heal you too."],
+	"rift": ["RIFTS", "A rift has opened: follow its arrow. Light a Beacon, catch a Wisp or win an Umbral Trial " +
+			"for a prize, before it fades."],
 }
 
 
 func _on_coach(key: String) -> void:
 	if COACH.has(key) and Save.tip_once(key):
 		var col := UiKit.RED if key == "low_hp" or key == "laser" or key == "boss" else UiKit.GOLD
+		if key == "rift":
+			col = Defs.RIFTS[0].color
 		_queue_tip(COACH[key][0], COACH[key][1], col)
 
 
