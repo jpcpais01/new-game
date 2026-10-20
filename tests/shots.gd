@@ -47,6 +47,10 @@ func _ready() -> void:
 		await _levi_shots()
 		get_tree().quit()
 		return
+	if args.has("gauntlet"):
+		await _gauntlet_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -544,6 +548,62 @@ func _levi_shots() -> void:
 	main.go_codex()
 	await _wait(1.0)
 	await _shot("l7_codex")
+
+
+func _gauntlet_shots() -> void:
+	Save.data.missions.append("warden")
+	Save.data.gauntlet = {"runs": 3, "clears": 1, "best_clear": 13800, "best_felled": 5, "best_stage": 5,
+			"best_score": 61000, "splits": [1500, 2100, 3300, 0]}
+	main.go_title()
+	await _wait(1.6)
+	await _shot("g0_title")
+	main.go_gauntlet()
+	await _wait(1.2)
+	await _shot("g1_screen")
+	main.start_gauntlet()
+	await _wait(1.6)
+	await _shot("g2_draft")
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	gs._cards.close()
+	main.arena.paused = false
+	while s.g_stage < 1 or s.g_next < 0 or s.gauntlet_wait() > 4.0:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		elif s.state == Sim.RUNNING:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y, Autopilot.burst(s))
+			if s.g_stage < 1 and s.boss_index() >= 0 and s.tick - s.g_boss_tick > 600:
+				s.e_hp[s.boss_index()] = 1.0
+		else:
+			break
+		s.events.clear()
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(0.6)
+	main.arena.demo = false
+	await _shot("g3_breather")
+	gs._hud._on_split(0, 1320, true)
+	await _wait(0.6)
+	await _shot("g4_split")
+	while s.boss_index() < 0 and s.state != Sim.DEAD:
+		if s.state == Sim.CHOOSING:
+			s.choose(Autopilot.pick(s))
+		else:
+			var m := Autopilot.move(s)
+			s.iframes = 2
+			s.step(m.x, m.y)
+		s.events.clear()
+	main.arena.demo = true
+	await _wait(3.4)
+	await _shot("g5_warden")
+	main.arena.demo = false
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(2.2)
+	await _shot("g6_results")
 
 
 func _wait(t: float) -> void:

@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 10
+const RULES_VERSION := 11
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -81,6 +81,7 @@ const EV_RIFT := 40       # kind, x, y, phase (0 opened, 1 taken on, 2 completed
 const EV_METEOR := 41     # x, y, r, phase (0 marked, 1 impact)
 const EV_RICOCHET := 42   # x, y, evolved (a glaive bounces off an enemy)
 const EV_LEVI := 43       # x, y, phase (0 coils, 1 lunge marked, 2 lunges, 3 sheds a segment, 4 escapes, 5 a segment bursts), n
+const EV_GAUNTLET := 44   # phase (0 a boss arrives, 1 a boss is passed, 2 the Gauntlet is cleared, 3 a new cycle), stage, ticks, felled
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -235,6 +236,16 @@ var levi_down := false
 var levi_clean := false       # a Leviathan fell without ever touching you
 var _levi_hit := false
 
+# --- the Gauntlet (boss rush) ---
+var gauntlet := false
+var g_stage := 0              # bosses passed (felled or escaped)
+var g_next := -1              # tick the next boss arrives (-1 while one is up)
+var g_boss_tick := 0          # tick the current boss arrived
+var g_stage_tick := 0         # tick the current stage began
+var g_splits: Array = []      # ticks each boss took to fall (-1: it escaped)
+var g_clear_tick := -1        # tick all four bosses of the first cycle were passed
+var g_bonus := 0              # speed and clear score
+
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
 var sched_i := 0
@@ -333,14 +344,15 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 	ship_stats = sd.stats
 	if ship_id == "nyx":
 		curse = 1.4
+	gauntlet = bool(loadout.get("gauntlet", false))
 	for id in loadout.get("mods", []):
-		if Defs.MUTATORS.has(id):
+		if Defs.MUTATORS.has(id) and not gauntlet:
 			mods[id] = true
 	if mods.has("dusk"):
 		sched_scale = 0.75
 	if mods.has("gilded"):
 		elite_next = 60 * TPS
-	radiance = clampi(int(loadout.get("radiance", 0)), 0, Defs.MAX_RADIANCE)
+	radiance = 0 if gauntlet else clampi(int(loadout.get("radiance", 0)), 0, Defs.MAX_RADIANCE)
 	if radiance >= 3 and not mods.has("gilded"):
 		elite_next = 150 * TPS
 	if radiance >= 6:
@@ -353,6 +365,11 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 	revives = int(loadout.get("revive", 0))
 	rerolls = int(loadout.get("reroll", 0)) + int(ship_stats.get("reroll", 0))
 	weapons.append({"id": sd.weapon, "lvl": int(ship_stats.get("wlvl", 1)), "t": 20, "k": 0, "a": 0})
+	if gauntlet:
+		# The Gauntlet opens with a draft of level-up cards before the first boss.
+		level = 1 + Defs.GAUNTLET_DRAFT
+		pending_levels = Defs.GAUNTLET_DRAFT
+		g_next = Defs.GAUNTLET_FIRST * TPS
 	_recompute()
 	hp = max_hp
 	xp_need = need_for(level)
@@ -385,6 +402,15 @@ static func need_for(lvl: int) -> float:
 
 func seconds() -> float:
 	return float(tick) / float(TPS)
+
+
+## The difficulty clock in minutes: the run's time, or in the Gauntlet a pace
+## that jumps with every boss passed and creeps on between them.
+func minutes() -> float:
+	if gauntlet:
+		var creep := minf(1.6, float(tick - g_stage_tick) / float(TPS * 60) * Defs.GAUNTLET_CREEP)
+		return Defs.GAUNTLET_PACE + Defs.GAUNTLET_STEP * float(g_stage) + creep
+	return seconds() / 60.0
 
 
 # =============================================================================
@@ -615,13 +641,15 @@ func flux_earned() -> int:
 	if ship_id == "nyx":
 		mult *= 1.5
 	mult *= Defs.radiance_flux(radiance)
+	if gauntlet:
+		mult *= Defs.GAUNTLET_FLUX
 	return int(float(base) * mult)
 
 
 ## The run's score: what the Daily Run ranks by. Banes multiply it.
 func score() -> int:
 	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50 + chain_score \
-			+ rifts_done * Defs.RIFT_SCORE
+			+ rifts_done * Defs.RIFT_SCORE + g_bonus
 	if dawn:
 		base += 10000
 	return int(float(base) * score_mult())
@@ -771,9 +799,10 @@ func _move_player(ix: int, iy: int) -> void:
 # --- director --------------------------------------------------------------------
 
 func _director() -> void:
-	var t := seconds()
-	var tm := t / 60.0
-	while sched_i < SCHEDULE.size() and tick >= int(float(SCHEDULE[sched_i][0]) * sched_scale) * TPS:
+	var tm := minutes()
+	if gauntlet:
+		_gauntlet()
+	while not gauntlet and sched_i < SCHEDULE.size() and tick >= int(float(SCHEDULE[sched_i][0]) * sched_scale) * TPS:
 		_scheduled(SCHEDULE[sched_i])
 		sched_i += 1
 	if endless and tick >= night_next and boss_index() < 0:
@@ -791,7 +820,10 @@ func _director() -> void:
 		rate *= 1.6
 	if endless:
 		rate *= 1.0 + Defs.NIGHT_SWARM * float(night)
-	if tick >= elite_next:
+	if gauntlet and g_next >= 0:
+		# Between bosses the swarm floods in: time to level up.
+		rate *= 1.35
+	if tick >= elite_next and not gauntlet:
 		if mods.has("gilded"):
 			elite_next = tick + (35 + rng.range_i(15)) * TPS
 		elif radiance >= 3:
@@ -812,6 +844,55 @@ func _director() -> void:
 	while spawn_acc >= 1.0:
 		spawn_acc -= 1.0
 		_spawn_random(tm)
+
+
+## The Gauntlet: once the breather is over, the next boss in line arrives,
+## stronger every cycle.
+func _gauntlet() -> void:
+	if g_next < 0 or tick < g_next or boss_index() >= 0:
+		return
+	var k := g_stage % Defs.GAUNTLET.size()
+	var cycle := g_stage / Defs.GAUNTLET.size()
+	var type: int = Defs.GAUNTLET[k]
+	boss_mult = float(Defs.GAUNTLET_HP[k]) * (1.0 + Defs.GAUNTLET_GROWTH * float(cycle))
+	var a := rng.range_i(Trig.STEPS)
+	if _spawn_at_safe(type, px + Trig.cos_i(a) * 620.0, py + Trig.sin_i(a) * 620.0, false, 150) < 0:
+		g_next = tick + 30
+		return
+	g_next = -1
+	g_boss_tick = tick
+	events.append([EV_GAUNTLET, 0, g_stage, 0, true])
+	events.append([EV_BOSS, type])
+
+
+## A Gauntlet boss fell (or escaped): record the split, pay the speed bonus and
+## start the breather before the next one.
+func _gauntlet_passed(felled: bool) -> void:
+	var ticks := tick - g_boss_tick
+	g_splits.append(ticks if felled else -1)
+	if felled:
+		g_bonus += maxi(0, Defs.GAUNTLET_PAR - ticks / TPS) * Defs.GAUNTLET_SPEED_PTS
+	events.append([EV_GAUNTLET, 1, g_stage, ticks, felled])
+	g_stage += 1
+	g_stage_tick = tick
+	g_next = tick + Defs.GAUNTLET_BREATHER * TPS
+	if g_stage == Defs.GAUNTLET.size():
+		g_clear_tick = tick
+		g_bonus += Defs.GAUNTLET_CLEAR_SCORE
+		flux_bonus += Defs.GAUNTLET_CLEAR_FLUX
+		events.append([EV_GAUNTLET, 2, g_stage, tick, true])
+	elif g_stage % Defs.GAUNTLET.size() == 0:
+		events.append([EV_GAUNTLET, 3, g_stage, tick, true])
+
+
+## Gauntlet: seconds until the next boss arrives (0 while one is up).
+func gauntlet_wait() -> float:
+	return 0.0 if g_next < 0 else maxf(0.0, float(g_next - tick) / float(TPS))
+
+
+## Gauntlet: which cycle the run is in (0 for the first).
+func gauntlet_cycle() -> int:
+	return g_stage / Defs.GAUNTLET.size()
 
 
 ## The Afterdark: every night a boss returns, alternating Warden and Eclipse,
@@ -835,7 +916,7 @@ func _night_boss() -> void:
 ## catch or an Umbral Trial to win. Never while a boss is up.
 func _update_rift() -> void:
 	if rift.is_empty():
-		if tick >= rift_next and boss_index() < 0:
+		if tick >= rift_next and boss_index() < 0 and not gauntlet:
 			_open_rift()
 		return
 	rift.ox = rift.x
@@ -1236,7 +1317,7 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	if en >= MAX_E:
 		return -1
 	var def: Dictionary = Defs.ENEMY[type]
-	var tm := seconds() / 60.0
+	var tm := minutes()
 	var hpm := 1.0 + 0.35 * tm + 0.08 * tm * tm
 	var spm := 1.0 + minf(0.3, 0.04 * tm)
 	var dmm := 1.0 + 0.14 * tm
@@ -1245,7 +1326,7 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	if type >= Defs.WARDEN:
 		hpm = boss_mult * (1.3 if radiance >= 5 else 1.0)
 		spm = 1.0
-		dmm = (1.0 + 0.15 * float(night)) * (1.2 if radiance >= 4 else 1.0)
+		dmm = (1.0 + 0.15 * float(night + g_stage / Defs.GAUNTLET.size())) * (1.2 if radiance >= 4 else 1.0)
 	else:
 		if radiance >= 1:
 			hpm *= 1.15
@@ -2837,7 +2918,7 @@ func _update_wake_trail() -> void:
 
 ## Overdrive damage grows with the swarm's toughness so it never goes stale.
 func _od_scale() -> float:
-	var tm := seconds() / 60.0
+	var tm := minutes()
 	return 1.0 + 0.35 * tm + 0.08 * tm * tm
 
 
@@ -3253,11 +3334,15 @@ func _on_death(i: int) -> void:
 		events.append([EV_LEVI, x, y, 4, lv_n])
 		lv_n = 0
 		lv_uid = 0
+		if gauntlet:
+			_gauntlet_passed(false)
 		return
 	kills += 1
 	if elite:
 		elite_kills += 1
 	events.append([EV_KILL, x, y, type, elite, e_r[i]])
+	if gauntlet and type >= Defs.WARDEN:
+		_gauntlet_passed(true)
 	chain += 1
 	chain_t = Defs.CHAIN_TICKS * (2 if ship_id == "echo" else 1)
 	chain_best = maxi(chain_best, chain)
@@ -3327,7 +3412,7 @@ func _on_death(i: int) -> void:
 			events.append([EV_BOSS_DOWN, type, x, y])
 			# The body bursts segment by segment, from the neck to the tail.
 			lv_pop = lv_n
-			if endless:
+			if endless or g_stage > Defs.GAUNTLET.size():
 				_drop_pickup("bigchest", x, y)
 				_drop_pickup("heart", x - 70.0, y)
 			else:
@@ -3342,7 +3427,7 @@ func _on_death(i: int) -> void:
 		Defs.ECLIPSE:
 			bosses_killed += 1
 			events.append([EV_BOSS_DOWN, type, x, y])
-			if endless:
+			if endless or gauntlet:
 				_drop_pickup("bigchest", x, y)
 				_drop_pickup("heart", x - 70.0, y)
 				for k in 16:
@@ -3638,5 +3723,5 @@ func _recompute() -> void:
 	if relics.has("u_gambit"):
 		st_crit += 0.2
 	st_xp = 1.0 + sh.call("xp", 0.0) + 0.12 * lv.call("scholar") + (0.25 if relics.has("midas") else 0.0) \
-			+ (0.4 if relics.has("u_hunger") else 0.0)
+			+ (0.4 if relics.has("u_hunger") else 0.0) + (Defs.GAUNTLET_XP if gauntlet else 0.0)
 	st_regen = 0.4 * lv.call("renewal")

@@ -22,6 +22,10 @@ func build() -> void:
 			UiKit.fmt_int(sim.kills)], 32, UiKit.DIM, UiKit.display_light())
 	body.add_child(info)
 	body.add_child(UiKit.label("SCORE  %s" % UiKit.fmt_int(sim.score()), 30, Color.WHITE, UiKit.display()))
+	if sim.gauntlet:
+		var gl := UiKit.label("THE GAUNTLET  ·  CYCLE %d  ·  %d BOSSES PASSED" % [sim.gauntlet_cycle() + 1, sim.g_stage],
+				26, Defs.GAUNTLET_COLOR, UiKit.display())
+		body.add_child(gl)
 	if sim.radiance > 0:
 		var rl := UiKit.label("RADIANCE %d  ·  %s" % [sim.radiance, ". ".join(_rules(sim.radiance))], 24,
 				Defs.radiance_color(sim.radiance), UiKit.body())

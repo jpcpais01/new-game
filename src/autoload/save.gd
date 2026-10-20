@@ -31,6 +31,7 @@ const DEFAULTS := {
 	"daily_replay": {},
 	"radiance": 0,
 	"radiance_cleared": -1,
+	"gauntlet": {},
 	"tips": [],
 	"settings": {"sound": true, "music": true, "haptics": true, "shake": true, "numbers": true},
 }
@@ -126,6 +127,33 @@ func loadout() -> Dictionary:
 	if r > 0:
 		out.radiance = r
 	return out
+
+
+## The Gauntlet's loadout: your ship and Forge, no Radiance.
+func gauntlet_loadout() -> Dictionary:
+	var out := loadout()
+	out.erase("radiance")
+	out.gauntlet = true
+	return out
+
+
+## The Gauntlet opens once the Warden has fallen.
+func gauntlet_unlocked() -> bool:
+	return (data.missions as Array).has("warden")
+
+
+## The Gauntlet record: runs, clears, best_clear (ticks), best_felled,
+## best_stage, best_score, splits (best ticks per boss, 0 for none).
+func gauntlet_rec() -> Dictionary:
+	if not (data.get("gauntlet") is Dictionary):
+		data.gauntlet = {}
+	var g: Dictionary = data.gauntlet
+	for k in ["runs", "clears", "best_clear", "best_felled", "best_stage", "best_score"]:
+		if not g.has(k):
+			g[k] = 0
+	if not (g.get("splits") is Array) or (g.splits as Array).size() != Defs.GAUNTLET.size():
+		g.splits = [0, 0, 0, 0]
+	return g
 
 
 ## The highest Radiance level the player may choose (0 until the first dawn).
@@ -231,6 +259,9 @@ func record_run(sim: Sim) -> Dictionary:
 	var beat := {}
 	var earned := sim.flux_earned()
 	var score := sim.score()
+	if sim.gauntlet:
+		_record_gauntlet(sim, score, beat)
+		return _record_common(sim, earned, beat)
 	if score > int(data.best_score):
 		beat.score = true
 		data.best_score = score
@@ -260,11 +291,6 @@ func record_run(sim: Sim) -> Dictionary:
 				data.radiance = radiance_max()
 	if sim.loadout.has("daily"):
 		_record_daily(sim, score, beat)
-	data.flux = int(data.flux) + earned
-	data.total_flux = int(data.total_flux) + earned
-	data.runs = int(data.runs) + 1
-	data.total_kills = int(data.total_kills) + sim.kills
-	data.total_rifts = int(data.get("total_rifts", 0)) + sim.rifts_done
 	if sim.dawn:
 		data.wins = int(data.wins) + 1
 		var won: Array = data.ships_won
@@ -279,6 +305,20 @@ func record_run(sim: Sim) -> Dictionary:
 	if sim.level > int(data.best_level):
 		beat.level = true
 		data.best_level = sim.level
+	return _record_common(sim, earned, beat)
+
+
+## What every run records, the Gauntlet included: Flux, totals, the best
+## Chain, evolutions discovered and missions.
+func _record_common(sim: Sim, earned: int, beat: Dictionary) -> Dictionary:
+	data.flux = int(data.flux) + earned
+	data.total_flux = int(data.total_flux) + earned
+	data.runs = int(data.runs) + 1
+	data.total_kills = int(data.total_kills) + sim.kills
+	data.total_rifts = int(data.get("total_rifts", 0)) + sim.rifts_done
+	if sim.gauntlet and sim.chain_best > int(data.best_chain):
+		beat.chain = true
+		data.best_chain = sim.chain_best
 	var known: Array = data.evolved
 	for w in sim.weapons:
 		if sim.is_evolved(w.id) and not known.has(w.id):
@@ -301,6 +341,37 @@ func record_run(sim: Sim) -> Dictionary:
 	beat.ships = ships
 	save_data()
 	return beat
+
+
+## Gauntlet bookkeeping: clears, the fastest clear, best splits per boss.
+## `beat` gets gauntlet_clear, gauntlet_score, gauntlet_felled and
+## gauntlet_splits (the indices of bosses felled faster than ever), plus
+## gauntlet_prev (the splits as they stood before this run).
+func _record_gauntlet(sim: Sim, score: int, beat: Dictionary) -> void:
+	var g := gauntlet_rec()
+	beat.gauntlet_prev = (g.splits as Array).duplicate()
+	beat.gauntlet_prev_clear = int(g.best_clear)
+	g.runs = int(g.runs) + 1
+	if score > int(g.best_score):
+		g.best_score = score
+		beat.gauntlet_score = true
+	if sim.bosses_killed > int(g.best_felled):
+		g.best_felled = sim.bosses_killed
+		beat.gauntlet_felled = true
+	g.best_stage = maxi(int(g.best_stage), sim.g_stage)
+	if sim.g_clear_tick >= 0:
+		g.clears = int(g.clears) + 1
+		if int(g.best_clear) <= 0 or sim.g_clear_tick < int(g.best_clear):
+			g.best_clear = sim.g_clear_tick
+			beat.gauntlet_clear = true
+	var fast: Array = []
+	var splits: Array = g.splits
+	for k in mini(sim.g_splits.size(), splits.size()):
+		var t := int(sim.g_splits[k])
+		if t > 0 and (int(splits[k]) <= 0 or t < int(splits[k])):
+			splits[k] = t
+			fast.append(k)
+	beat.gauntlet_splits = fast
 
 
 ## Daily Run bookkeeping: per-day best, tries, streak, bounty, best replay.

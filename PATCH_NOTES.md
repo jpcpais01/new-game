@@ -1,5 +1,12 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 10:00 UTC
+
+- **New mode: the Gauntlet.** Every boss, back to back. Draft five upgrade cards, then the Leviathan, the Warden, the Seraph and the Eclipse come for you one after another, each 16 seconds after the last one falls, in an arena that burns amber and gold. Clear all four and the cycle starts again, stronger, until you fall. Your ship and Forge fly with you; there are no rifts and no elites, only bosses and the swarm between them. It unlocks once you have defeated the Warden, right under the Daily Run on the title screen.
+- **Race your splits.** The Gauntlet times every fight like a speedrun. A ladder at the top of the screen tracks the four bosses, a live split under the boss bar glows green while you are ahead of your best and red when you fall behind, and every boss you fell flashes its time and the difference from your record. Fell a boss in under 1:15 for a speed bonus. The Gauntlet screen keeps your best split for each boss, your fastest clear, your sum of best and your most bosses in one run.
+- **Three new missions.** Gauntlet Runner (clear the Gauntlet), Lightspeed (clear it in under 4:00) and Eternal Return (defeat 8 bosses in one Gauntlet), worth 1,400 Flux together.
+- **New sounds.** A gong as each boss steps into the Gauntlet, a stopwatch chime for every split (a brighter one for a new best) and a fanfare when the fourth boss falls.
+
 ## Oct 20, 2026 · 07:00 UTC
 
 - **A new boss: the Leviathan.** At 2:00 a serpent of living light slithers out of the dark, a head trailed by twenty-six burning scales. Only its head can be hurt, and its body burns whatever it touches. It hunts where you are going, coils around you while its scales fire inward (slip out through the gap before the ring closes), then rears back, flashes white and lunges along a warning line. Wounded, it sheds its tail in a burst of shards at 75%, 50% and 25%. Kill it and its body bursts scale by scale into light and gems, leaving your first relic cache and a core. Take longer than a minute and it escapes with its prize.

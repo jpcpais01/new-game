@@ -512,6 +512,12 @@ const MISSIONS := [
 		"flux": 120},
 	{"id": "charmer", "name": "Snake Charmer", "text": "Defeat the Leviathan without it ever touching you.",
 		"kind": "charmer", "goal": 1, "flux": 300},
+	{"id": "gauntlet", "name": "Gauntlet Runner", "text": "Clear the Gauntlet: defeat all four bosses back to back.",
+		"kind": "gauntlet", "goal": 1, "flux": 300},
+	{"id": "lightspeed", "name": "Lightspeed", "text": "Clear the Gauntlet in under 4:00.", "kind": "gauntlet_fast",
+		"goal": 1, "flux": 500},
+	{"id": "eternal", "name": "Eternal Return", "text": "Defeat 8 bosses in one Gauntlet.", "kind": "gauntlet_bosses",
+		"goal": 8, "flux": 600},
 	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
 		"flux": 300},
 	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,
@@ -549,6 +555,32 @@ const MUTATORS := {
 }
 const BOONS := ["volatile", "lucky", "overcharged", "gravity", "gilded"]
 const BANES := ["glass", "horde", "frenzy", "giants", "bloodlight", "dusk"]
+
+## The Gauntlet: the four bosses back to back, then again, stronger, until you
+## fall. Unlocked by Wardenfall. Bosses arrive in this order every cycle.
+const GAUNTLET := [LEVIATHAN, WARDEN, SERAPH, ECLIPSE]
+const GAUNTLET_NAMES := ["Leviathan", "Warden", "Seraph", "Eclipse"]
+const GAUNTLET_HP := [0.7, 0.55, 0.55, 0.55]   # boss HP multiplier in the first cycle
+const GAUNTLET_GROWTH := 1.5         # ...plus this much per cycle after it
+const GAUNTLET_DRAFT := 5            # level-up cards picked before the first boss
+const GAUNTLET_XP := 0.5             # extra experience
+const GAUNTLET_FIRST := 30           # seconds until the first boss
+const GAUNTLET_BREATHER := 16        # seconds between one boss falling and the next
+const GAUNTLET_PACE := 1.0           # swarm clock (minutes) at the first boss...
+const GAUNTLET_STEP := 1.6           # ...plus this much per boss passed
+const GAUNTLET_CREEP := 0.5          # ...and it creeps on this fast (min per min) within a stage
+const GAUNTLET_PAR := 75             # seconds: a boss felled faster pays a speed bonus
+const GAUNTLET_SPEED_PTS := 60       # score per second under par
+const GAUNTLET_CLEAR_SCORE := 10000
+const GAUNTLET_CLEAR_FLUX := 200
+const GAUNTLET_FLUX := 0.8           # Flux multiplier for Gauntlet runs
+const GAUNTLET_FAST := 240           # seconds: the Lightspeed mission
+const GAUNTLET_COLOR := Color(1.0, 0.72, 0.3)
+
+
+static func gauntlet_name(stage: int) -> String:
+	return String(GAUNTLET_NAMES[stage % GAUNTLET.size()])
+
 
 ## Afterdark: after the dawn you may fly on. Bosses return stronger.
 const NIGHT_BOSS_EVERY := 90

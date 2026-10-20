@@ -93,6 +93,12 @@ func _ready() -> void:
 	var daily := _daily_button()
 	col.add_child(daily)
 	UiKit.pop_in(daily, 0.5)
+	var gap2g := Control.new()
+	gap2g.custom_minimum_size = Vector2(0, 20)
+	col.add_child(gap2g)
+	var gauntlet := _gauntlet_button()
+	col.add_child(gauntlet)
+	UiKit.pop_in(gauntlet, 0.52)
 	var gap2b := Control.new()
 	gap2b.custom_minimum_size = Vector2(0, 24)
 	col.add_child(gap2b)
@@ -186,6 +192,55 @@ func _daily_button() -> Control:
 		var tw := b.create_tween().set_loops()
 		tw.tween_property(b, "modulate", Color(1.35, 1.3, 1.15), 0.7).set_trans(Tween.TRANS_SINE)
 		tw.tween_property(b, "modulate", Color.WHITE, 0.7).set_trans(Tween.TRANS_SINE)
+	return b
+
+
+## The Gauntlet: the four bosses in a row, your best clear, or what unlocks it.
+func _gauntlet_button() -> Control:
+	var open := Save.gauntlet_unlocked()
+	var g := Save.gauntlet_rec()
+	var b := UiKit.button("", Defs.GAUNTLET_COLOR if open else UiKit.DIM, 36)
+	b.custom_minimum_size = Vector2(888, 110)
+	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	b.disabled = not open
+	if open:
+		b.pressed.connect(func(): main.go_gauntlet())
+	else:
+		b.modulate = Color(1, 1, 1, 0.6)
+	var h := HBoxContainer.new()
+	h.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	h.offset_left = 30
+	h.offset_right = -30
+	h.add_theme_constant_override("separation", 16)
+	h.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(h)
+	h.add_child(UiKit.icon_rect("gauntlet", 72))
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", -4)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	h.add_child(v)
+	v.add_child(UiKit.label("THE GAUNTLET", 36, Defs.GAUNTLET_COLOR.lerp(Color.WHITE, 0.3) if open else UiKit.DIM,
+			UiKit.display(), HORIZONTAL_ALIGNMENT_LEFT))
+	var sub := "DEFEAT THE WARDEN TO UNLOCK"
+	if open:
+		sub = "BOSS RUSH  ·  NEW"
+		if int(g.best_clear) > 0:
+			sub = "BEST CLEAR %s" % GauntletScreen.fmt_split(int(g.best_clear))
+		elif int(g.runs) > 0:
+			sub = "MOST BOSSES %d  ·  NOT YET CLEARED" % int(g.best_felled)
+	v.add_child(UiKit.label(sub, 24, UiKit.DIM, UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT))
+	for type in Defs.GAUNTLET:
+		var tr := TextureRect.new()
+		tr.texture = Art.enemy[type]
+		tr.custom_minimum_size = Vector2(62, 62)
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if not open:
+			tr.modulate = Color(0.4, 0.4, 0.5, 0.8)
+		h.add_child(tr)
 	return b
 
 

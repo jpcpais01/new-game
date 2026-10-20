@@ -33,6 +33,7 @@ func _init() -> void:
 	_test_echo()
 	_test_starfall()
 	_test_leviathan()
+	_test_gauntlet()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -1354,6 +1355,87 @@ func _test_leviathan() -> void:
 	# Light trails grow with mastery.
 	check(Defs.trail_tier(-1) == 0 and Defs.trail_tier(0) == 1 and Defs.trail_tier(2) == 1, "first trails")
 	check(Defs.trail_tier(3) == 2 and Defs.trail_tier(9) == 3 and Defs.trail_tier(10) == 4, "mastery trails")
+
+
+## Steps a Gauntlet run with no swarm until its next boss is up, then fells it.
+func _fell_next(s: Sim) -> int:
+	while s.boss_index() < 0 and s.tick < 1 << 20:
+		if s.state == Sim.CHOOSING:
+			s.choose(0)
+			continue
+		s.iframes = 999
+		s.spawn_acc = -1e9
+		s.step(0, 0)
+	var b := s.boss_index()
+	var type := s.e_type[b]
+	for k in 90:
+		s.iframes = 999
+		s.step(0, 0)
+	s.e_hp[s.boss_index()] = 0.0
+	s.step(0, 0)
+	return type
+
+
+func _test_gauntlet() -> void:
+	var s := Sim.new(501, {"gauntlet": true, "radiance": 5, "mods": ["horde"]})
+	check(s.gauntlet and s.radiance == 0 and s.mods.is_empty(), "the Gauntlet ignores Radiance and mutators")
+	check(s.level == 1 + Defs.GAUNTLET_DRAFT and s.pending_levels == Defs.GAUNTLET_DRAFT, "it opens with a draft")
+	s.step(0, 0)
+	check(s.state == Sim.CHOOSING, "the draft cards come up at once")
+	for k in Defs.GAUNTLET_DRAFT:
+		s.choose(0)
+	check(s.state == Sim.RUNNING and s.pending_levels == 0, "after the draft the run starts")
+	var normal := Sim.new(501)
+	check(is_equal_approx(normal.minutes(), 0.0) and is_equal_approx(s.minutes(), Defs.GAUNTLET_PACE + 1.0 / 3600.0 * Defs.GAUNTLET_CREEP),
+			"the Gauntlet runs on its own pace clock")
+	var order: Array = []
+	for k in Defs.GAUNTLET.size():
+		order.append(_fell_next(s))
+	check(order == Defs.GAUNTLET, "the bosses come in order: %s" % str(order))
+	check(s.g_clear_tick > 0 and s.g_splits.size() == 4 and s.bosses_killed == 4, "four bosses felled clear it")
+	check(int(s.g_splits[0]) == 91, "a split counts the ticks from arrival to the fall (%d)" % int(s.g_splits[0]))
+	check(not s.dawn and s.state == Sim.RUNNING, "the Eclipse does not end a Gauntlet")
+	check(s.g_bonus >= Defs.GAUNTLET_CLEAR_SCORE + 4 * (Defs.GAUNTLET_PAR - 2) * Defs.GAUNTLET_SPEED_PTS,
+			"fast splits and the clear pay score (%d)" % s.g_bonus)
+	check(s.minutes() >= Defs.GAUNTLET_PACE + 4.0 * Defs.GAUNTLET_STEP, "the pace jumps with every boss")
+	var bigs := 0
+	for p in s.pickups:
+		if p.k == "bigchest":
+			bigs += 1
+	check(bigs >= 3, "the Warden, Seraph and Eclipse leave boss caches (%d)" % bigs)
+	check(s.rift.is_empty() and s.elite_kills == 0, "no rifts or elites in the Gauntlet")
+	# Cycle II: stronger.
+	_fell_next(s)
+	check(s.boss_mult > Defs.GAUNTLET_HP[0] * 1.5, "the second cycle is stronger (%.2f)" % s.boss_mult)
+	check(s.g_splits.size() == 5, "the second cycle keeps splitting")
+	# Missions.
+	var data := {"gauntlet": {"clears": 0, "best_clear": 0, "best_felled": 0}}
+	check(Missions.done(_find_mission("gauntlet"), s, data), "Gauntlet Runner mission")
+	check(Missions.done(_find_mission("lightspeed"), s, data) == (s.g_clear_tick < Defs.GAUNTLET_FAST * Sim.TPS),
+			"Lightspeed mission follows the clear time")
+	check(not Missions.done(_find_mission("eternal"), s, data), "Eternal Return needs 8 bosses")
+	check(Missions.done(_find_mission("eternal"), null, {"gauntlet": {"best_felled": 8}}), "Eternal Return from the save")
+	check(not Missions.done(_find_mission("gauntlet"), Sim.new(1), {}), "a normal run never clears the Gauntlet")
+	# Escapes count as passed, without a split.
+	var e := Sim.new(502, {"gauntlet": true})
+	e.step(0, 0)
+	for k in Defs.GAUNTLET_DRAFT:
+		e.choose(0)
+	while e.boss_index() < 0:
+		e.iframes = 999
+		e.spawn_acc = -1e9
+		e.step(0, 0)
+	e.e_spawn[e.boss_index()] = 0
+	e.e_t[e.boss_index()] = e.levi_escape_ticks()
+	e.step(0, 0)
+	check(e.g_stage == 1 and e.g_splits == [-1] and e.bosses_killed == 0 and e.g_next > e.tick,
+			"an escaped Leviathan passes the stage with no split")
+	# Replays.
+	var r := Sim.new(503, {"gauntlet": true, "hull": 2})
+	Autopilot.play(r, 150 * Sim.TPS)
+	var rr := Sim.from_replay(r.to_replay())
+	check(rr.tick == r.tick and rr.checksum() == r.checksum() and rr.g_splits == r.g_splits,
+			"a Gauntlet replays bit for bit (%d bosses passed)" % r.g_stage)
 
 
 func _test_runs() -> void:

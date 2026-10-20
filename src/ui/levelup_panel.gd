@@ -54,8 +54,10 @@ func open(s: Sim) -> void:
 	var relic := s.relic_choice
 	var umbral := s.umbral_choice
 	var head_col := Defs.UMBRAL_COLOR if umbral else (RELIC_COL if relic else UiKit.GOLD)
-	_title = UiKit.glow_label("UMBRAL RELIC" if umbral else ("RELIC" if relic else "LEVEL UP"), 92 if not umbral else 80,
-			head_col)
+	# The Gauntlet opens with a draft: the first cards are picked before the clock starts.
+	var draft := s.gauntlet and s.tick <= 1 and not relic
+	var head := "UMBRAL RELIC" if umbral else ("RELIC" if relic else ("DRAFT" if draft else "LEVEL UP"))
+	_title = UiKit.glow_label(head, 92 if not umbral else 80, Defs.GAUNTLET_COLOR if draft else head_col)
 	_title.position = Vector2(0, h * 0.11)
 	_title.size = Vector2(w, 120)
 	_title.pivot_offset = _title.size * 0.5
@@ -67,6 +69,9 @@ func open(s: Sim) -> void:
 		sub_text = "POWER AT A PRICE  ·  OR REFUSE ALL THREE"
 	elif relic:
 		sub_text = "CHOOSE ONE  ·  IT LASTS THE WHOLE RUN"
+	elif draft:
+		sub_text = "PICK %d OF %d  ·  BEFORE THE FIRST BOSS" % [Defs.GAUNTLET_DRAFT - s.pending_levels + 1,
+				Defs.GAUNTLET_DRAFT]
 	var sub := UiKit.label(sub_text, 32, UiKit.DIM, UiKit.display_light())
 	if relic:
 		Sfx.play("relic", 0.8)

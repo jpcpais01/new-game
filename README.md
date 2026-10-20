@@ -20,7 +20,9 @@ score, and every ship remembers the highest Radiance it has cleared. Any
 level-up card can be banished from the run. About once a minute a rift opens
 somewhere in the arena: light a Beacon, catch a fleeing Prism Wisp, weather a
 Starfall of meteors or win an Umbral Trial for an Umbral relic, power at a price. Every ship streams a
-light trail that grows from an ember to a prismatic ribbon as you master it.
+light trail that grows from an ember to a prismatic ribbon as you master it. Felled the Warden? The Gauntlet
+throws all four bosses at you back to back, then again, stronger, and times every
+fight: race your best splits, clear it under four minutes, see how many cycles you last.
 Built with Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
@@ -33,10 +35,10 @@ publishes a new release automatically.
 | --- | --- |
 | `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions, the Chain), `missions.gd` (mission progress), `daily.gd` (the day's seed, ship and mutators), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). |
 | `src/view/` | Drawing only: `arena.gd` (runs the sim in real time, camera, shake, slow-mo, events → effects/sound), `entities.gd`, `fx.gd` (particles, rings, beams, lightning, damage numbers), `background.gdshader` (warping grid). |
-| `src/ui/` | Screens: title (live autopilot demo behind it), game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex, Forge, settings. |
+| `src/ui/` | Screens: title (live autopilot demo behind it), the Gauntlet, game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex, Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |
 | `assets/` | Generated sprites/icons/audio (see `tools/`) and fonts (Orbitron, Rajdhani; OFL). |
-| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `levi_probe.gd` (how the bot fares against the Leviathan), `shots.tscn` (screenshots). |
+| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `levi_probe.gd` (how the bot fares against the Leviathan), `gauntlet_probe.gd` (the bot in the Gauntlet), `shots.tscn` (screenshots). |
 
 ```sh
 godot --headless --path . --import
