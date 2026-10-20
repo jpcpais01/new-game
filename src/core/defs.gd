@@ -205,12 +205,57 @@ const RELICS := {
 		"text": "Below half health you deal +50% damage and fly 15% faster."},
 }
 const RELIC_ORDER := ["halo", "wake", "starbreaker", "supercrit", "overcharge", "phoenix", "midas", "wrath"]
+## Umbral relics: power at a price. Only a won Umbral Trial offers them, and
+## the offer can be refused for a Prism Cache instead.
+const UMBRALS := {
+	"u_sun": {"name": "Shattered Sun", "color": Color(1.0, 0.36, 0.5), "umbral": true,
+		"text": "+50% damage. Your hull holds 30% less."},
+	"u_hunger": {"name": "Hunger", "color": Color(0.85, 0.3, 1.0), "umbral": true,
+		"text": "+40% experience. The swarm has +25% HP."},
+	"u_frenzy": {"name": "Frenzy Engine", "color": Color(1.0, 0.42, 0.25), "umbral": true,
+		"text": "Weapons recharge 25% faster. You take 35% more damage."},
+	"u_gambit": {"name": "Gambler's Prism", "color": Color(1.0, 0.75, 0.3), "umbral": true,
+		"text": "+20% critical chance and critical hits strike one time harder. Every other hit deals 30% less."},
+	"u_crown": {"name": "Chain Crown", "color": Color(1.0, 0.85, 0.45), "umbral": true,
+		"text": "Your Chain's score multiplier climbs twice as fast, up to x6. A hit that breaks a Chain of 25 or more costs 15 more HP."},
+}
+const UMBRAL_ORDER := ["u_sun", "u_hunger", "u_frenzy", "u_gambit", "u_crown"]
+const UMBRAL_COLOR := Color(0.78, 0.32, 1.0)
 const HALO_TICKS := 15 * 60
 const WAKE_TICKS := 80
 
 
 static func is_relic(id: String) -> bool:
-	return RELICS.has(id)
+	return RELICS.has(id) or UMBRALS.has(id)
+
+
+static func is_umbral(id: String) -> bool:
+	return UMBRALS.has(id)
+
+
+## Rifts: every minute or so a rift opens somewhere in the arena with a
+## challenge and a prize. Kinds are indices into RIFTS.
+enum { RIFT_BEACON, RIFT_WISP, RIFT_TRIAL }
+const RIFTS := [
+	{"id": "beacon", "name": "Light Beacon", "goal": "LIGHT THE BEACON", "color": Color(1.0, 0.82, 0.38),
+		"text": "Hold your ground inside its ring until it blazes, while the swarm closes in. Lit, it pays a Prism Cache."},
+	{"id": "wisp", "name": "Prism Wisp", "goal": "CATCH THE WISP", "color": Color(0.55, 1.0, 0.92),
+		"text": "A spark of pure light that flees and scatters gems as it runs. Catch it for a full Overdrive, repairs and a shower of light."},
+	{"id": "trial", "name": "Umbral Rift", "goal": "UMBRAL TRIAL", "color": Color(0.78, 0.32, 1.0),
+		"text": "Touch it to open a trial: destroy the swarm it releases before time runs out to claim an Umbral relic, power at a price."},
+]
+const RIFT_FIRST := 50         # seconds until the first rift (always a beacon)
+const RIFT_GAP := 55           # seconds between one rift closing and the next opening...
+const RIFT_GAP_RANGE := 30     # ...plus up to this many more
+const RIFT_LIFE := [40, 30, 35]  # seconds a rift waits to be taken, per kind
+const TRIAL_FROM := 120        # Umbral Trials open from 2:00
+const BEACON_R := 160.0
+const BEACON_TICKS := 300      # ticks inside the ring to light a beacon
+const WISP_R := 30.0
+const WISP_SIGHT := 560.0      # the wisp bolts once you come this close
+const TRIAL_R := 100.0
+const TRIAL_TICKS := 15 * 60
+const RIFT_SCORE := 750
 
 
 ## The Forge: permanent upgrades bought with Flux between runs.
@@ -285,6 +330,8 @@ static func card_info(id: String) -> Dictionary:
 		return PASSIVES[id]
 	if RELICS.has(id):
 		return RELICS[id]
+	if UMBRALS.has(id):
+		return UMBRALS[id]
 	return EXTRAS.get(id, {})
 
 
@@ -401,6 +448,12 @@ const MISSIONS := [
 		"flux": 250},
 	{"id": "grand_codex", "name": "Grand Codex", "text": "Discover all 8 evolutions.", "kind": "codex", "goal": 8,
 		"flux": 700},
+	{"id": "riftwalker", "name": "Riftwalker", "text": "Complete 3 rifts in one run.", "kind": "rifts", "goal": 3,
+		"flux": 150},
+	{"id": "pathfinder", "name": "Pathfinder", "text": "Complete 40 rifts in total.", "kind": "total_rifts",
+		"goal": 40, "flux": 400},
+	{"id": "umbral_pact", "name": "Umbral Pact", "text": "Hold 2 Umbral relics in one run.", "kind": "umbrals",
+		"goal": 2, "flux": 300},
 	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
 		"flux": 300},
 	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,
@@ -458,8 +511,14 @@ const CHAIN_TIERS := [[50, "ON FIRE"], [100, "RAMPAGE"], [250, "UNSTOPPABLE"], [
 		[1000, "SUPERNOVA"], [2000, "AFTERGLOW"]]
 
 
-static func chain_mult(chain: int) -> float:
+static func chain_mult(chain: int, crown := false) -> float:
+	if crown:
+		return minf(CROWN_MAX_MULT, 1.0 + 2.0 * CHAIN_BONUS * float(chain / CHAIN_STEP))
 	return minf(CHAIN_MAX_MULT, 1.0 + CHAIN_BONUS * float(chain / CHAIN_STEP))
+
+
+## Chain Crown (an Umbral relic) raises the multiplier's ceiling.
+const CROWN_MAX_MULT := 6.0
 
 
 ## The mission that unlocks a ship, or {} for ships you start with.

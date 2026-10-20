@@ -59,7 +59,7 @@ func build() -> void:
 	body.add_child(cc)
 	# Relics carried this run.
 	for id in sim.relics:
-		var r: Dictionary = Defs.RELICS[id]
+		var r: Dictionary = Defs.card_info(id)
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 12)
 		row.add_child(UiKit.icon_rect(id, 56))

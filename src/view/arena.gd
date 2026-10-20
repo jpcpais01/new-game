@@ -17,7 +17,7 @@ signal overdrive_ready
 signal chain_milestone(count: int, title: String)
 signal chain_lost(count: int)
 signal relic_taken(id: String)
-## A moment worth a one-time coach tip: elite, boss, laser, chain, low_hp.
+## A moment worth a one-time coach tip: elite, boss, laser, chain, low_hp, rift.
 signal coach(key: String)
 
 const TICK := 1.0 / 60.0
@@ -241,6 +241,8 @@ func _update_view(delta: float) -> void:
 			var ang := Trig.to_rad(sim.orbit_ang + k * Trig.STEPS / n)
 			fx.particle(p.x + cos(ang) * rad, p.y + sin(ang) * rad, randf_range(-20, 20), randf_range(-20, 20), 0.3,
 					1.1, Color(0.9, 0.5, 1.8), 0, 4.0)
+	if not paused and sim.state == Sim.RUNNING:
+		_rift_particles(p)
 	# Camera: follow with a little look-ahead, plus trauma shake.
 	var look := mv * 70.0
 	_cam_pos = _cam_pos.lerp(p + look, clampf(delta * 6.0, 0.0, 1.0))
@@ -616,11 +618,107 @@ func handle_events() -> void:
 				if loud:
 					Sfx.play("halo")
 					Sfx.buzz(50)
+			Sim.EV_RIFT:
+				_on_rift(e, loud)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
 					fx.spray(e[1], e[2], ship_color * 1.6, 6, randf() * TAU, TAU, 420.0, 0.8, 0.25)
 	sim.events.clear()
+
+
+## Rifts: opened, taken on, completed or closed.
+func _on_rift(e: Array, loud: bool) -> void:
+	var kind: int = e[1]
+	var x: float = e[2]
+	var y: float = e[3]
+	var phase: int = e[4]
+	var info: Dictionary = Defs.RIFTS[kind]
+	var col: Color = info.color
+	match phase:
+		0:
+			fx.ring(x, y, 20.0, 380.0, 0.7, col, 1.6)
+			fx.burst(x, y, col * 1.8, 40, 700.0, 1.2, 0.8)
+			add_wave(x, y, 1.2, 900.0)
+			if loud:
+				coach.emit("rift")
+				banner.emit(String(info.name).to_upper(), col)
+				Sfx.play("rift")
+		1:
+			if kind == Defs.RIFT_TRIAL:
+				for k in 3:
+					fx.ring(sim.px, sim.py, 20.0, 480.0 + 120.0 * k, 0.5 + 0.15 * k, col, 1.8)
+				fx.flash(sim.px, sim.py, 500.0, 0.5, col)
+				add_wave(sim.px, sim.py, 2.0, 1000.0)
+				shake(0.45)
+				if loud:
+					banner.emit("UMBRAL TRIAL\nDESTROY %d" % int(sim.rift.goal), col)
+					Sfx.play("trial")
+					Sfx.buzz(90)
+			elif kind == Defs.RIFT_WISP:
+				fx.burst(x, y, col * 1.8, 24, 500.0, 1.0, 0.5)
+				if loud:
+					Sfx.play("wisp", 1.2)
+			else:
+				fx.ring(x, y, 20.0, Defs.BEACON_R, 0.4, col, 1.4)
+				if loud:
+					Sfx.play("charge", 0.6)
+		2:
+			for k in 3:
+				fx.ring(x, y, 20.0, 360.0 + 200.0 * k, 0.6 + 0.2 * k, col, 1.8)
+			fx.burst(x, y, col * 2.0, 70, 1000.0, 1.5, 0.9)
+			fx.burst(x, y, Color(2, 2, 2), 30, 600.0, 1.0, 0.6)
+			fx.flash(x, y, 520.0, 0.6, col)
+			add_wave(x, y, 2.2, 1000.0)
+			_flash = 0.5
+			_zoom = maxf(_zoom, 0.4)
+			shake(0.45)
+			slowmo(0.35, 0.4)
+			if loud:
+				var done := ["BEACON LIT", "WISP CAUGHT", "TRIAL WON"]
+				banner.emit(done[kind], col)
+				Sfx.play("rift_done")
+				Sfx.buzz(70)
+		_:
+			fx.ring(x, y, 200.0, 10.0, 0.5, Color(col, 0.6), 1.0)
+			if loud:
+				if phase == 4:
+					var lost := ["BEACON LOST", "WISP ESCAPED", "TRIAL FAILED"]
+					banner.emit(lost[kind], UiKit.RED)
+				Sfx.play("blink", 0.5)
+
+
+## Sparks that make each rift read at a glance.
+func _rift_particles(p: Vector2) -> void:
+	if sim.rift.is_empty():
+		return
+	var kind := int(sim.rift.kind)
+	var col: Color = Defs.RIFTS[kind].color
+	var x: float = sim.rift.x
+	var y: float = sim.rift.y
+	match kind:
+		Defs.RIFT_BEACON:
+			if randf() < 0.6:
+				var ang := randf() * TAU
+				var rr := Defs.BEACON_R * randf_range(0.9, 1.1)
+				var sx := x + cos(ang) * rr
+				var sy := y + sin(ang) * rr
+				var up := 120.0 + 500.0 * sim.rift_frac()
+				fx.particle(sx, sy, (x - sx) * 0.8, (y - sy) * 0.8 - up, 0.6, 0.8, col * 1.8, 0, 3.0)
+		Defs.RIFT_WISP:
+			for k in 2:
+				var c := Color.from_hsv(randf(), 0.5, 1.0) * 1.8
+				fx.particle(x + randf_range(-10, 10), y + randf_range(-10, 10), randf_range(-60, 60),
+						randf_range(-60, 60), 0.5, 1.0, c, 0, 4.0)
+		Defs.RIFT_TRIAL:
+			if randf() < 0.8:
+				var ang2 := randf() * TAU
+				var rr2 := Defs.TRIAL_R * randf_range(1.2, 2.2)
+				var sx2 := x + cos(ang2) * rr2
+				var sy2 := y + sin(ang2) * rr2
+				var tang := ang2 + PI * 0.5
+				fx.particle(sx2, sy2, (x - sx2) * 2.0 + cos(tang) * 160.0, (y - sy2) * 2.0 + sin(tang) * 160.0, 0.5,
+						0.9, Color(1.2, 0.5, 2.0), 1, 0.5)
 
 
 ## Ion Scythe: a crescent of light, alternating its swing. Lunar Reaper

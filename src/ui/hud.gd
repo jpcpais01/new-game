@@ -34,6 +34,12 @@ var _chain_alpha := 0.0
 var _chain_pop := 0.0
 var _chain_shown := 0
 var _broken: Label
+var _rift_title: Label
+var _rift_sub: Label
+var _rift_alpha := 0.0
+var _rift_kind := 0
+var _rift_y := 0.0
+var _rift_box := UiKit.box(Color.WHITE, Color.BLACK, 22, 2, 0)
 
 
 func _ready() -> void:
@@ -62,6 +68,12 @@ func _ready() -> void:
 	_broken.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_broken.modulate.a = 0.0
 	add_child(_broken)
+	_rift_title = UiKit.label("", 26, Color.WHITE, UiKit.display(), HORIZONTAL_ALIGNMENT_LEFT)
+	_rift_title.size = Vector2(420, 34)
+	add_child(_rift_title)
+	_rift_sub = UiKit.label("", 24, Color(1, 1, 1, 0.8), UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT)
+	_rift_sub.size = Vector2(420, 30)
+	add_child(_rift_sub)
 	_banner = UiKit.glow_label("", 76, UiKit.MAGENTA)
 	_banner.modulate.a = 0.0
 	add_child(_banner)
@@ -237,8 +249,46 @@ func _process(delta: float) -> void:
 	_boss_name.modulate.a = _boss_alpha
 	_loadout.position.y = top + (104.0 + 80.0 * _boss_alpha)
 	_relics.position = Vector2(24, _loadout.position.y + 70.0)
+	_update_rift(s, delta)
 	_update_chain(s, delta)
 	queue_redraw()
+
+
+## The open rift's objective: a glass pill under the loadout.
+func _update_rift(s: Sim, delta: float) -> void:
+	var on := not s.rift.is_empty()
+	_rift_alpha = move_toward(_rift_alpha, 1.0 if on else 0.0, delta * (5.0 if on else 2.5))
+	_rift_y = _relics.position.y + (56.0 if not s.relics.is_empty() else 0.0)
+	_rift_title.position = Vector2(112, _rift_y + 8)
+	_rift_sub.position = Vector2(112, _rift_y + 40)
+	_rift_title.modulate.a = _rift_alpha
+	_rift_sub.modulate.a = _rift_alpha * 0.9
+	if not on:
+		return
+	_rift_kind = int(s.rift.kind)
+	var info: Dictionary = Defs.RIFTS[_rift_kind]
+	var left := UiKit.fmt_time(float(s.rift.life) / float(Sim.TPS))
+	var title := String(info.goal)
+	var sub := left
+	match _rift_kind:
+		Defs.RIFT_BEACON:
+			if s.rift_frac() > 0.0:
+				title = "CHARGING  %d%%" % int(s.rift_frac() * 100.0)
+				sub = "STAY IN THE RING"
+			else:
+				sub = "HOLD THE RING  ·  " + left
+		Defs.RIFT_WISP:
+			sub = ("IT TIRES, KEEP CHASING  ·  " if s.rift.on else "FOLLOW THE ARROW  ·  ") + left
+		Defs.RIFT_TRIAL:
+			if s.rift.on:
+				sub = "%d / %d  ·  %s" % [mini(s.kills - int(s.rift.k0), int(s.rift.goal)), int(s.rift.goal), left]
+			else:
+				title = "UMBRAL RIFT"
+				sub = "TOUCH IT TO BEGIN  ·  " + left
+	_rift_title.text = title
+	_rift_sub.text = sub
+	var col: Color = info.color
+	_rift_title.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.35))
 
 
 func _update_chain(s: Sim, delta: float) -> void:
@@ -250,10 +300,10 @@ func _update_chain(s: Sim, delta: float) -> void:
 			_chain.scale = Vector2.ONE * (1.12 + 0.25 * _chain_pop)
 		_chain_shown = s.chain
 		_chain.text = "%s CHAIN" % UiKit.fmt_int(s.chain)
-		var m := Defs.chain_mult(s.chain)
+		var m := s.chain_mult()
 		_chain_mult.text = "SCORE x%.1f" % m if m > 1.0 else "KEEP IT GOING"
 		# The counter warms from gold to white-hot as the multiplier climbs.
-		var heat := clampf((m - 1.0) / (Defs.CHAIN_MAX_MULT - 1.0), 0.0, 1.0)
+		var heat := clampf((m - 1.0) / (s.chain_cap() - 1.0), 0.0, 1.0)
 		_chain.add_theme_color_override("font_color", UiKit.GOLD.lerp(Color(1.0, 0.95, 0.9), heat))
 	_chain.scale = _chain.scale.lerp(Vector2.ONE, clampf(delta * 10.0, 0.0, 1.0))
 	_chain.modulate.a = _chain_alpha
@@ -288,6 +338,7 @@ func _draw() -> void:
 	var pts := PackedVector2Array([Vector2(kx, ky - 13), Vector2(kx + 9, ky), Vector2(kx, ky + 13), Vector2(kx - 9, ky)])
 	draw_colored_polygon(pts, Color(1.0, 0.35, 0.7))
 	_draw_cache_arrows()
+	_draw_rift()
 	# Chain timer: a gold fuse that burns down between kills.
 	if _chain_alpha > 0.0 and arena.sim.chain > 0:
 		var fuse := clampf(float(arena.sim.chain_t) / float(Defs.CHAIN_TICKS), 0.0, 1.0)
@@ -309,6 +360,47 @@ func _draw() -> void:
 		for k in range(1, 10):
 			var x := br.position.x + bw * k / 10.0
 			draw_line(Vector2(x, by), Vector2(x, by + 18), Color(0, 0, 0, 0.5 * _boss_alpha), 2.0)
+
+
+## The rift's objective pill and, while it is off screen, an arrow to it.
+func _draw_rift() -> void:
+	if _rift_alpha <= 0.0:
+		return
+	var s := arena.sim
+	var col: Color = Defs.RIFTS[_rift_kind].color
+	var rect := Rect2(20, _rift_y, 500, 82)
+	_rift_box.border_color = Color(col, 0.7 * _rift_alpha)
+	_rift_box.bg_color = Color(0.03, 0.02, 0.08, 0.75 * _rift_alpha)
+	draw_style_box(_rift_box, rect)
+	var pulse := 1.0 + 0.06 * sin(arena.vtime * 6.0)
+	var isz := 64.0 * pulse
+	draw_texture_rect(Art.tex("i_rift_" + String(Defs.RIFTS[_rift_kind].id)),
+			Rect2(rect.position + Vector2(48.0 - isz * 0.5, 41.0 - isz * 0.5), Vector2(isz, isz)), false,
+			Color(1.3, 1.3, 1.3, _rift_alpha))
+	var frac := s.rift_frac() if not s.rift.is_empty() else 0.0
+	var bar := Rect2(rect.position.x + 92, rect.position.y + rect.size.y - 12, rect.size.x - 112, 5)
+	draw_rect(bar, Color(1, 1, 1, 0.1 * _rift_alpha))
+	if frac > 0.0:
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * frac, bar.size.y)), Color(col * 1.4, _rift_alpha))
+	if s.rift.is_empty() or (s.rift.on and _rift_kind == Defs.RIFT_TRIAL):
+		return
+	var vs := size
+	var center := arena.camera.get_screen_center_position()
+	var half := vs * 0.5
+	var rel := Vector2(float(s.rift.x), float(s.rift.y)) - center
+	if absf(rel.x) < half.x - 40.0 and absf(rel.y) < half.y - 40.0:
+		return
+	var dir := rel.normalized()
+	var lim := half - Vector2(70.0, 70.0)
+	var k := minf(lim.x / maxf(absf(dir.x), 0.001), lim.y / maxf(absf(dir.y), 0.001))
+	var pos := half + dir * k
+	pos.y = clampf(pos.y, top + 220.0, vs.y - 70.0)
+	var ap := 1.0 + 0.15 * sin(arena.vtime * 8.0)
+	var tip := pos + dir * 34.0 * ap
+	var side := dir.orthogonal() * 22.0 * ap
+	draw_colored_polygon(PackedVector2Array([tip, pos - dir * 6.0 + side, pos - dir * 6.0 - side]), col)
+	draw_texture_rect(Art.tex("i_rift_" + String(Defs.RIFTS[_rift_kind].id)),
+			Rect2(pos - dir * 52.0 - Vector2(32, 32), Vector2(64, 64)), false, Color(1.3, 1.3, 1.3, 0.95))
 
 
 ## Off-screen Prism Caches get a pulsing arrow on the screen edge.

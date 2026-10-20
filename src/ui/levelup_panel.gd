@@ -8,6 +8,7 @@ extends Control
 signal picked(index: int)
 signal reroll_pressed
 signal banish_pressed(index: int)
+signal decline_pressed
 
 var sim: Sim
 var _cards: Array = []
@@ -51,15 +52,22 @@ func open(s: Sim) -> void:
 	var w := size.x
 	var h := size.y
 	var relic := s.relic_choice
-	_title = UiKit.glow_label("RELIC" if relic else "LEVEL UP", 92, RELIC_COL if relic else UiKit.GOLD)
+	var umbral := s.umbral_choice
+	var head_col := Defs.UMBRAL_COLOR if umbral else (RELIC_COL if relic else UiKit.GOLD)
+	_title = UiKit.glow_label("UMBRAL RELIC" if umbral else ("RELIC" if relic else "LEVEL UP"), 92 if not umbral else 80,
+			head_col)
 	_title.position = Vector2(0, h * 0.11)
 	_title.size = Vector2(w, 120)
 	_title.pivot_offset = _title.size * 0.5
 	add_child(_title)
 	_title.scale = Vector2(1.8, 1.8)
 	create_tween().tween_property(_title, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	var sub := UiKit.label("CHOOSE ONE  ·  IT LASTS THE WHOLE RUN" if relic else
-			"LEVEL %d  ·  CHOOSE AN UPGRADE" % s.level, 32, UiKit.DIM, UiKit.display_light())
+	var sub_text := "LEVEL %d  ·  CHOOSE AN UPGRADE" % s.level
+	if umbral:
+		sub_text = "POWER AT A PRICE  ·  OR REFUSE ALL THREE"
+	elif relic:
+		sub_text = "CHOOSE ONE  ·  IT LASTS THE WHOLE RUN"
+	var sub := UiKit.label(sub_text, 32, UiKit.DIM, UiKit.display_light())
 	if relic:
 		Sfx.play("relic", 0.8)
 		Sfx.buzz(40)
@@ -84,7 +92,8 @@ func open(s: Sim) -> void:
 		tw.tween_property(card, "position", target, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	var row_y := y0 + 3 * (card_h + gap) + 10
 	var can_banish := s.banishes > 0 and not relic
-	var both := s.rerolls > 0 and can_banish
+	# An Umbral offer can be refused: the REFUSE button sits where BANISH would.
+	var both := s.rerolls > 0 and (can_banish or umbral)
 	var bw := 400.0
 	_reroll = UiKit.button("REROLL  ×%d" % s.rerolls, UiKit.MAGENTA, 36)
 	_reroll.position = Vector2(w * 0.5 - bw - 20.0 if both else (w - bw) * 0.5, row_y)
@@ -100,6 +109,16 @@ func open(s: Sim) -> void:
 	_banish.visible = can_banish
 	_banish.pressed.connect(_toggle_banish)
 	add_child(_banish)
+	if umbral:
+		var refuse := UiKit.button("REFUSE  ·  TAKE A CACHE", Defs.UMBRAL_COLOR, 30)
+		refuse.position = Vector2(w * 0.5 + 20.0 if both else (w - 520.0) * 0.5, row_y)
+		refuse.custom_minimum_size = Vector2(bw if both else 520.0, 0)
+		refuse.pressed.connect(func():
+			if not _locked:
+				_locked = true
+				Sfx.play("click", 0.8)
+				decline_pressed.emit())
+		add_child(refuse)
 	_hint = UiKit.label("", 28, BANISH_COL, UiKit.display_light())
 	_hint.position = Vector2(0, row_y + 120)
 	_hint.size = Vector2(w, 40)
@@ -145,13 +164,18 @@ func _make_card(id: String, sz: Vector2) -> Control:
 	name.size = Vector2(sz.x - tx - 30, 56)
 	card.add_child(name)
 	var tag_text := ""
-	if Defs.is_relic(id):
+	if Defs.is_umbral(id):
+		tag_text = "UMBRAL RELIC"
+	elif Defs.is_relic(id):
 		tag_text = "RELIC"
 	elif is_new:
 		tag_text = "NEW WEAPON" if Defs.is_weapon(id) else "NEW SYSTEM"
 	elif lvl > 0:
 		tag_text = "LEVEL %d  →  %d" % [lvl, lvl + 1]
-	var tag := UiKit.label(tag_text, 28, UiKit.GOLD if is_new else (RELIC_COL if Defs.is_relic(id) else UiKit.DIM),
+	var tag_col := UiKit.GOLD if is_new else (RELIC_COL if Defs.is_relic(id) else UiKit.DIM)
+	if Defs.is_umbral(id):
+		tag_col = Defs.UMBRAL_COLOR
+	var tag := UiKit.label(tag_text, 28, tag_col,
 			UiKit.display_light(),
 			HORIZONTAL_ALIGNMENT_LEFT)
 	tag.position = Vector2(tx, 92)

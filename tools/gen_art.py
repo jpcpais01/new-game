@@ -470,6 +470,51 @@ def radiance_icons():
               lines=[[(-0.85, 0.75), (0.85, -0.75)], [(-0.2, -0.45), (0.2, -0.45)]], core_white=0.7), "i_banish")
 
 
+# Round 8: rifts (beacon, wisp, Umbral Trial) and the Umbral relics.
+VIOLET = (0.78, 0.32, 1.0)
+CROWN = [(-0.85, 0.35), (-0.85, -0.45), (-0.42, -0.05), (0.0, -0.8), (0.42, -0.05), (0.85, -0.45), (0.85, 0.35)]
+UMBRAL_ICONS = {
+    "u_sun": ([regular(28, 0.4)], rays(10, 0.56, 0.86) + [[(-0.12, -0.42), (0.08, -0.12), (-0.06, 0.1), (0.12, 0.42)]],
+              (1.0, 0.36, 0.5)),
+    "u_hunger": ([star(10, 0.84, 0.56), regular(24, 0.24)], [], (0.85, 0.3, 1.0)),
+    "u_frenzy": ([star(8, 0.84, 0.66, math.pi / 8)],
+                 [[(0.1, -0.5), (-0.22, 0.04), (0.06, 0.04), (-0.1, 0.5)]], (1.0, 0.42, 0.25)),
+    "u_gambit": ([[(x * 0.84, y * 0.84) for x, y in DIAMOND], regular(12, 0.1)] +
+                 [[(cx + x, cy + y) for x, y in regular(10, 0.08)] for cx, cy in ((-0.42, 0.0), (0.42, 0.0))],
+                 [], (1.0, 0.75, 0.3)),
+    "u_crown": ([[(x * 0.8, y * 0.8 - 0.1) for x, y in CROWN]],
+                [[(math.cos(a) * 0.16 - 0.2, math.sin(a) * 0.12 + 0.62) for a in np.linspace(0, 2 * math.pi, 17)],
+                 [(math.cos(a) * 0.16 + 0.2, math.sin(a) * 0.12 + 0.62) for a in np.linspace(0, 2 * math.pi, 17)]],
+                (1.0, 0.85, 0.45)),
+}
+RIFT_ICONS = {
+    "rift_beacon": ([regular(32, 0.9), star(4, 0.5, 0.16, -math.pi / 2)], [], (1.0, 0.82, 0.38)),
+    "rift_wisp": ([regular(20, 0.3)],
+                  [[(-0.3, 0.12), (-0.62, 0.3), (-0.95, 0.24)], [(-0.3, -0.12), (-0.62, -0.3), (-0.95, -0.24)],
+                   [(-0.32, 0.0), (-0.8, 0.0)]] + rays(6, 0.42, 0.62, math.pi / 6), (0.55, 1.0, 0.92)),
+    "rift_trial": ([regular(24, 0.18)], spiral(3, 0.26, 0.95, 0.55), VIOLET),
+}
+
+
+def over(base, top):
+    return Image.alpha_composite(top, base)
+
+
+def rift_sprites():
+    for name, (shapes, lines, col) in UMBRAL_ICONS.items():
+        base = neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75)
+        # A broken violet ring marks the price every Umbral relic carries.
+        ring = neon([], VIOLET, size=96, radius=34, line=2.6, glow=6.0, fill=0.0, core_white=0.4,
+                    lines=[arc_pts(0.98, a, a + 1.25, 10) for a in (0.3, 2.4, 4.5)])
+        save(over(base, ring), "i_" + name)
+    for name, (shapes, lines, col) in RIFT_ICONS.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
+             "i_" + name)
+    # World sprite for the Umbral Rift: a white vortex the view tints violet.
+    save(neon([regular(24, 0.12)], (1, 1, 1), size=256, radius=110, line=5.0, glow=14.0, fill=0.2, core_white=1.0,
+              lines=spiral(4, 0.16, 1.0, 0.6, steps=28)), "vortex")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -548,6 +593,10 @@ if __name__ == "__main__":
         radiance_icons()
         print("radiance art ok")
         sys.exit(0)
+    if "--rifts" in sys.argv:
+        rift_sprites()
+        print("rift art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -560,5 +609,6 @@ if __name__ == "__main__":
     mod_icons()
     arsenal_sprites()
     radiance_icons()
+    rift_sprites()
     app_icon()
     print("art ok")

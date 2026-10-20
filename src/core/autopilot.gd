@@ -5,7 +5,8 @@ extends RefCounted
 
 const PREF := ["pulse", "orbit", "nova", "arc", "seeker", "lance", "scythe", "mine", "amplifier", "vitality",
 		"overclock", "magnet", "thrusters", "plating", "lens", "renewal", "fortune", "scholar", "halo", "phoenix",
-		"wake", "starbreaker", "wrath", "supercrit", "overcharge", "midas", "heal", "flux"]
+		"wake", "starbreaker", "wrath", "supercrit", "overcharge", "midas", "u_gambit", "u_hunger", "u_sun",
+		"u_crown", "u_frenzy", "heal", "flux"]
 
 ## Cards the pilot takes before anything in PREF (balance probes set this).
 static var favor: Array = []
@@ -66,6 +67,18 @@ static func move(s: Sim) -> Vector2i:
 				fy += dy / d * 0.8
 				chased = true
 				break
+	if threat < 0.9 and not chased and not s.rift.is_empty():
+		chased = _rift_pull(s, threat)
+		if chased:
+			var rx: float = s.rift.x - s.px
+			var ry: float = s.rift.y - s.py
+			var rd := sqrt(rx * rx + ry * ry) + 1.0
+			var k := 0.9
+			# Inside a beacon: just hold near the middle.
+			if int(s.rift.kind) == Defs.RIFT_BEACON and rd < Defs.BEACON_R * 0.6:
+				k = 0.25 * rd / (Defs.BEACON_R * 0.6)
+			fx += rx / rd * k
+			fy += ry / rd * k
 	if threat < 0.4 and not chased:
 		var best := -1
 		var bd := 500.0 * 500.0
@@ -92,13 +105,25 @@ static func move(s: Sim) -> Vector2i:
 				fy += dy / d * 0.5
 	var r := sqrt(s.px * s.px + s.py * s.py)
 	if r > 900.0:
-		var k := (r - 900.0) / 600.0 * 2.5
+		var k := (r - 900.0) / 600.0 * (0.8 if chased and int(s.rift.get("kind", -1)) == Defs.RIFT_WISP else 2.5)
 		fx -= s.px / r * k
 		fy -= s.py / r * k
 	var l := sqrt(fx * fx + fy * fy)
 	if l < 0.05:
 		return Vector2i(0, 0)
 	return Vector2i(int(fx / l * 100.0), int(fy / l * 100.0))
+
+
+## Whether the open rift is worth flying to right now.
+static func _rift_pull(s: Sim, threat: float) -> bool:
+	match int(s.rift.kind):
+		Defs.RIFT_BEACON:
+			return threat < 0.7 or s.rift.on
+		Defs.RIFT_WISP:
+			return true
+		Defs.RIFT_TRIAL:
+			return not s.rift.on and s.hp > s.max_hp * 0.55
+	return false
 
 
 ## Fires the Overdrive when it is charged and the moment is right: a crowd

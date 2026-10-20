@@ -205,6 +205,7 @@ func _draw_glow() -> void:
 		draw_texture(Art.tex("i_nova_evo"), Vector2(-48, -48), Color(1.6, 1.2, 2.0))
 	_draw_wake(s, t)
 	_draw_mines(s, t)
+	_draw_rift(s, t, a)
 	# Pickups. Prism Caches stand under a pillar of light so you can find them.
 	for p in s.pickups:
 		var kind := String(p.k)
@@ -327,6 +328,86 @@ func _draw_glow() -> void:
 				draw_arc(Vector2.ZERO, 52.0, 0.0, TAU, 48, Color(gold, 0.18), 8.0)
 			else:
 				draw_arc(Vector2.ZERO, 46.0, -PI * 0.5, -PI * 0.5 + TAU * hf, 40, Color(gold, 0.3), 2.0)
+
+
+## Rifts: a beacon's ring and pillar, the fleeing Prism Wisp, the Umbral vortex
+## (and, during a trial, a countdown ring around the ship).
+func _draw_rift(s: Sim, t: float, a: float) -> void:
+	if s.rift.is_empty():
+		return
+	var kind := int(s.rift.kind)
+	var col: Color = Defs.RIFTS[kind].color
+	var x := lerpf(float(s.rift.ox), float(s.rift.x), a)
+	var y := lerpf(float(s.rift.oy), float(s.rift.y), a)
+	var ring := Art.tex("ring")
+	var glow := Art.tex("glow")
+	var beam := Art.tex("beam")
+	var life := float(s.rift.life) / 60.0
+	# The last five seconds of a waiting rift flicker out.
+	var fade := 1.0 if s.rift.on or life > 5.0 else 0.55 + 0.45 * absf(sin(t * (6.0 + 6.0 * (5.0 - life))))
+	match kind:
+		Defs.RIFT_BEACON:
+			var k := s.rift_frac()
+			var rr := Defs.BEACON_R
+			draw_set_transform(Vector2(x, y), -PI * 0.5, Vector2.ONE)
+			var bw := 30.0 + 90.0 * k
+			draw_texture_rect(beam, Rect2(0, -bw * 0.5, 1600, bw), false,
+					Color(col * (1.0 + k), (0.25 + 0.5 * k) * fade))
+			draw_texture_rect(beam, Rect2(0, -bw * 0.12, 1600, bw * 0.24), false,
+					Color(2, 2, 2, (0.2 + 0.6 * k) * fade))
+			draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE)
+			# Ground ring: dashes turning around the edge, the charge filling it.
+			var segs := 16
+			for i in segs:
+				var a0 := t * 0.6 + TAU * float(i) / float(segs)
+				draw_arc(Vector2.ZERO, rr, a0, a0 + TAU / float(segs) * 0.55, 6, Color(col * 1.4, 0.6 * fade), 4.0)
+			draw_arc(Vector2.ZERO, rr + 14.0, 0.0, TAU, 64, Color(col, 0.12 * fade), 10.0)
+			if k > 0.0:
+				draw_arc(Vector2.ZERO, rr - 14.0, -PI * 0.5, -PI * 0.5 + TAU * k, 64, Color(col * 2.0, 0.95), 9.0)
+				draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE * (rr * 2.2 / 128.0))
+				draw_texture(glow, Vector2(-64, -64), Color(col, 0.12 + 0.25 * k))
+			var cs := 0.8 + 0.25 * k + 0.06 * sin(t * 5.0)
+			draw_set_transform(Vector2(x, y), t * (0.8 + 4.0 * k), Vector2(cs, cs))
+			draw_texture(Art.tex("i_rift_beacon"), Vector2(-48, -48), Color(1.6, 1.6, 1.6, fade))
+		Defs.RIFT_WISP:
+			var tired: bool = s.rift.on and int(s.rift.k0) % 300 >= 210
+			var flick := 0.6 + 0.4 * absf(sin(t * 30.0)) if tired else 1.0
+			var hue := Color.from_hsv(fmod(t * 0.5, 1.0), 0.45, 1.0)
+			draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE * 1.6)
+			draw_texture(glow, Vector2(-64, -64), Color(hue, 0.45 * fade * flick))
+			draw_set_transform(Vector2(x, y), t * 2.5, Vector2.ONE * (0.55 + 0.05 * sin(t * 9.0)))
+			draw_texture(ring, Vector2(-128, -128), Color(col * 1.6, 0.7 * fade * flick))
+			draw_set_transform(Vector2(x, y), -t * 4.0, Vector2.ONE * 0.75)
+			draw_texture(Art.tex("i_rift_wisp"), Vector2(-48, -48), Color(1.8, 1.8, 1.8, fade * flick))
+			draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE * 0.45)
+			draw_texture(glow, Vector2(-64, -64), Color(2.2, 2.2, 2.2, fade * flick))
+		Defs.RIFT_TRIAL:
+			var on: bool = s.rift.on
+			var vs := (Defs.TRIAL_R * 1.5 / 110.0) * (1.0 + 0.05 * sin(t * 3.0))
+			draw_set_transform(Vector2(x, y), -t * (1.2 if not on else 3.5), Vector2(vs, vs))
+			draw_texture(Art.tex("vortex"), Vector2(-128, -128), Color(col * 1.5, 0.85 * fade))
+			draw_set_transform(Vector2(x, y), t * 0.7, Vector2(vs, vs) * 0.7)
+			draw_texture(Art.tex("vortex"), Vector2(-128, -128), Color(1.0, 0.4, 0.8, 0.5 * fade))
+			draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE * (Defs.TRIAL_R * 2.4 / 128.0))
+			draw_texture(glow, Vector2(-64, -64), Color(col, 0.3 * fade))
+			if not on:
+				draw_set_transform(Vector2(x, y), 0.0, Vector2.ONE)
+				var pulse := fmod(t * 0.8, 1.0)
+				draw_arc(Vector2.ZERO, Defs.TRIAL_R * (1.0 + 0.6 * pulse), 0.0, TAU, 48,
+						Color(col * 1.4, 0.5 * (1.0 - pulse)), 4.0)
+			else:
+				# Around the ship: kills needed (inner) and time left (outer).
+				var px := lerpf(s.ppx, s.px, a)
+				var py := lerpf(s.ppy, s.py, a)
+				var tl := clampf(float(s.rift.life) / float(Defs.TRIAL_TICKS), 0.0, 1.0)
+				var kf := s.rift_frac()
+				draw_set_transform(Vector2(px, py), 0.0, Vector2.ONE)
+				var warn := tl < 0.3
+				var tc := Color(1.0, 0.3, 0.4) if warn else col
+				var pulse2 := 0.75 + 0.25 * sin(t * (14.0 if warn else 5.0))
+				draw_arc(Vector2.ZERO, 92.0, -PI * 0.5, -PI * 0.5 + TAU * tl, 64, Color(tc * 1.6, 0.85 * pulse2), 5.0)
+				draw_arc(Vector2.ZERO, 80.0, -PI * 0.5, -PI * 0.5 + TAU * kf, 64, Color(1.6, 1.2, 2.0, 0.9), 4.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 ## Ion Wake: a ribbon of light along the path the ship flew.

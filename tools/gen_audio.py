@@ -584,6 +584,52 @@ def sfx_radiance():
     write_wav("ascend", x, 0.85)
 
 
+def sfx_rifts():
+    """Rifts: opening, the wisp, the Umbral Trial and a completed rift (own RNG)."""
+    global rng
+    rng = np.random.default_rng(211)
+    # Rift opens: a far-off shimmer that swells and hangs.
+    n = int(1.3 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for k, m in enumerate([74, 81, 86]):
+        vib = 1 + 0.006 * np.sin(2 * np.pi * (4.0 + k) * tt)
+        x += np.sin(2 * np.pi * mtof(m) * tt * vib) * env(n, 0.35, 0.5, 0.3, 0.5, 0.1) * 0.16
+    x += lowpass(highpass(noise(n), 3000), 9000) * env(n, 0.5, 0.6) * 0.14
+    x += np.sin(sweep_phase(300, 600, n, 1.4)) * env(n, 0.4, 0.6) * 0.12
+    write_wav("rift", x, 0.75)
+    # Wisp: a quick run of bell-like sparkles.
+    n = int(0.7 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([88, 91, 95, 100]):
+        st = int(k * 0.055 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2) + 0.4 * np.sin(2 * np.pi * mtof(m) * 2.76 * t2)) * \
+            expdecay(seg, 9.0) * 0.22
+    write_wav("wisp", x, 0.7)
+    # Umbral Trial: a dark sub drop under a detuned minor cluster.
+    n = int(1.4 * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(sweep_phase(110, 38, n, 0.5)) * expdecay(n, 3.0) * 0.8
+    for m, dt in [(50, 0.0), (53, 0.3), (57, -0.25)]:
+        f = mtof(m) * (1 + dt / 100.0)
+        x += lowpass(saw_from_phase(2 * np.pi * f * tt, 10), 1800) * env(n, 0.05, 0.5, 0.4, 0.7, 0.2) * 0.14
+    x += lowpass(noise(n), 900) * expdecay(n, 6) * 0.3
+    write_wav("trial", x, 0.85)
+    # Rift complete: a bright rising arpeggio landing on a ringing chord.
+    n = int(1.5 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([72, 76, 79, 84, 88]):
+        st = int(k * 0.07 * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2) + 0.3 * np.sin(4 * np.pi * mtof(m) * t2)) * \
+            env(seg, 0.01, 0.4, 0.3, 0.6, 0.15) * 0.18
+    x += highpass(noise(n), 6500) * env(n, 0.02, 0.5) * 0.1
+    write_wav("rift_done", x, 0.85)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -602,6 +648,10 @@ if __name__ == "__main__":
         sfx_radiance()
         print("radiance audio ok")
         sys.exit(0)
+    if "--rifts" in sys.argv:
+        sfx_rifts()
+        print("rift audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -613,4 +663,5 @@ if __name__ == "__main__":
     sfx_threats()
     sfx_arsenal()
     sfx_radiance()
+    sfx_rifts()
     print("audio ok")
