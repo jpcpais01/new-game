@@ -10,6 +10,7 @@ const BOSS_EPITHETS := {Defs.WARDEN: "KEEPER OF THE FIRST GATE", Defs.ECLIPSE: "
 		Defs.SERAPH: "WHEEL OF BURNING LIGHT", Defs.LEVIATHAN: "SERPENT OF THE DEEP DARK"}
 ## Seconds a boss's title card stays up.
 const INTRO_TIME := 2.8
+const ROMAN := ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
 ## The Chain counter shows from this many kills in a row.
 const CHAIN_SHOW := 5
 
@@ -50,6 +51,12 @@ var _intro_title: Label
 var _intro_sub: Label
 var _intro := 0.0
 var _intro_col := Color.WHITE
+# The Gauntlet: best splits as they stood when the run began, and the split popup.
+var _g_best: Array = []
+var _g_prev_clear := 0
+var _split_head: Label
+var _split_time: Label
+var _split_sub: Label
 
 
 func _ready() -> void:
@@ -93,6 +100,12 @@ func _ready() -> void:
 	for l in [_intro_tag, _intro_title, _intro_sub]:
 		l.modulate.a = 0.0
 		add_child(l)
+	_split_head = UiKit.label("", 28, Color(1, 1, 1, 0.85), UiKit.display_light())
+	_split_time = UiKit.glow_label("", 96, Defs.GAUNTLET_COLOR, UiKit.display())
+	_split_sub = UiKit.glow_label("", 40, UiKit.GREEN, UiKit.display())
+	for l in [_split_head, _split_time, _split_sub]:
+		l.modulate.a = 0.0
+		add_child(l)
 	_loadout = HBoxContainer.new()
 	_loadout.add_theme_constant_override("separation", 6)
 	_loadout.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -126,9 +139,23 @@ func bind(a: Arena) -> void:
 		if not arena.demo:
 			_boss_intro(type)
 		_boss_name.text = BOSS_NAMES.get(type, "BOSS")
+		if arena.sim.gauntlet:
+			_boss_name.text = ""
 		if arena.sim.endless:
 			_boss_name.text += "  ·  NIGHT %d" % arena.sim.night)
 	a.card_taken.connect(func(_id, _lvl): _rebuild_loadout())
+	if a.sim.gauntlet:
+		var g := Save.gauntlet_rec()
+		_g_best = (g.splits as Array).duplicate()
+		_g_prev_clear = int(g.best_clear)
+		a.gauntlet_split.connect(_on_split)
+		a.gauntlet_cleared.connect(func(ticks: int):
+			var rec := _g_prev_clear <= 0 or ticks < _g_prev_clear
+			show_banner("GAUNTLET CLEARED", Defs.GAUNTLET_COLOR, GauntletScreen.fmt_split(ticks) +
+					("  ·  NEW RECORD" if rec else "  ·  CYCLE II BEGINS")))
+		a.gauntlet_cycle.connect(func(cycle: int):
+			show_banner("CYCLE %s" % ROMAN[mini(cycle, ROMAN.size() - 1)], Defs.GAUNTLET_COLOR,
+					"THE BOSSES RETURN STRONGER"))
 	a.leveled_up.connect(func(): _xp_flash = 1.0)
 	a.chain_milestone.connect(func(count: int, title: String):
 		_chain_pop = 1.0
@@ -175,6 +202,8 @@ func _layout() -> void:
 func _place_chain() -> void:
 	var w := size.x
 	var y := top + 236.0 + 80.0 * _boss_alpha
+	if arena != null and arena.sim != null and arena.sim.gauntlet:
+		y = top + 300.0 + 40.0 * _boss_alpha
 	_chain.position = Vector2(w - 444, y)
 	_chain_mult.position = Vector2(w - 444, y + 52)
 	_broken.position = Vector2(w - 624, y + 6)
@@ -227,6 +256,10 @@ func _boss_intro(type: int) -> void:
 	_intro_col = Defs.ENEMY_COLOR[type]
 	var s := arena.sim
 	_intro_tag.text = "NIGHT %d" % s.night if s.endless else "WARNING"
+	if s.gauntlet:
+		_intro_tag.text = "BOSS %d" % (s.g_stage + 1)
+		if s.gauntlet_cycle() > 0:
+			_intro_tag.text += "  ·  CYCLE %s" % ROMAN[mini(s.gauntlet_cycle(), ROMAN.size() - 1)]
 	_intro_title.text = BOSS_NAMES.get(type, "BOSS")
 	_intro_title.add_theme_color_override("font_color", _intro_col.lerp(Color.WHITE, 0.6))
 	_intro_title.add_theme_color_override("font_shadow_color", Color(_intro_col, 0.7))
@@ -297,11 +330,86 @@ func _process(delta: float) -> void:
 			_boss_shown = 1.0
 	_boss_name.modulate.a = _boss_alpha
 	_loadout.position.y = top + (104.0 + 80.0 * _boss_alpha)
+	if s.gauntlet:
+		_update_gauntlet(s)
 	_relics.position = Vector2(24, _loadout.position.y + 70.0)
 	_update_rift(s, delta)
 	_update_chain(s, delta)
 	_intro = maxf(0.0, _intro - delta)
 	queue_redraw()
+
+
+## The Gauntlet: the live split under the boss bar (green while ahead of your
+## best), or the countdown to the next boss. The ladder sits above the bar.
+func _update_gauntlet(s: Sim) -> void:
+	_loadout.position.y = top + 304.0
+	var k := s.g_stage % Defs.GAUNTLET.size()
+	var best := int(_g_best[k]) if s.gauntlet_cycle() == 0 and k < _g_best.size() else 0
+	if s.g_next < 0:
+		var ticks := s.tick - s.g_boss_tick
+		_boss_name.text = "SPLIT  " + GauntletScreen.fmt_split(ticks)
+		var col := Defs.GAUNTLET_COLOR
+		if best > 0:
+			_boss_name.text += "   ·   BEST " + GauntletScreen.fmt_split(best)
+			col = UiKit.GREEN if ticks <= best else UiKit.RED
+		_boss_name.add_theme_color_override("font_color", col.lerp(Color.WHITE, 0.3))
+		_boss_name.position.y = top + 248.0
+	else:
+		var wait := s.gauntlet_wait()
+		_boss_name.text = "" if s.tick <= 1 else "NEXT  ·  %s  ·  %d" % [BOSS_NAMES[Defs.GAUNTLET[k]], ceili(wait)]
+		_boss_name.add_theme_color_override("font_color", Defs.GAUNTLET_COLOR.lerp(Color.WHITE, 0.3))
+		_boss_name.position.y = top + 222.0
+		_boss_name.modulate.a = 1.0
+
+
+## A Gauntlet boss passed: its split, and how it compares with your best.
+func _on_split(stage: int, ticks: int, felled: bool) -> void:
+	var k := stage % Defs.GAUNTLET.size()
+	var type: int = Defs.GAUNTLET[k]
+	var best := int(_g_best[k]) if stage < Defs.GAUNTLET.size() and k < _g_best.size() else 0
+	_split_head.text = BOSS_NAMES[type] + ("  FELLED" if felled else "  ESCAPED")
+	var sub := ""
+	var sub_col := Defs.GAUNTLET_COLOR
+	if not felled:
+		_split_time.text = "NO SPLIT"
+		sub = "IT TOOK ITS PRIZE"
+		sub_col = UiKit.RED
+	else:
+		_split_time.text = GauntletScreen.fmt_split(ticks)
+		if stage >= Defs.GAUNTLET.size():
+			sub = "CYCLE %s" % ROMAN[mini(stage / Defs.GAUNTLET.size(), ROMAN.size() - 1)]
+		elif best <= 0:
+			sub = "FIRST SPLIT"
+		else:
+			var d := ticks - best
+			sub = ("-" if d < 0 else "+") + GauntletScreen.fmt_split(absi(d)) + ("  ·  NEW BEST" if d < 0 else "")
+			sub_col = UiKit.GREEN if d < 0 else UiKit.RED
+		var under := Defs.GAUNTLET_PAR - ticks / Sim.TPS
+		if under > 0:
+			sub += "  ·  +%s SPEED" % UiKit.fmt_int(under * Defs.GAUNTLET_SPEED_PTS)
+	_split_sub.text = sub
+	_split_sub.add_theme_color_override("font_color", sub_col.lerp(Color.WHITE, 0.25))
+	_split_sub.add_theme_color_override("font_shadow_color", Color(sub_col, 0.6))
+	var record := felled and best > 0 and ticks < best and stage < Defs.GAUNTLET.size()
+	Sfx.play("split_best" if record or (felled and best <= 0 and stage < Defs.GAUNTLET.size()) else "split")
+	var w := size.x
+	var y := size.y * 0.27
+	_split_head.position = Vector2(0, y)
+	_split_time.position = Vector2(0, y + 34)
+	_split_sub.position = Vector2(0, y + 150)
+	for l in [_split_head, _split_time, _split_sub]:
+		l.size = Vector2(w, l.size.y)
+		l.pivot_offset = Vector2(w * 0.5, l.size.y * 0.5)
+	_split_time.scale = Vector2(1.6, 1.6)
+	var tw := create_tween()
+	tw.tween_property(_split_head, "modulate:a", 1.0, 0.2)
+	tw.parallel().tween_property(_split_time, "modulate:a", 1.0, 0.2)
+	tw.parallel().tween_property(_split_time, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_EXPO) \
+			.set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(_split_sub, "modulate:a", 1.0, 0.3).set_delay(0.35)
+	tw.tween_interval(1.9)
+	for l in [_split_head, _split_time, _split_sub]:
+		tw.parallel().tween_property(l, "modulate:a", 0.0, 0.6)
 
 
 ## The open rift's objective: a glass pill under the loadout.
@@ -423,8 +531,10 @@ func _draw() -> void:
 		var fc := UiKit.GOLD if fuse > 0.3 else UiKit.RED
 		draw_rect(Rect2(cx + cw * (1.0 - fuse), cy, cw * fuse, 6), Color(fc * 1.3, _chain_alpha))
 	# Boss bar.
+	if arena.sim.gauntlet:
+		_draw_ladder()
 	if _boss_alpha > 0.0:
-		var by := top + 160.0
+		var by := top + (222.0 if arena.sim.gauntlet else 160.0)
 		var bw := w * 0.8
 		var br := Rect2((w - bw) * 0.5, by, bw, 18)
 		draw_rect(br.grow(3), Color(0.03, 0.0, 0.03, 0.9 * _boss_alpha))
@@ -434,6 +544,46 @@ func _draw() -> void:
 		for k in range(1, 10):
 			var x := br.position.x + bw * k / 10.0
 			draw_line(Vector2(x, by), Vector2(x, by + 18), Color(0, 0, 0, 0.5 * _boss_alpha), 2.0)
+
+
+## The Gauntlet ladder: the four bosses of this cycle in a row, passed ones
+## with their split, the one you face glowing.
+func _draw_ladder() -> void:
+	var s := arena.sim
+	var w := size.x
+	var n := Defs.GAUNTLET.size()
+	var cur := s.g_stage % n
+	var up := s.g_next < 0
+	var y := top + 150.0
+	var gap := 96.0
+	var x0 := w * 0.5 - gap * float(n - 1) * 0.5
+	var font := UiKit.display()
+	var gold := Defs.GAUNTLET_COLOR
+	for k in n - 1:
+		var lit := k < cur
+		draw_line(Vector2(x0 + gap * k + 26.0, y), Vector2(x0 + gap * (k + 1) - 26.0, y),
+				Color(gold * (1.3 if lit else 0.5), 0.9 if lit else 0.35), 3.0 if lit else 2.0)
+	var first := s.g_stage - cur
+	for k in n:
+		var type: int = Defs.GAUNTLET[k]
+		var c := Vector2(x0 + gap * k, y)
+		var col: Color = Defs.ENEMY_COLOR[type]
+		var sz := 62.0
+		var mod := Color(0.35, 0.35, 0.45, 0.7)
+		if k < cur:
+			mod = Color(1.0, 0.85, 0.6, 0.75)
+		elif k == cur:
+			var pulse := 0.5 + 0.5 * sin(arena.vtime * (7.0 if up else 3.0))
+			sz = 74.0 + (8.0 * pulse if up else 0.0)
+			mod = Color(1.3, 1.3, 1.3, 1.0) if up else Color(1.0, 1.0, 1.0, 0.85)
+			draw_circle(c, 34.0 + 6.0 * pulse, Color(col, 0.16 + 0.14 * pulse))
+			draw_arc(c, 36.0 + 4.0 * pulse, 0.0, TAU, 40, Color(col * 1.4, 0.7), 2.5)
+		draw_texture_rect(Art.enemy[type], Rect2(c - Vector2(sz, sz) * 0.5, Vector2(sz, sz)), false, mod)
+		if k < cur and first + k < s.g_splits.size():
+			var t := int(s.g_splits[first + k])
+			var txt := GauntletScreen.fmt_split(t) if t > 0 else "ESC"
+			draw_string(font, Vector2(c.x - 60.0, y + 50.0), txt, HORIZONTAL_ALIGNMENT_CENTER, 120.0, 20,
+					Color(gold.lerp(Color.WHITE, 0.4), 0.85) if t > 0 else Color(UiKit.RED, 0.8))
 
 
 ## The rift's objective pill and, while it is off screen, an arrow to it.

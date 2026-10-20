@@ -15,6 +15,7 @@ uniform float flash = 0.0;
 uniform vec3 tint = vec3(0.35, 0.95, 1.0);
 uniform float t = 0.0;
 uniform float night = 0.0;
+uniform float gauntlet = 0.0;
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -81,6 +82,16 @@ void fragment() {
 	col = mix(col, vec3(0.03, 0.004, 0.012) + vec3(0.32, 0.02, 0.1) * pow(n1, 2.6) * 1.8
 			+ vec3(0.14, 0.0, 0.2) * pow(n2, 3.0) * 1.4, night);
 
+	// The Gauntlet: an amber coliseum, rings of light around the centre like
+	// the tiers of an arena, turning slowly.
+	col = mix(col, vec3(0.03, 0.016, 0.01) + vec3(0.3, 0.14, 0.03) * pow(n1, 2.8) * 1.7
+			+ vec3(0.2, 0.04, 0.12) * pow(n2, 3.0) * 1.3, gauntlet);
+	float rr = length(w);
+	float tier = abs(fract(rr / 300.0) - 0.5) * 300.0;
+	float spokes = 0.6 + 0.4 * sin(atan(w.y, w.x) * 16.0 + t * 0.25);
+	col += vec3(1.0, 0.62, 0.22) * smoothstep(3.0, 0.0, tier * zoom) * 0.14 * spokes * gauntlet
+			* smoothstep(arena_r, arena_r - 200.0, rr);
+
 	// Stars (two parallax depths).
 	vec2 s1 = (cam * 0.35 + sp) / 7.0;
 	float st = step(0.996, hash(floor(s1))) * smoothstep(0.5, 0.0, length(fract(s1) - 0.5));
@@ -90,6 +101,7 @@ void fragment() {
 
 	vec3 gridc = mix(tint, vec3(1.0, 0.18, 0.42), clamp(danger, 0.0, 1.0));
 	gridc = mix(gridc, vec3(1.0, 0.22, 0.55), night * 0.75);
+	gridc = mix(gridc, vec3(1.0, 0.66, 0.26), gauntlet * 0.6);
 	float near = exp(-pdist / 650.0);
 	float lines = minor * 0.09 + major * 0.2 + dots * 0.22;
 	col += gridc * lines * (0.3 + 1.1 * near + band_glow * 1.6);
@@ -100,6 +112,7 @@ void fragment() {
 	float edge = abs(r - arena_r);
 	float pulse = 0.75 + 0.25 * sin(t * 3.0 + atan(w.y, w.x) * 12.0);
 	vec3 wallc = mix(vec3(1.0, 0.28, 0.65), vec3(1.0, 0.7, 0.3), night);
+	wallc = mix(wallc, vec3(1.0, 0.78, 0.35), gauntlet);
 	if (r > arena_r) {
 		col *= 0.3;
 		float stripe = step(0.5, fract((w.x + w.y) / 70.0 - t * 0.4));

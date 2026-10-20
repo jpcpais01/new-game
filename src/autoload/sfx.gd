@@ -22,6 +22,7 @@ const SOUNDS := {
 	"glaive": [3, 0.07, -10.0], "ricochet": [4, 0.04, -12.0], "meteor": [3, 0.07, -3.0],
 	"meteor_fall": [2, 0.12, -11.0], "starfall": [1, 0.5, -2.0],
 	"levi_roar": [1, 0.5, -1.0], "lunge": [2, 0.2, -3.0], "shed": [3, 0.06, -4.0], "coil": [1, 0.5, -5.0],
+	"split": [1, 0.2, -3.0], "split_best": [1, 0.3, -2.0], "gong": [1, 0.5, -2.0], "gauntlet_clear": [1, 0.5, 0.0],
 }
 
 var _pools := {}

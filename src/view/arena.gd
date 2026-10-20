@@ -19,6 +19,11 @@ signal chain_lost(count: int)
 signal relic_taken(id: String)
 ## A moment worth a one-time coach tip: elite, boss, laser, chain, low_hp, rift.
 signal coach(key: String)
+## The Gauntlet: a boss was passed (felled or escaped) after `ticks`, or the
+## first cycle was cleared at run tick `ticks` (stage 4), or a new cycle began.
+signal gauntlet_split(stage: int, ticks: int, felled: bool)
+signal gauntlet_cleared(ticks: int)
+signal gauntlet_cycle(cycle: int)
 
 const TICK := 1.0 / 60.0
 
@@ -57,6 +62,7 @@ var _end_timer := -1.0
 var _cam_pos := Vector2.ZERO
 var _danger := 0.0
 var _night := 0.0
+var _gold := 0.0
 var _slash_spin := 1.0
 ## 1 -> 0 over the opening second of a run: the ship warps in on a pillar of light.
 var warp := 0.0
@@ -101,6 +107,7 @@ func start(new_sim: Sim, is_demo: bool) -> void:
 	_end_timer = -1.0
 	hp_ghost = 1.0
 	_night = 1.0 if sim.endless else 0.0
+	_gold = 1.0 if sim.gauntlet else 0.0
 	fx.clear()
 	_waves.clear()
 	_cam_pos = Vector2(sim.px, sim.py)
@@ -366,6 +373,8 @@ func _update_bg(delta: float, p: Vector2) -> void:
 	bg_mat.set_shader_parameter("t", vtime)
 	_night = move_toward(_night, 1.0 if sim.endless else 0.0, delta * 0.4)
 	bg_mat.set_shader_parameter("night", _night)
+	_gold = move_toward(_gold, 1.0 if sim.gauntlet else 0.0, delta * 0.5)
+	bg_mat.set_shader_parameter("gauntlet", _gold)
 	bg_mat.set_shader_parameter("arena_r", Sim.ARENA_R)
 
 
@@ -680,6 +689,8 @@ func handle_events() -> void:
 				_on_meteor(e, loud)
 			Sim.EV_LEVI:
 				_on_levi(e, loud)
+			Sim.EV_GAUNTLET:
+				_on_gauntlet(e, loud)
 			Sim.EV_AEGIS:
 				fx.ring(e[1], e[2], e[3] * 0.6, e[3], 0.22, ship_color, 1.0)
 				if randf() < 0.5:
@@ -689,6 +700,40 @@ func handle_events() -> void:
 
 ## The Leviathan: coils, rears, lunges, sheds its tail, escapes, and after it
 ## falls, bursts segment by segment.
+## The Gauntlet: a gong as each boss steps in, a chime per split, a fanfare
+## and a golden shockwave when all four have fallen.
+func _on_gauntlet(e: Array, loud: bool) -> void:
+	var phase := int(e[1])
+	match phase:
+		0:
+			for k in 2:
+				fx.ring(sim.px, sim.py, 40.0, 900.0 + 300.0 * k, 0.9 + 0.3 * k, Defs.GAUNTLET_COLOR, 1.4)
+			add_wave(sim.px, sim.py, 1.6, 700.0)
+			if loud:
+				Sfx.play("gong")
+		1:
+			if loud:
+				gauntlet_split.emit(int(e[2]), int(e[3]), bool(e[4]))
+		2:
+			var col := Defs.GAUNTLET_COLOR
+			for k in 4:
+				fx.ring(sim.px, sim.py, 30.0, 700.0 + 320.0 * k, 0.8 + 0.3 * k, col, 1.9)
+			fx.burst(sim.px, sim.py, Color(2.2, 1.6, 0.7), 110, 1200.0, 1.8, 1.2)
+			add_wave(sim.px, sim.py, 3.2, 800.0)
+			_flash = 1.0
+			_zoom = 1.0
+			shake(0.8)
+			slowmo(0.2, 1.4)
+			if loud:
+				Sfx.play("gauntlet_clear")
+				Sfx.buzz(220)
+				gauntlet_cleared.emit(int(e[3]))
+		3:
+			if loud:
+				gauntlet_cycle.emit(int(e[2]) / Defs.GAUNTLET.size())
+				Sfx.play("od_ready", 0.8)
+
+
 func _on_levi(e: Array, loud: bool) -> void:
 	var x: float = e[1]
 	var y: float = e[2]

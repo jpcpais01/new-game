@@ -597,6 +597,20 @@ def leviathan_sprites():
               core_white=1.0, lines=[[(-0.6, 0.62), (0.3, 0.0), (-0.6, -0.62)]]), "levi_seg")
 
 
+# Round 11: the Gauntlet (two crossed blades inside a ring of four boss marks).
+def gauntlet_icons():
+    blade = [(0.0, -0.98), (0.11, -0.2), (0.0, 0.62), (-0.11, -0.2)]
+    def rot(pts, a):
+        c, s_ = math.cos(a), math.sin(a)
+        return [(x * c - y * s_, x * s_ + y * c) for x, y in pts]
+    shapes = [rot(blade, math.pi / 4), rot(blade, -math.pi / 4)]
+    shapes += [[(math.cos(a) * 0.82 + x, math.sin(a) * 0.82 + y) for x, y in regular(4, 0.12, math.pi / 4)]
+               for a in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2)]
+    guards = [[(-0.42, 0.3), (-0.2, 0.42)], [(0.42, 0.3), (0.2, 0.42)]]
+    save(neon(shapes, (1.0, 0.72, 0.3), size=96, radius=34, line=3.8, glow=8.5, fill=0.4, lines=guards,
+              core_white=0.75), "i_gauntlet")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -687,6 +701,10 @@ if __name__ == "__main__":
         leviathan_sprites()
         print("leviathan art ok")
         sys.exit(0)
+    if "--gauntlet" in sys.argv:
+        gauntlet_icons()
+        print("gauntlet art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -702,5 +720,6 @@ if __name__ == "__main__":
     rift_sprites()
     ricochet_sprites()
     leviathan_sprites()
+    gauntlet_icons()
     app_icon()
     print("art ok")

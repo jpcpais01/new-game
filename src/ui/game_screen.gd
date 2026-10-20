@@ -18,6 +18,7 @@ var _over := false
 var _dawn: Control
 var _tips: Array = []      # queued coach tips [title, text, colour]
 var _tip: Control
+var _gauntlet_intro := false
 
 
 func _ready() -> void:
@@ -74,6 +75,10 @@ func _process(delta: float) -> void:
 		return
 	_stick.modulate = _stick.modulate.lerp(Color.WHITE, clampf(delta * 4.0, 0.0, 1.0))
 	arena.input_vec = _stick.get_vector()
+	if sim.gauntlet and not _gauntlet_intro and sim.state == Sim.RUNNING and sim.tick > 1:
+		# After the draft: the bosses in line.
+		_gauntlet_intro = true
+		_show_gauntlet()
 	if _card_delay > 0.0:
 		_card_delay -= delta
 		if _card_delay <= 0.0:
@@ -195,7 +200,13 @@ func _on_end(won: bool) -> void:
 	r.sim = sim
 	r.won = sim.dawn
 	r.beat = beat
-	r.retry.connect(func(): main.start_daily() if sim.loadout.has("daily") else main.start_run())
+	r.retry.connect(func():
+		if sim.gauntlet:
+			main.start_gauntlet()
+		elif sim.loadout.has("daily"):
+			main.start_daily()
+		else:
+			main.start_run())
 	r.forge.connect(func(): main.go_forge())
 	r.home.connect(func(): main.go_title())
 	r.hangar.connect(func(): main.go_hangar())
@@ -349,6 +360,37 @@ func _show_radiance() -> void:
 	UiKit.pop_in(box, 0.6, 0)
 	var tw := box.create_tween()
 	tw.tween_interval(4.0)
+	tw.tween_property(box, "modulate:a", 0.0, 0.8)
+	tw.tween_callback(box.queue_free)
+
+
+## The Gauntlet opens with its four bosses in a row, then fades away.
+func _show_gauntlet() -> void:
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	box.offset_top = main.safe_top() + 540
+	box.offset_bottom = box.offset_top + 360
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 10)
+	add_child(box)
+	move_child(box, _stick.get_index() + 1)
+	box.add_child(UiKit.glow_label("THE GAUNTLET", 64, Defs.GAUNTLET_COLOR))
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 30)
+	box.add_child(row)
+	for k in Defs.GAUNTLET.size():
+		var tr := TextureRect.new()
+		tr.texture = Art.enemy[Defs.GAUNTLET[k]]
+		tr.custom_minimum_size = Vector2(110, 110)
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(tr)
+		UiKit.pop_in(tr, 0.5 + 0.18 * k, 0)
+	box.add_child(UiKit.label("FOUR BOSSES  ·  NO WAITING  ·  BEAT YOUR SPLITS", 28, UiKit.DIM, UiKit.display_light()))
+	UiKit.pop_in(box, 0.2, 0)
+	var tw := box.create_tween()
+	tw.tween_interval(5.0)
 	tw.tween_property(box, "modulate:a", 0.0, 0.8)
 	tw.tween_callback(box.queue_free)
 

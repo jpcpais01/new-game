@@ -90,11 +90,30 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 				v = maxi(v, run.afterdark_seconds())
 		"bosses":
 			v = run.bosses_killed if run != null else 0
+		"gauntlet":
+			v = 1 if int(Missions.gauntlet_rec(data).get("clears", 0)) > 0 else 0
+			if run != null and run.gauntlet and run.g_clear_tick >= 0:
+				v = 1
+		"gauntlet_fast":
+			var best := int(Missions.gauntlet_rec(data).get("best_clear", 0))
+			if run != null and run.gauntlet and run.g_clear_tick >= 0:
+				best = run.g_clear_tick if best <= 0 else mini(best, run.g_clear_tick)
+			v = 1 if best > 0 and best < Defs.GAUNTLET_FAST * Sim.TPS else 0
+		"gauntlet_bosses":
+			v = int(Missions.gauntlet_rec(data).get("best_felled", 0))
+			if run != null and run.gauntlet:
+				v = maxi(v, run.bosses_killed)
 		"untouched":
 			if run != null:
 				var clean := run.tick if run.first_hurt < 0 else run.first_hurt
 				v = clean / Sim.TPS
 	return clampi(v, 0, goal)
+
+
+## The save's Gauntlet record ({} before the first Gauntlet).
+static func gauntlet_rec(data: Dictionary) -> Dictionary:
+	var g = data.get("gauntlet", {})
+	return g if g is Dictionary else {}
 
 
 static func done(m: Dictionary, run: Sim, data: Dictionary) -> bool:

@@ -711,6 +711,66 @@ def sfx_leviathan():
     write_wav("coil", x, 0.6)
 
 
+def sfx_gauntlet():
+    """The Gauntlet: a split chime, a record split, the gong as a boss steps in, the clear fanfare (own RNG)."""
+    global rng
+    rng = np.random.default_rng(337)
+    # Split: two quick bright bell tones, a stopwatch click on top.
+    n = int(0.7 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([84, 91]):
+        st = int(0.07 * k * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2) + 0.35 * np.sin(2 * np.pi * mtof(m) * 2.76 * t2)) * \
+            expdecay(seg, 6) * 0.3
+    x[:int(0.01 * SR)] += highpass(noise(int(0.01 * SR)), 4000) * 0.5
+    write_wav("split", x, 0.8)
+    # Record: the split chime climbing a major arpeggio with a shimmer.
+    n = int(1.3 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([79, 83, 86, 91, 95]):
+        st = int(0.075 * k * SR)
+        seg = n - st
+        t2 = np.arange(seg) / SR
+        x[st:] += (np.sin(2 * np.pi * mtof(m) * t2) + 0.3 * np.sin(2 * np.pi * mtof(m) * 3.0 * t2)) * \
+            expdecay(seg, 4.5) * 0.22
+    x += highpass(noise(n), 7000) * env(n, 0.2, 0.9) * 0.08
+    write_wav("split_best", x, 0.85)
+    # Gong: a low metallic strike with inharmonic partials, struck as the next boss steps in.
+    n = int(2.2 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for f, a, k in [(55, 0.5, 1.6), (110.6, 0.3, 2.2), (152.3, 0.22, 2.8), (207.9, 0.16, 3.4), (296.1, 0.1, 4.5)]:
+        x += np.sin(2 * np.pi * f * tt * (1 + 0.002 * np.sin(2 * np.pi * 3 * tt))) * expdecay(n, k) * a
+    x += lowpass(noise(n), 900) * expdecay(n, 30) * 0.5
+    write_wav("gong", x, 0.9)
+    # Clear: a brass-like fanfare (stacked saws through a closing filter) over a timpani roll.
+    n = int(2.6 * SR)
+    x = np.zeros(n)
+    notes = [(67, 0.0, 0.18), (72, 0.18, 0.18), (76, 0.36, 0.18), (79, 0.54, 1.8)]
+    for m, st_s, dur in notes:
+        st = int(st_s * SR)
+        seg = int(dur * SR)
+        t2 = np.arange(seg) / SR
+        tone = np.zeros(seg)
+        for det in (-0.12, 0.0, 0.12):
+            tone += saw_from_phase(2 * np.pi * mtof(m + det) * t2, 10)
+        tone = lowpass(tone, 3200) * env(seg, 0.02, 0.25, 0.6, 0.3 if dur > 1 else 0.05) * 0.12
+        x[st:st + seg] += tone[:max(0, min(seg, n - st))]
+    roll = np.zeros(n)
+    for k in range(18):
+        st = int((0.02 * k) * SR)
+        seg = int(0.25 * SR)
+        roll[st:st + seg] += np.sin(sweep_phase(110, 70, seg, 0.5)) * expdecay(seg, 14) * (0.15 + 0.02 * k)
+    x += roll
+    hit = int(0.54 * SR)
+    seg = n - hit
+    x[hit:] += np.sin(sweep_phase(90, 45, seg, 0.5)) * expdecay(seg, 3) * 0.6
+    x[hit:] += highpass(noise(seg), 5000) * expdecay(seg, 2) * 0.1
+    write_wav("gauntlet_clear", x, 0.9)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -741,6 +801,10 @@ if __name__ == "__main__":
         sfx_leviathan()
         print("leviathan audio ok")
         sys.exit(0)
+    if "--gauntlet" in sys.argv:
+        sfx_gauntlet()
+        print("gauntlet audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -755,4 +819,5 @@ if __name__ == "__main__":
     sfx_rifts()
     sfx_ricochet()
     sfx_leviathan()
+    sfx_gauntlet()
     print("audio ok")

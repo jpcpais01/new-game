@@ -103,6 +103,22 @@ func start_daily() -> void:
 		return g)
 
 
+## The Gauntlet: the four bosses back to back with your own ship and Forge.
+func start_gauntlet() -> void:
+	_switch(func():
+		var g := GameScreen.new()
+		g.main = self
+		g.ready.connect(func(): g.begin(fresh_seed(), Save.gauntlet_loadout()), CONNECT_ONE_SHOT)
+		return g)
+
+
+func go_gauntlet() -> void:
+	_switch(func():
+		var g := GauntletScreen.new()
+		g.main = self
+		return g)
+
+
 func go_daily() -> void:
 	_switch(func():
 		var d := DailyScreen.new()
@@ -163,7 +179,7 @@ func _switch(make: Callable) -> void:
 
 func _disconnect_arena() -> void:
 	for sig in ["leveled_up", "ended", "banner", "boss_started", "boss_ended", "card_taken", "hurt",
-			"chest_opened", "overdrive_ready", "coach"]:
+			"chest_opened", "overdrive_ready", "coach", "gauntlet_split", "gauntlet_cleared", "gauntlet_cycle"]:
 		for c in arena.get_signal_connection_list(sig):
 			arena.disconnect(sig, c.callable)
 

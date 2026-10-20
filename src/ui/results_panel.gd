@@ -20,6 +20,9 @@ var _score_target := 0
 
 
 func build() -> void:
+	if sim.gauntlet:
+		_build_gauntlet()
+		return
 	accent = UiKit.GOLD if won else UiKit.MAGENTA
 	var night := won and sim.endless
 	var t := heading("BEYOND THE DAWN" if night else ("DAWN REACHED" if won else "SIGNAL LOST"),
@@ -50,6 +53,11 @@ func build() -> void:
 	_trail()
 	_evolutions()
 	_missions()
+	_footer()
+
+
+## Flux earned (counting up) and the buttons.
+func _footer() -> void:
 	var flux_box := PanelContainer.new()
 	var fsb := UiKit.box(UiKit.GOLD, Color(0.1, 0.07, 0.02, 0.6), 24, 2, 12)
 	fsb.content_margin_top = 16
@@ -81,6 +89,123 @@ func build() -> void:
 	h.pressed.connect(func(): home.emit())
 	row.add_child(h)
 	body.add_child(row)
+
+
+## The Gauntlet's results: the clear (or where it ended), and every split
+## against your best.
+func _build_gauntlet() -> void:
+	var cleared := sim.g_clear_tick >= 0
+	accent = Defs.GAUNTLET_COLOR if cleared else UiKit.MAGENTA
+	var t := heading("GAUNTLET CLEARED" if cleared else "SIGNAL LOST", Defs.GAUNTLET_COLOR if cleared else UiKit.RED,
+			70 if cleared else 76)
+	t.pivot_offset = Vector2(386, 50)
+	t.scale = Vector2(1.5, 1.5)
+	create_tween().tween_property(t, "scale", Vector2.ONE, 0.6).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	var sub := ""
+	if cleared:
+		sub = "All four fell in %s." % GauntletScreen.fmt_split(sim.g_clear_tick)
+		if sim.bosses_killed > Defs.GAUNTLET.size():
+			sub = "All four fell in %s, then %d more." % [GauntletScreen.fmt_split(sim.g_clear_tick),
+					sim.bosses_killed - Defs.GAUNTLET.size()]
+	else:
+		sub = "%d of 4 bosses passed. %s stood in your way." % [sim.g_stage,
+				String(Hud.BOSS_NAMES[Defs.GAUNTLET[sim.g_stage % Defs.GAUNTLET.size()]]).capitalize()]
+	var sl := UiKit.label(sub, 34, UiKit.DIM)
+	sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sl.custom_minimum_size = Vector2(760, 0)
+	body.add_child(sl)
+	if cleared and beat.has("gauntlet_clear"):
+		var rec := UiKit.glow_label("NEW RECORD CLEAR", 34, Defs.GAUNTLET_COLOR)
+		body.add_child(rec)
+		var tw := rec.create_tween().set_loops()
+		tw.tween_property(rec, "modulate", Color(1.4, 1.3, 1.1), 0.5)
+		tw.tween_property(rec, "modulate", Color.WHITE, 0.5)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 24)
+	grid.add_theme_constant_override("v_separation", 18)
+	_stat(grid, "BOSSES", str(sim.bosses_killed), beat.has("gauntlet_felled"), 0)
+	_stat(grid, "LEVEL", str(sim.level), false, 1)
+	_stat(grid, "KILLS", UiKit.fmt_int(sim.kills), false, 2)
+	var cc := CenterContainer.new()
+	cc.add_child(grid)
+	body.add_child(cc)
+	_splits()
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 0)
+	v.add_child(UiKit.label("GAUNTLET SCORE", 26, UiKit.DIM, UiKit.display_light()))
+	_score_label = UiKit.glow_label("0", 78, Color.WHITE)
+	v.add_child(_score_label)
+	_score_target = sim.score()
+	if beat.has("gauntlet_score"):
+		var r := UiKit.label("NEW BEST", 26, Defs.GAUNTLET_COLOR, UiKit.display())
+		v.add_child(r)
+		var tw2 := r.create_tween().set_loops()
+		tw2.tween_property(r, "modulate:a", 0.4, 0.5)
+		tw2.tween_property(r, "modulate:a", 1.0, 0.5)
+	body.add_child(v)
+	UiKit.pop_in(v, 0.55, 20)
+	_evolutions()
+	_missions()
+	_footer()
+
+
+## One line per boss passed: split, and the difference from your best before this run.
+func _splits() -> void:
+	if sim.g_splits.is_empty():
+		return
+	var prev: Array = beat.get("gauntlet_prev", [])
+	var fast: Array = beat.get("gauntlet_splits", [])
+	var p := PanelContainer.new()
+	var sb := UiKit.box(Defs.GAUNTLET_COLOR, Color(0.1, 0.06, 0.02, 0.55), 22, 2, 10)
+	sb.content_margin_left = 22
+	sb.content_margin_right = 22
+	sb.content_margin_top = 12
+	sb.content_margin_bottom = 12
+	p.add_theme_stylebox_override("panel", sb)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 4)
+	p.add_child(col)
+	col.add_child(UiKit.label("SPLITS", 24, Defs.GAUNTLET_COLOR.lerp(Color.WHITE, 0.3), UiKit.display()))
+	var shown := mini(sim.g_splits.size(), 8)
+	for k in shown:
+		var n := Defs.GAUNTLET.size()
+		var type: int = Defs.GAUNTLET[k % n]
+		var t := int(sim.g_splits[k])
+		var h := HBoxContainer.new()
+		h.add_theme_constant_override("separation", 14)
+		var tr := TextureRect.new()
+		tr.texture = Art.enemy[type]
+		tr.custom_minimum_size = Vector2(56, 56)
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		h.add_child(tr)
+		var name := UiKit.label(String(Hud.BOSS_NAMES[type]) + ("  ·  %s" % Hud.ROMAN[mini(k / n, 9)] if k >= n else ""),
+				28, Defs.ENEMY_COLOR[type].lerp(Color.WHITE, 0.4), UiKit.display_light(), HORIZONTAL_ALIGNMENT_LEFT)
+		name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(name)
+		var delta := ""
+		var dcol := UiKit.DIM
+		if t <= 0:
+			delta = "ESCAPED"
+			dcol = UiKit.RED
+		elif k < n and fast.has(k):
+			var old := int(prev[k]) if k < prev.size() else 0
+			delta = "NEW BEST" if old <= 0 else "-" + GauntletScreen.fmt_split(old - t)
+			dcol = UiKit.GREEN
+		elif k < n and k < prev.size() and int(prev[k]) > 0:
+			delta = "+" + GauntletScreen.fmt_split(t - int(prev[k]))
+			dcol = UiKit.RED
+		var dl := UiKit.label(delta, 24, dcol, UiKit.display(), HORIZONTAL_ALIGNMENT_RIGHT)
+		dl.custom_minimum_size = Vector2(150, 0)
+		h.add_child(dl)
+		var tl := UiKit.label(GauntletScreen.fmt_split(t) if t > 0 else "-", 34, Color.WHITE, UiKit.display(),
+				HORIZONTAL_ALIGNMENT_RIGHT)
+		tl.custom_minimum_size = Vector2(150, 0)
+		h.add_child(tl)
+		col.add_child(h)
+		UiKit.pop_in(h, 0.4 + 0.12 * k, 0)
+	body.add_child(p)
 
 
 ## A brighter light trail earned for this ship.
