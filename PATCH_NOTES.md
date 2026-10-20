@@ -1,6 +1,6 @@
 # Afterglow patch notes
 
-## Oct 20, 2026 · 05:00 UTC
+## Oct 20, 2026 · 04:00 UTC
 
 - **New weapon: the Ricochet Glaive.** Throw a spinning glaive that leaps from enemy to enemy with a bright ricochet, then flies home through everything in its way. It is thrown again only once it is back in your hand, so fighting close to the swarm means faster throws. Levels add ricochets and more glaives, up to three at once.
 - **New evolution: Ouroboros.** A maxed Ricochet Glaive with Renewal becomes four golden serpent glaives that grow 20% stronger with every ricochet (up to triple damage) and leap straight back out the moment they return. Nine evolutions now fill the Codex.
