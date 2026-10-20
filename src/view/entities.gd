@@ -12,8 +12,13 @@ const GEM_TIERS := [
 	[1e9, Color(1.0, 0.45, 1.0), 1.35],
 ]
 
+## Shardfield crystal hues, by crystal index.
+const SHARD_HUES := [Color(0.45, 0.92, 1.0), Color(0.72, 0.55, 1.0), Color(1.0, 0.5, 0.8), Color(0.45, 1.0, 0.8)]
+const SHARD_LIGHT := Vector2(-0.6, -0.8)
+
 var arena: Arena
 var layer := BODIES
+var _shard_shapes := {}   # crystal index -> its drawn shape (rebuilt when a new field is placed)
 
 
 func _ready() -> void:
@@ -44,6 +49,7 @@ func _draw_enemies() -> void:
 	var a := arena.alpha
 	var t := arena.vtime
 	var gold := Art.tex("ring")
+	_draw_shards(s, t)
 	_draw_levi_body(s, a, t)
 	for i in s.en:
 		if s.e_spawn[i] > 6:
@@ -738,6 +744,188 @@ func _draw_sector(s: Sim, t: float, a: float) -> void:
 			_draw_maw(m, t, a)
 	elif s.sector == Defs.SECTOR_CORONA and not s.flare.is_empty():
 		_draw_flare(s, t)
+	elif s.sector == Defs.SECTOR_SHARD:
+		_draw_shard_glow(s, t)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## A crystal's look, made once per field: a faceted main prism with two
+## smaller ones leaning out of it, and the cracks that open as it charges.
+func _shard_shape(s: Sim, k: int) -> Dictionary:
+	var c: Dictionary = s.shards[k]
+	var key := Vector3(float(c.x), float(c.y), float(c.r))
+	var sh: Dictionary = _shard_shapes.get(k, {})
+	if not sh.is_empty() and sh.key == key:
+		return sh
+	var rnd := RandomNumberGenerator.new()
+	rnd.seed = hash(key)
+	var r: float = c.r
+	var rot := Trig.to_rad(int(c.a))
+	var parts: Array = []
+	# Two smaller prisms behind the main one.
+	for j in 2:
+		var ang := rot + PI * 0.6 + float(j) * PI * 0.85 + rnd.randf_range(-0.3, 0.3)
+		var cen := Vector2(cos(ang), sin(ang)) * r * 0.58
+		parts.append(_prism_pts(rnd, cen, r * rnd.randf_range(0.4, 0.5), 5, ang))
+	parts.append(_prism_pts(rnd, Vector2.ZERO, r, 6 + k % 3, rot))
+	var cracks: Array = []
+	for j in 5:
+		var ang2 := rnd.randf() * TAU
+		var p0 := Vector2(cos(ang2), sin(ang2)) * r * 0.12
+		var p1 := p0 + Vector2(cos(ang2 + rnd.randf_range(-0.5, 0.5)), sin(ang2 + rnd.randf_range(-0.5, 0.5))) * r * 0.45
+		var p2 := p1 + Vector2(cos(ang2 + rnd.randf_range(-0.7, 0.7)), sin(ang2 + rnd.randf_range(-0.7, 0.7))) * r * 0.35
+		cracks.append(PackedVector2Array([p0, p1, p2]))
+	var rubble: Array = []
+	for j in 7:
+		var ang3 := TAU * float(j) / 7.0 + rnd.randf_range(-0.3, 0.3)
+		var cen2 := Vector2(cos(ang3), sin(ang3)) * r * rnd.randf_range(0.25, 0.85)
+		rubble.append(_prism_pts(rnd, cen2, r * rnd.randf_range(0.12, 0.22), 4, ang3))
+	sh = {"key": key, "parts": parts, "cracks": cracks, "rubble": rubble, "hue": SHARD_HUES[k % SHARD_HUES.size()]}
+	_shard_shapes[k] = sh
+	return sh
+
+
+## A prism seen from above, cut like a gem: a ring of jittered corners, a
+## flat table on top (nudged towards the light, so it looks tall) and sloped
+## facets between them that shade like glass.
+func _prism_pts(rnd: RandomNumberGenerator, cen: Vector2, r: float, n: int, rot: float) -> Dictionary:
+	var pts := PackedVector2Array()
+	var table := PackedVector2Array()
+	var top := cen + SHARD_LIGHT * r * 0.16
+	var k := rnd.randf_range(0.36, 0.5)
+	for i in n:
+		var ang := rot + TAU * (float(i) + rnd.randf_range(-0.22, 0.22)) / float(n)
+		var p := cen + Vector2(cos(ang), sin(ang)) * r * rnd.randf_range(0.88, 1.1)
+		pts.append(p)
+		table.append(top + (p - cen) * k)
+	var shadow := PackedVector2Array()
+	for p in pts:
+		shadow.append(p + Vector2(0.14, 0.2) * r)
+	return {"pts": pts, "table": table, "shadow": shadow}
+
+
+## Crystal bodies (normal blend): dark glass facets lit from the top left.
+## Shattered ones leave rubble; growing ones rise out of it.
+func _draw_shards(s: Sim, t: float) -> void:
+	if s.sector != Defs.SECTOR_SHARD:
+		return
+	for k in s.shards.size():
+		var c: Dictionary = s.shards[k]
+		var sh := _shard_shape(s, k)
+		var hue: Color = sh.hue
+		var st := int(c.st)
+		var pos := Vector2(float(c.x), float(c.y))
+		if st == 2 or st == 3:
+			draw_set_transform(pos, 0.0, Vector2.ONE)
+			for rb in sh.rubble:
+				_draw_prism(rb, hue, 0.55, 0.0)
+		if st == 2:
+			continue
+		var sc := 1.0
+		var hot := 0.0
+		if st == 3:
+			var g := float(int(c.t)) / float(Defs.SHARD_GROW)
+			sc = 0.15 + 0.85 * (1.0 - pow(1.0 - g, 3.0))
+			hot = 1.0 - g
+		elif st == 1:
+			var f := 1.0 - float(int(c.t)) / float(Defs.SHARD_FUSE)
+			sc = 1.0 + 0.04 * f + 0.02 * sin(t * 60.0) * f
+			hot = 0.4 + 0.6 * f
+		draw_set_transform(pos, 0.0, Vector2(sc, sc))
+		for part in sh.parts:
+			_draw_prism(part, hue, 1.0, hot)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_prism(part: Dictionary, hue: Color, alpha: float, hot: float) -> void:
+	var pts: PackedVector2Array = part.pts
+	var table: PackedVector2Array = part.table
+	var n := pts.size()
+	var light := SHARD_LIGHT.normalized()
+	draw_colored_polygon(part.shadow, Color(0.0, 0.0, 0.02, 0.5 * alpha))
+	var deep := Color(hue.r * 0.1 + 0.015, hue.g * 0.12 + 0.02, hue.b * 0.2 + 0.05)
+	var white := Color(1.5, 1.5, 1.6)
+	var cen := Vector2.ZERO
+	for p in pts:
+		cen += p
+	cen /= float(n)
+	for i in n:
+		var j := (i + 1) % n
+		var mid := ((pts[i] + pts[j]) * 0.5 - cen).normalized()
+		var lit := clampf(0.5 + 0.5 * mid.dot(light), 0.0, 1.0)
+		var col := deep.lerp(hue * 0.95, pow(lit, 1.6))
+		if lit > 0.86:
+			col = col.lerp(white, (lit - 0.86) * 2.4)
+		col = col.lerp(white, hot * 0.6)
+		draw_colored_polygon(PackedVector2Array([pts[i], pts[j], table[j], table[i]]), Color(col, 0.95 * alpha))
+	var tc := deep.lerp(hue, 0.5).lerp(white, 0.12 + 0.55 * hot)
+	draw_colored_polygon(table, Color(tc, 0.95 * alpha))
+	for i in n:
+		draw_line(pts[i], table[i], Color(hue.lerp(white, 0.3), 0.45 * alpha), 1.5)
+	var ring := table.duplicate()
+	ring.append(table[0])
+	draw_polyline(ring, Color(hue.lerp(white, 0.5), 0.7 * alpha), 1.5)
+	ring = pts.duplicate()
+	ring.append(pts[0])
+	draw_polyline(ring, Color(hue.lerp(Color.WHITE, 0.35 + 0.5 * hot), 0.95 * alpha), 2.5)
+
+
+## Crystal light (additive): a pool of light on the floor, edges that bloom,
+## a charge ring that fills with kills, cracks and a hum while it resonates,
+## and a ghost outline where a shattered one will grow back.
+func _draw_shard_glow(s: Sim, t: float) -> void:
+	var glow := Art.tex("glow")
+	for k in s.shards.size():
+		var c: Dictionary = s.shards[k]
+		var sh := _shard_shape(s, k)
+		var hue: Color = sh.hue
+		var st := int(c.st)
+		var r: float = c.r
+		var pos := Vector2(float(c.x), float(c.y))
+		if st == 2:
+			# Waiting to grow back: a faint dashed outline, brighter near the end.
+			var left := float(int(c.t)) / float(Defs.SHARD_REGROW * Sim.TPS)
+			var k2 := clampf(1.0 - left / 0.2, 0.0, 1.0)
+			draw_set_transform(pos, t * 0.3, Vector2.ONE)
+			for j in 10:
+				var a0 := TAU * float(j) / 10.0
+				draw_arc(Vector2.ZERO, r, a0, a0 + TAU / 20.0, 6, Color(hue, 0.1 + 0.35 * k2), 2.0)
+			continue
+		var frac := s.shard_frac(k)
+		var res := st == 1
+		var fuse := 1.0 - float(int(c.t)) / float(Defs.SHARD_FUSE) if res else 0.0
+		var breath := 0.85 + 0.15 * sin(t * 1.7 + float(k))
+		draw_set_transform(pos, 0.0, Vector2.ONE * (r * 3.4 / 128.0))
+		draw_texture(glow, Vector2(-64, -64), Color(hue, (0.1 + 0.22 * frac) * breath + 0.3 * fuse))
+		draw_set_transform(pos, 0.0, Vector2.ONE * (r * 1.3 / 128.0))
+		draw_texture(glow, Vector2(-64, -64), Color(hue * 1.6, 0.12 + 0.5 * frac + 0.4 * fuse))
+		var sc := 1.0
+		if st == 3:
+			var g := float(int(c.t)) / float(Defs.SHARD_GROW)
+			sc = 0.15 + 0.85 * (1.0 - pow(1.0 - g, 3.0))
+		draw_set_transform(pos, 0.0, Vector2(sc, sc))
+		var edge := hue * (1.0 + 0.8 * frac + 1.2 * fuse)
+		for part in sh.parts:
+			var ring: PackedVector2Array = (part.pts as PackedVector2Array).duplicate()
+			ring.append(ring[0])
+			draw_polyline(ring, Color(edge, 0.35 + 0.35 * frac), 3.0)
+		if frac > 0.5 or res:
+			# Cracks of light open as it fills.
+			var ck := clampf((frac - 0.5) * 2.0, 0.0, 1.0) if not res else 1.0
+			var flick := 1.0 if not res else 0.7 + 0.3 * sin(t * 50.0)
+			for cr in sh.cracks:
+				draw_polyline(cr, Color(2.0, 2.0, 2.2, (0.25 + 0.6 * ck) * flick), 1.5 + 1.5 * fuse)
+		draw_set_transform(pos, 0.0, Vector2.ONE)
+		if st == 0 and frac > 0.0:
+			draw_arc(Vector2.ZERO, r + 18.0, -PI * 0.5, -PI * 0.5 + TAU * frac, maxi(6, int(48.0 * frac)),
+					Color(hue * 1.5, 0.55), 4.0)
+		if res:
+			# The hum: rings closing in on it, and a white-hot heart.
+			for j in 3:
+				var f := fmod(fuse * 3.0 + float(j) / 3.0, 1.0)
+				draw_arc(Vector2.ZERO, lerpf(r * 2.6, r * 1.05, f), 0.0, TAU, 48, Color(hue * 2.0, 0.5 * f), 3.0)
+			draw_set_transform(pos, 0.0, Vector2.ONE * (r * (0.8 + 1.4 * fuse) / 128.0))
+			draw_texture(glow, Vector2(-64, -64), Color(2.0, 2.0, 2.2, 0.4 + 0.5 * fuse))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 

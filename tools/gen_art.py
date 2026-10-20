@@ -637,6 +637,30 @@ def sector_icons():
               lines=flames, core_white=0.8), "i_sector_corona")
 
 
+# Round 14: the Shardfield (a cluster of three faceted crystals) and the
+# crystal shard used by the Codex and coach tips.
+def shard_icons():
+    def prism(cx, cy, w, h, tilt):
+        c, s_ = math.cos(tilt), math.sin(tilt)
+        pts = [(0.0, -h), (w, -h * 0.55), (w, h * 0.6), (0.0, h), (-w, h * 0.6), (-w, -h * 0.55)]
+        return [(cx + x * c - y * s_, cy + x * s_ + y * c) for x, y in pts]
+
+    def facets(cx, cy, w, h, tilt):
+        c, s_ = math.cos(tilt), math.sin(tilt)
+        tr = lambda x, y: (cx + x * c - y * s_, cy + x * s_ + y * c)
+        return [[tr(0.0, -h), tr(0.0, h)], [tr(-w, -h * 0.55), tr(0.0, -h * 0.2), tr(w, -h * 0.55)]]
+
+    parts = [(0.0, -0.05, 0.3, 0.92, 0.0), (-0.5, 0.3, 0.2, 0.55, -0.45), (0.52, 0.32, 0.19, 0.5, 0.5)]
+    shapes = [prism(*p_) for p_ in parts]
+    lines = []
+    for p_ in parts:
+        lines += facets(*p_)
+    save(neon(shapes, (0.55, 0.9, 1.0), size=96, radius=34, line=3.4, glow=8.5, fill=0.45, lines=lines,
+              core_white=0.75), "i_sector_shard")
+    save(neon([prism(0.0, 0.0, 0.42, 0.95, 0.35)], (0.75, 0.6, 1.0), size=96, radius=34, line=3.6, glow=9.0,
+              fill=0.5, lines=facets(0.0, 0.0, 0.42, 0.95, 0.35), core_white=0.75), "i_shard")
+
+
 def mod_icons():
     for name, (shapes, lines, col) in MOD_ICONS.items():
         save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.35, lines=lines, core_white=0.75),
@@ -766,6 +790,10 @@ if __name__ == "__main__":
         sector_icons()
         print("sector art ok")
         sys.exit(0)
+    if "--shards" in sys.argv:
+        shard_icons()
+        print("shard art ok")
+        sys.exit(0)
     if "--resonance" in sys.argv:
         resonance_icons()
         print("resonance art ok")
@@ -787,6 +815,7 @@ if __name__ == "__main__":
     leviathan_sprites()
     gauntlet_icons()
     sector_icons()
+    shard_icons()
     resonance_icons()
     app_icon()
     print("art ok")

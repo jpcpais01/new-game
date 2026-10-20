@@ -59,6 +59,10 @@ func _ready() -> void:
 		await _resonance_shots()
 		get_tree().quit()
 		return
+	if args.has("shards"):
+		await _shard_shots()
+		get_tree().quit()
+		return
 	main.start_run()
 	await _wait(1.0)
 	var gs = main.screen
@@ -677,6 +681,58 @@ func _sector_shots() -> void:
 	await _wait(0.1)
 	await _shot("s7_flare")
 	main.arena.demo = false
+
+
+func _shard_shots() -> void:
+	Save.data.missions.append("warden")
+	Save.data.missions.append("dawn")
+	Save.data.missions.append("seraphfall")
+	Save.data.sector = Defs.SECTOR_SHARD
+	main.go_hangar()
+	await _wait(1.4)
+	await _shot("c1_hangar")
+	main.start_run()
+	await _wait(2.0)
+	await _shot("c2_intro")
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	_ff(s, func(): return s.tick > 215 * Sim.TPS and s.en > 80, 260 * Sim.TPS)
+	# Stand beside the nearest crystal and charge it most of the way.
+	var best := 0
+	var bd := INF
+	for k in s.shards.size():
+		var c: Dictionary = s.shards[k]
+		var d := Vector2(float(c.x) - s.px, float(c.y) - s.py).length()
+		if d < bd and int(c.st) == 0:
+			bd = d
+			best = k
+	var cb: Dictionary = s.shards[best]
+	s.px = float(cb.x) + float(cb.r) + 90.0
+	s.py = float(cb.y) + 40.0
+	s.ppx = s.px
+	s.ppy = s.py
+	cb.charge = s.shard_full() * 0.8
+	gs._hud._rebuild_loadout()
+	main.arena.demo = true
+	await _wait(1.0)
+	await _shot("c3_field")
+	cb.charge = s.shard_full() + 1.0
+	s._shard_charge(best, 0.0)
+	cb.st = 1
+	cb.t = 12
+	await _wait(0.12)
+	await _shot("c4_resonate")
+	await _wait(0.35)
+	await _shot("c5_shatter")
+	main.arena.demo = false
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(2.4)
+	await _shot("c6_results")
+	main.go_codex()
+	await _wait(1.2)
+	await _shot("c7_codex")
 
 
 func _resonance_shots() -> void:

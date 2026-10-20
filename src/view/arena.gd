@@ -381,6 +381,7 @@ func _update_bg(delta: float, p: Vector2) -> void:
 	bg_mat.set_shader_parameter("arena_r", Sim.ARENA_R)
 	bg_mat.set_shader_parameter("abyss", 1.0 if sim.sector == Defs.SECTOR_ABYSS else 0.0)
 	bg_mat.set_shader_parameter("corona", 1.0 if sim.sector == Defs.SECTOR_CORONA else 0.0)
+	bg_mat.set_shader_parameter("shard", 1.0 if sim.sector == Defs.SECTOR_SHARD else 0.0)
 	var ms := PackedVector4Array()
 	for m in sim.maws:
 		if ms.size() < 3:
@@ -724,6 +725,8 @@ func handle_events() -> void:
 				_on_maw(e, loud)
 			Sim.EV_FLARE:
 				_on_flare(e, loud)
+			Sim.EV_SHARD:
+				_on_shard(e, loud)
 			Sim.EV_RESONANCE:
 				_on_resonance(e, loud)
 			Sim.EV_RESFX:
@@ -975,6 +978,73 @@ func _on_flare(e: Array, loud: bool) -> void:
 				Sfx.play("flare_pass", 1.0 + 0.02 * float(mini(sim.flares_passed, 20)))
 
 
+## The Shardfield: crystals hum as they fill, shatter into prismatic light,
+## drink enemy shots and take lasers for you.
+func _on_shard(e: Array, loud: bool) -> void:
+	var x: float = e[1]
+	var y: float = e[2]
+	var k := int(e[4])
+	var hue: Color = EntityView.SHARD_HUES[k % EntityView.SHARD_HUES.size()] if k >= 0 else Color(0.55, 0.9, 1.0)
+	var r: float = float(sim.shards[k].r) if k >= 0 else 60.0
+	var near := Vector2(x - sim.px, y - sim.py).length() < 1100.0
+	match int(e[3]):
+		0:
+			fx.ring(x, y, r * 2.8, r, 0.5, hue, 1.4)
+			if loud:
+				coach.emit("shard")
+				if near:
+					Sfx.play("shard_charge", randf_range(0.95, 1.06))
+		1:
+			var a0 := Trig.to_rad(int(e[5]))
+			fx.flash(x, y, Defs.SHARD_BLAST * 1.6, 0.4, hue)
+			fx.ring(x, y, r, Defs.SHARD_BLAST * 1.15, 0.4, Color(1.6, 1.6, 1.8), 2.2)
+			fx.ring(x, y, r * 0.5, Defs.SHARD_BLAST * 1.6, 0.6, hue, 1.6)
+			for b in Defs.SHARD_BEAMS:
+				var ang := a0 + TAU * float(b) / float(Defs.SHARD_BEAMS)
+				var bc := Color.from_hsv(fmod(float(b) / float(Defs.SHARD_BEAMS) + vtime * 0.1, 1.0), 0.45, 1.0)
+				var dir := Vector2(cos(ang), sin(ang))
+				fx.beam(Vector2(x, y) + dir * r * 0.6, Vector2(x, y) + dir * Defs.SHARD_BEAM_LEN, Defs.SHARD_BEAM_W * 1.6,
+						bc * 1.4, 0.34)
+				fx.spray(x, y, bc * 1.8, 6, ang, 0.15, 1300.0, 1.0, 0.35)
+			# Glass: shards of every colour, flung out and tumbling.
+			for j in 34:
+				var ang2 := randf() * TAU
+				var sp := randf_range(250.0, 950.0)
+				var pc := hue.lerp(Color.from_hsv(randf(), 0.4, 1.0), 0.5) * 1.8
+				fx.particle(x + cos(ang2) * r * 0.5, y + sin(ang2) * r * 0.5, cos(ang2) * sp, sin(ang2) * sp,
+						randf_range(0.4, 0.9), randf_range(0.8, 1.6), pc, 1, 2.6)
+			fx.burst(x, y, Color(1.8, 1.8, 2.0), 40, 900.0, 1.2, 0.5)
+			add_wave(x, y, 2.2, 1000.0)
+			if near:
+				shake(0.32)
+				_aberr = maxf(_aberr, 0.35)
+			if loud and near:
+				Sfx.play("shard_break", randf_range(0.92, 1.08))
+				Sfx.buzz(45)
+		2:
+			fx.ring(x, y, 4.0, 34.0, 0.2, hue, 0.8)
+			fx.spray(x, y, hue * 1.8, 4, randf() * TAU, TAU, 260.0, 0.6, 0.2)
+			if loud and near and randf() < 0.6:
+				Sfx.play("shard_ping", randf_range(0.9, 1.35))
+		3:
+			fx.ring(sim.px, sim.py, 30.0, 110.0, 0.3, Color(0.55, 0.95, 1.0), 1.2)
+			if loud:
+				coach.emit("cover")
+				Sfx.play("shard_ping", 0.7)
+		4:
+			fx.ring(x, y, r * 2.2, r * 0.8, 0.9, hue, 1.2)
+			for j in 14:
+				var ang3 := randf() * TAU
+				var rr := r * randf_range(1.4, 2.4)
+				fx.particle(x + cos(ang3) * rr, y + sin(ang3) * rr, -cos(ang3) * rr * 1.4, -sin(ang3) * rr * 1.4, 0.6, 1.0,
+						hue * 1.6, 0, 1.0)
+			if loud and near:
+				Sfx.play("shard_grow", randf_range(0.95, 1.05))
+		5:
+			fx.burst(x, y, hue * 1.4, 24, 500.0, 1.0, 0.5)
+			fx.ring(x, y, r * 0.4, r * 1.6, 0.4, hue, 1.0)
+
+
 ## Sector ambience: light spiralling into black holes, embers off the sun and
 ## the flare front.
 func _sector_particles() -> void:
@@ -1008,6 +1078,33 @@ func _sector_particles() -> void:
 				var v := randf_range(100.0, 380.0)
 				fx.particle(cos(ang3) * fr, sin(ang3) * fr, cos(ang3) * v, sin(ang3) * v, 0.5, 1.2,
 						Color(2.4, 1.2, 0.35), 0, 2.0)
+	elif sim.sector == Defs.SECTOR_SHARD:
+		# Glints rising off charged crystals near you, and sparks where a laser
+		# breaks on one.
+		for k in sim.shards.size():
+			var c: Dictionary = sim.shards[k]
+			if int(c.st) >= 2:
+				continue
+			var cx: float = c.x
+			var cy: float = c.y
+			if absf(cx - sim.px) > 900.0 or absf(cy - sim.py) > 1300.0:
+				continue
+			var f := sim.shard_frac(k)
+			if randf() < 0.08 + 0.5 * f:
+				var ang4 := randf() * TAU
+				var r1: float = float(c.r) * randf_range(0.3, 1.0)
+				var hue: Color = EntityView.SHARD_HUES[k % EntityView.SHARD_HUES.size()]
+				fx.particle(cx + cos(ang4) * r1, cy + sin(ang4) * r1, randf_range(-20, 20), randf_range(-90, -30),
+						randf_range(0.6, 1.2), 0.7 + f, hue * (1.4 + f), 0, 0.6)
+		for l in sim.lasers():
+			if not l[5] or not l[8]:
+				continue
+			var la := Trig.to_rad(l[2])
+			var end := Vector2(l[0], l[1]) + Vector2(cos(la), sin(la)) * float(l[3])
+			var col: Color = Defs.ENEMY_COLOR[l[6]]
+			fx.spray(end.x, end.y, col * 2.0, 2, la + PI, 1.6, 520.0, 0.8, 0.22)
+			if randf() < 0.3:
+				fx.flash(end.x, end.y, 60.0, 0.12, Color(0.6, 0.95, 1.0))
 
 
 ## Sparks that make each rift read at a glance.

@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 13
+const RULES_VERSION := 14
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -87,6 +87,8 @@ const EV_FLARE := 46      # phase (0 the sun swells, 1 erupts, 2 burns you, 3 fa
 const EV_RESONANCE := 47  # resonance id, weapon a, weapon b (a resonance switches on)
 const EV_RESFX := 48      # resonance id, then its data (refraction: x1, y1, x2, y2, w; homecoming: x, y, r;
                           # bladestorm: x, y, angle, radius, half arc; surge: x, y)
+const EV_SHARD := 49      # x, y, phase (0 a crystal resonates, 1 shatters, 2 absorbs a shot, 3 shields you from a beam,
+                          # 4 grows back, 5 crumbles to make room for a rift), crystal index (-1: none), beam angle
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -261,6 +263,13 @@ var _eaten := {}              # uid -> the black hole that crushed it (its light
 var flare := {}               # Corona: the flare in flight, {} when none: t, r, gaps, spin, hit, past, uids
 var flare_next := 0
 var flares_passed := 0        # flares slipped through without a burn
+var shards: Array = []        # Shardfield crystals: {x, y, r, a, st (0 standing, 1 resonating, 2 shattered,
+                              # 3 growing back), t, charge}
+var _shard_at := PackedInt32Array()  # grid cell -> the crystal near it (-1 none, -2 more than one)
+var shards_broken := 0        # crystals shattered this run
+var shots_absorbed := 0       # enemy shots the crystals swallowed
+var beams_covered := 0        # laser beams a crystal shielded you from
+var _cover_tick := -100
 
 # Resonances (two weapons at RESONANCE_LEVEL+ switch on a bonus effect)
 var resonances: Array = []    # resonance ids in the order they switched on
@@ -411,6 +420,8 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 		flare_next = Defs.FLARE_FIRST * TPS
 		py = Defs.SUN_START
 		ppy = py
+	elif sector == Defs.SECTOR_SHARD:
+		_place_shards()
 	_recompute()
 	hp = max_hp
 	xp_need = need_for(level)
@@ -476,9 +487,13 @@ func step(ix: int, iy: int, burst := false) -> void:
 		_update_maws()
 	elif sector == Defs.SECTOR_CORONA:
 		_update_corona()
+	elif sector == Defs.SECTOR_SHARD:
+		_update_shards()
 	_update_enemies()
 	_grid_build()
 	_separate()
+	if sector == Defs.SECTOR_SHARD:
+		_shard_solid()
 	_levi_body()
 	_aegis_aura()
 	_update_chain()
@@ -695,7 +710,7 @@ func flux_earned() -> int:
 ## The run's score: what the Daily Run ranks by. Banes multiply it.
 func score() -> int:
 	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50 + chain_score \
-			+ rifts_done * Defs.RIFT_SCORE + g_bonus
+			+ rifts_done * Defs.RIFT_SCORE + g_bonus + shards_broken * Defs.SHARD_SCORE
 	if dawn:
 		base += 10000
 	return int(float(base) * score_mult())
@@ -726,6 +741,8 @@ func checksum() -> int:
 		h = GlowRng.mix32(h ^ (int(float(m.x) * 100.0) & GlowRng.MASK) ^ (int(m.eaten) << 16))
 	if not flare.is_empty():
 		h = GlowRng.mix32(h ^ (int(float(flare.r) * 100.0) & GlowRng.MASK))
+	for c in shards:
+		h = GlowRng.mix32(h ^ (int(float(c.charge) * 10.0) & 0xFFFF) ^ (int(c.st) << 16) ^ (int(c.t) << 20))
 	h = GlowRng.mix32(h ^ int(rng.state()[0]))
 	return h
 
@@ -838,6 +855,20 @@ func _move_player(ix: int, iy: int) -> void:
 	if d > lim:
 		px = px / d * lim
 		py = py / d * lim
+	if sector == Defs.SECTOR_SHARD:
+		var k := shard_at(px, py, PLAYER_R)
+		if k >= 0:
+			var c: Dictionary = shards[k]
+			var dx := px - float(c.x)
+			var dy := py - float(c.y)
+			var dc := sqrt(dx * dx + dy * dy)
+			if dc < 0.001:
+				dx = 0.0
+				dy = 1.0
+				dc = 1.0
+			var rr: float = float(c.r) + PLAYER_R
+			px = float(c.x) + dx / dc * rr
+			py = float(c.y) + dy / dc * rr
 	if l > 0.2:
 		facing = Trig.angle_of(mx, my)
 	if st_regen > 0.0 and hp < max_hp:
@@ -1016,6 +1047,18 @@ func _open_rift() -> void:
 		var ra := Trig.angle_of(x, y) if d > 1.0 else a
 		x = Trig.cos_i(ra) * clear
 		y = Trig.sin_i(ra) * clear
+	if sector == Defs.SECTOR_SHARD:
+		# Crystals in the way crumble to make room for it.
+		for k in shards.size():
+			var c: Dictionary = shards[k]
+			var cx: float = float(c.x) - x
+			var cy: float = float(c.y) - y
+			var room: float = float(c.r) + 140.0
+			if int(c.st) < 2 and cx * cx + cy * cy < room * room:
+				c.st = 2
+				c.t = Defs.SHARD_REGROW * TPS
+				c.charge = 0.0
+				events.append([EV_SHARD, float(c.x), float(c.y), 5, k, 0])
 	rift = {"kind": kind, "x": x, "y": y, "ox": x, "oy": y, "life": int(Defs.RIFT_LIFE[kind]) * TPS, "on": false,
 			"prog": 0.0, "k0": 0, "goal": 0, "mets": []}
 	events.append([EV_RIFT, kind, x, y, 0])
@@ -1572,6 +1615,254 @@ func flare_warn() -> float:
 	return minf(1.0, float(flare.t) / float(Defs.FLARE_WARN))
 
 
+# --- sectors: the Shardfield ---------------------------------------------------------------
+
+## Scatters the crystals: never near where you warp in, never too close to the
+## wall or to each other, so there is always a way between them.
+func _place_shards() -> void:
+	var lim := ARENA_R - Defs.SHARD_GAP
+	var tries := 0
+	while shards.size() < Defs.SHARD_COUNT and tries < 800:
+		tries += 1
+		var r := rng.range_f(Defs.SHARD_R_MIN, Defs.SHARD_R_MAX)
+		var a := rng.range_i(Trig.STEPS)
+		var d := sqrt(rng.unit()) * (lim - r)
+		if d < Defs.SHARD_CLEAR + r:
+			continue
+		var x := Trig.cos_i(a) * d
+		var y := Trig.sin_i(a) * d
+		var ok := true
+		for c in shards:
+			var dx: float = x - float(c.x)
+			var dy: float = y - float(c.y)
+			var need: float = r + float(c.r) + Defs.SHARD_GAP
+			if dx * dx + dy * dy < need * need:
+				ok = false
+				break
+		if ok:
+			shards.append({"x": x, "y": y, "r": r, "a": rng.range_i(Trig.STEPS), "st": 0, "t": 0, "charge": 0.0})
+	# A lookup from grid cells to the crystal near them (40 px of slack around each).
+	_shard_at.resize(GRID_N * GRID_N)
+	_shard_at.fill(-1)
+	for k in shards.size():
+		var c: Dictionary = shards[k]
+		var reach: float = float(c.r) + 40.0
+		var x0 := clampi(int((float(c.x) - reach + GRID_HALF) / CELL), 0, GRID_N - 1)
+		var x1 := clampi(int((float(c.x) + reach + GRID_HALF) / CELL), 0, GRID_N - 1)
+		var y0 := clampi(int((float(c.y) - reach + GRID_HALF) / CELL), 0, GRID_N - 1)
+		var y1 := clampi(int((float(c.y) + reach + GRID_HALF) / CELL), 0, GRID_N - 1)
+		for cy in range(y0, y1 + 1):
+			for cx in range(x0, x1 + 1):
+				var cell := cy * GRID_N + cx
+				_shard_at[cell] = k if _shard_at[cell] == -1 else -2
+
+
+## The solid crystal that a circle at (x, y) of radius `pad` (up to 40)
+## overlaps, or -1.
+func shard_at(x: float, y: float, pad: float) -> int:
+	if shards.is_empty():
+		return -1
+	var k := _shard_at[_cell(x, y)]
+	if k == -1:
+		return -1
+	if k >= 0:
+		return k if _shard_overlaps(k, x, y, pad) else -1
+	for j in shards.size():
+		if _shard_overlaps(j, x, y, pad):
+			return j
+	return -1
+
+
+func _shard_overlaps(k: int, x: float, y: float, pad: float) -> bool:
+	var c: Dictionary = shards[k]
+	if int(c.st) >= 2:
+		return false
+	var dx := x - float(c.x)
+	var dy := y - float(c.y)
+	var rr := float(c.r) + pad
+	return dx * dx + dy * dy < rr * rr
+
+
+## How far a beam from (x, y) at angle a gets before a crystal stops it
+## (`length` if nothing does).
+func beam_reach(x: float, y: float, a: int, length: float) -> float:
+	if sector != Defs.SECTOR_SHARD:
+		return length
+	var ux := Trig.cos_i(a)
+	var uy := Trig.sin_i(a)
+	var best := length
+	for c in shards:
+		if int(c.st) >= 2:
+			continue
+		var rx: float = float(c.x) - x
+		var ry: float = float(c.y) - y
+		var t := rx * ux + ry * uy
+		var r: float = c.r
+		if t <= 0.0 or t - r >= best:
+			continue
+		var side := rx * uy - ry * ux
+		if absf(side) >= r:
+			continue
+		best = minf(best, maxf(0.0, t - sqrt(r * r - side * side)))
+	return best
+
+
+## The charge a crystal needs to resonate: more as the night goes on.
+func shard_full() -> float:
+	return float(Defs.SHARD_FULL) + float(Defs.SHARD_FULL_MIN) * minutes()
+
+
+## 0..1 how charged crystal k is (1 while it resonates).
+func shard_frac(k: int) -> float:
+	var c: Dictionary = shards[k]
+	if int(c.st) == 1:
+		return 1.0
+	return clampf(float(c.charge) / shard_full(), 0.0, 1.0) if int(c.st) == 0 else 0.0
+
+
+## A kill beside a standing crystal charges it.
+func _shard_feed(x: float, y: float, v: float) -> void:
+	for k in shards.size():
+		var c: Dictionary = shards[k]
+		if int(c.st) != 0:
+			continue
+		var dx: float = x - float(c.x)
+		var dy: float = y - float(c.y)
+		var reach: float = float(c.r) + Defs.SHARD_FEED
+		if dx * dx + dy * dy < reach * reach:
+			_shard_charge(k, v)
+			return
+
+
+func _shard_charge(k: int, v: float) -> void:
+	var c: Dictionary = shards[k]
+	if int(c.st) != 0:
+		return
+	c.charge = float(c.charge) + v
+	if float(c.charge) >= shard_full():
+		c.st = 1
+		c.t = Defs.SHARD_FUSE
+		events.append([EV_SHARD, float(c.x), float(c.y), 0, k, 0])
+
+
+## Resonating crystals count down to shattering; shattered ones grow back
+## once you are clear of the spot.
+func _update_shards() -> void:
+	for k in shards.size():
+		var c: Dictionary = shards[k]
+		match int(c.st):
+			1:
+				c.t = int(c.t) - 1
+				if int(c.t) <= 0:
+					_shatter(k, -1)
+			2:
+				c.t = int(c.t) - 1
+				if int(c.t) <= 0:
+					var dx: float = px - float(c.x)
+					var dy: float = py - float(c.y)
+					var room: float = float(c.r) + PLAYER_R + 60.0
+					if dx * dx + dy * dy > room * room:
+						c.st = 3
+						c.t = 0
+						events.append([EV_SHARD, float(c.x), float(c.y), 4, k, 0])
+					else:
+						c.t = 30
+			3:
+				c.t = int(c.t) + 1
+				if int(c.t) >= Defs.SHARD_GROW:
+					c.st = 0
+					c.t = 0
+					c.charge = 0.0
+
+
+## Crystals are solid: the swarm slides around them and darts break their
+## dash on them. Bosses smash straight through, and it hurts them.
+func _shard_solid() -> void:
+	for k in shards.size():
+		var c: Dictionary = shards[k]
+		if int(c.st) >= 2:
+			continue
+		var cx: float = c.x
+		var cy: float = c.y
+		var cr: float = c.r
+		_query(cx, cy, cr)
+		for q in _qn:
+			var i := _qbuf[q]
+			if e_hp[i] <= 0.0:
+				continue
+			var dx := e_x[i] - cx
+			var dy := e_y[i] - cy
+			var rr := cr + e_r[i] * 0.85
+			var d2 := dx * dx + dy * dy
+			if d2 >= rr * rr:
+				continue
+			if e_type[i] >= Defs.WARDEN:
+				var smash := cr + e_r[i] * 0.4
+				if d2 < smash * smash:
+					_shatter(k, i)
+					break
+				continue
+			var d := sqrt(d2)
+			if d < 0.001:
+				dx = 0.0
+				dy = 1.0
+				d = 1.0
+			e_x[i] = cx + dx / d * rr
+			e_y[i] = cy + dy / d * rr
+			e_vx[i] *= 0.5
+			e_vy[i] *= 0.5
+			if e_type[i] == Defs.DART and e_state[i] == 2:
+				e_state[i] = 0
+				e_t[i] = 60 + rng.range_i(60)
+
+
+## A crystal shatters: a blast of light and beams thrown out in a star, all of
+## it yours. A boss that smashed it takes a share of its own medicine.
+func _shatter(k: int, smasher: int) -> void:
+	var c: Dictionary = shards[k]
+	c.st = 2
+	c.t = Defs.SHARD_REGROW * TPS
+	c.charge = 0.0
+	shards_broken += 1
+	var x: float = c.x
+	var y: float = c.y
+	var a0 := int(c.a) + rng.range_i(Trig.STEPS)
+	events.append([EV_SHARD, x, y, 1, k, a0])
+	var dmg := 40.0 * _od_scale()
+	var bdmg := 30.0 * _od_scale()
+	var br := Defs.SHARD_BLAST
+	var hw := Defs.SHARD_BEAM_W
+	var reach := Defs.SHARD_BEAM_LEN
+	for i in en:
+		if e_spawn[i] > 0 or e_hp[i] <= 0.0:
+			continue
+		var dx := e_x[i] - x
+		var dy := e_y[i] - y
+		var d2 := dx * dx + dy * dy
+		var hit := 0.0
+		var rr := br + e_r[i]
+		if d2 < rr * rr:
+			hit = dmg
+		elif d2 < (reach + e_r[i]) * (reach + e_r[i]):
+			for b in Defs.SHARD_BEAMS:
+				var ang := a0 + b * Trig.STEPS / Defs.SHARD_BEAMS
+				var ux := Trig.cos_i(ang)
+				var uy := Trig.sin_i(ang)
+				if dx * ux + dy * uy > 0.0 and absf(dx * uy - dy * ux) < hw + e_r[i]:
+					hit = bdmg
+					break
+		if i == smasher:
+			hit += e_maxhp[i] * 0.04
+		if hit > 0.0:
+			var d := sqrt(d2) + 0.001
+			_damage(i, hit, dx / d * 480.0, dy / d * 480.0)
+	if od_t <= 0:
+		var was_ready := od >= od_need
+		od = minf(od_need, od + 5.0)
+		if not was_ready and od >= od_need:
+			events.append([EV_OD_READY])
+
+
 func _spawn_random(tm: float) -> void:
 	var type := _pick_type(tm)
 	var a := rng.range_i(Trig.STEPS)
@@ -1936,7 +2227,8 @@ func _sentinel(i: int, dx: float, dy: float, d: float) -> float:
 				e_state[i] = 1
 				e_t[i] = 80
 				e_ang[i] = Trig.angle_of(dx, dy)
-				events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SENTINEL_LEN, SENTINEL_W, 0, Defs.SENTINEL])
+				events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], beam_reach(e_x[i], e_y[i], e_ang[i], SENTINEL_LEN),
+						SENTINEL_W, 0, Defs.SENTINEL])
 			return 1.0
 		1:
 			e_t[i] -= 1
@@ -1945,7 +2237,8 @@ func _sentinel(i: int, dx: float, dy: float, d: float) -> float:
 			if e_t[i] <= 0:
 				e_state[i] = 2
 				e_t[i] = 16
-				events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SENTINEL_LEN, SENTINEL_W, 1, Defs.SENTINEL])
+				events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], beam_reach(e_x[i], e_y[i], e_ang[i], SENTINEL_LEN),
+						SENTINEL_W, 1, Defs.SENTINEL])
 			return 0.0
 		2:
 			e_t[i] -= 1
@@ -1970,7 +2263,16 @@ func _beam_hit(x: float, y: float, a: int, length: float, half_w: float) -> bool
 	var along := rx * ux + ry * uy
 	if along < 0.0 or along > length:
 		return false
-	return absf(rx * uy - ry * ux) < half_w + PLAYER_R * 0.6
+	if absf(rx * uy - ry * ux) >= half_w + PLAYER_R * 0.6:
+		return false
+	if sector == Defs.SECTOR_SHARD and beam_reach(x, y, a, along) < along:
+		# A crystal stands between you and the beam.
+		if tick - _cover_tick > 30:
+			beams_covered += 1
+			events.append([EV_SHARD, px, py, 3, -1, a])
+		_cover_tick = tick
+		return false
+	return true
 
 
 ## Seraph: a wheel of turning lasers, then three aimed lances, then it
@@ -2011,7 +2313,8 @@ func _seraph(i: int, dx: float, dy: float, d: float) -> float:
 			events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SERAPH_LANCE, 26.0, 0, Defs.SERAPH])
 		elif sub == 30:
 			e_state[i] = 4
-			events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], SERAPH_LANCE, 26.0, 1, Defs.SERAPH])
+			events.append([EV_LASER, e_x[i], e_y[i], e_ang[i], beam_reach(e_x[i], e_y[i], e_ang[i], SERAPH_LANCE), 26.0,
+					1, Defs.SERAPH])
 		elif sub == 42:
 			e_state[i] = 0
 		if e_state[i] == 4:
@@ -2064,7 +2367,7 @@ func seraph_lances(i: int) -> Array:
 
 
 ## Every laser on the field for the views and the autopilot:
-## [x, y, angle, length, half width, live, type, charge 0..1].
+## [x, y, angle, length, half width, live, type, charge 0..1, cut short by a crystal].
 func lasers() -> Array:
 	var out: Array = []
 	for i in en:
@@ -2074,18 +2377,23 @@ func lasers() -> Array:
 		var st := e_state[i]
 		if type == Defs.SENTINEL and (st == 1 or st == 2):
 			var kc := 1.0 if st == 2 else 1.0 - float(e_t[i]) / 80.0
-			out.append([e_x[i], e_y[i], e_ang[i], SENTINEL_LEN, SENTINEL_W, st == 2, type, kc])
+			var rs := beam_reach(e_x[i], e_y[i], e_ang[i], SENTINEL_LEN)
+			out.append([e_x[i], e_y[i], e_ang[i], rs, SENTINEL_W, st == 2, type, kc, rs < SENTINEL_LEN])
 		elif type == Defs.SERAPH:
 			var c := e_t[i] % 600
 			if st == 1 or st == 2:
 				var arms := seraph_arms(i)
 				var ka := 1.0 if st == 2 else float(c) / 60.0
 				for k in arms:
-					out.append([e_x[i], e_y[i], e_k[i] + k * Trig.STEPS / arms, SERAPH_ARM, 16.0, st == 2, type, ka])
+					var aa := e_k[i] + k * Trig.STEPS / arms
+					var ra := beam_reach(e_x[i], e_y[i], aa, SERAPH_ARM)
+					out.append([e_x[i], e_y[i], aa, ra, 16.0, st == 2, type, ka, ra < SERAPH_ARM])
 			elif st == 3 or st == 4:
 				var kl := 1.0 if st == 4 else float((c - 330) % 50) / 30.0
 				for off in seraph_lances(i):
-					out.append([e_x[i], e_y[i], e_ang[i] + int(off), SERAPH_LANCE, 26.0, st == 4, type, kl])
+					var al := e_ang[i] + int(off)
+					var rl := beam_reach(e_x[i], e_y[i], al, SERAPH_LANCE)
+					out.append([e_x[i], e_y[i], al, rl, 26.0, st == 4, type, kl, rl < SERAPH_LANCE])
 	return out
 
 
@@ -3740,6 +4048,14 @@ func _update_orbs() -> void:
 			_hurt(q_dmg[i])
 		elif q_x[i] * q_x[i] + q_y[i] * q_y[i] > (ARENA_R + 40.0) * (ARENA_R + 40.0):
 			dead = true
+		elif sector == Defs.SECTOR_SHARD:
+			var k := shard_at(q_x[i], q_y[i], 4.0)
+			if k >= 0:
+				# The crystal drinks the shot, and its light charges it.
+				dead = true
+				shots_absorbed += 1
+				events.append([EV_SHARD, q_x[i], q_y[i], 2, k, 0])
+				_shard_charge(k, 1.0)
 		if dead:
 			var l := qn - 1
 			if i != l:
@@ -3963,6 +4279,8 @@ func _on_death(i: int) -> void:
 		events.append([EV_MAW, x, y, 1, int(maw.eaten)])
 	elif xpv > 0:
 		_drop_gem(x, y, float(xpv))
+	if sector == Defs.SECTOR_SHARD and type < Defs.WARDEN:
+		_shard_feed(x, y, 8.0 if elite else 1.0)
 	match type:
 		Defs.SPLITTER:
 			for k in 3:
@@ -4058,6 +4376,20 @@ func _drop_gem(x: float, y: float, v: float) -> void:
 
 
 func _drop_pickup(kind: String, x: float, y: float) -> void:
+	if sector == Defs.SECTOR_SHARD:
+		# Never inside a crystal (standing or not, since it grows back).
+		for c in shards:
+			var dx: float = x - float(c.x)
+			var dy: float = y - float(c.y)
+			var rr: float = float(c.r) + 46.0
+			if dx * dx + dy * dy < rr * rr:
+				var d := sqrt(dx * dx + dy * dy)
+				if d < 1.0:
+					dx = 0.0
+					dy = 1.0
+					d = 1.0
+				x = float(c.x) + dx / d * rr
+				y = float(c.y) + dy / d * rr
 	pickups.append({"k": kind, "x": x, "y": y, "mag": false, "spd": 0.0})
 
 

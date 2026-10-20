@@ -23,6 +23,8 @@ uniform vec4 maws[3];          // x, y, grip (0..1.5), unused
 uniform float maw_core = 70.0;
 uniform float sun_r = 120.0;
 uniform float sun_heat = 0.0;  // a flare building, 0..1
+// The Shardfield: a glacier-blue sky with a triangular lattice of light.
+uniform float shard = 0.0;
 
 float hash(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
@@ -100,6 +102,25 @@ void fragment() {
 	vec2 gm = abs(fract(g / (cell * 4.0) + 0.5) - 0.5) * cell * 4.0;
 	float major = smoothstep(2.6, 0.2, min(gm.x, gm.y) * zoom);
 	float dots = smoothstep(5.0, 0.0, length(gc) * zoom);
+	if (shard > 0.0) {
+		// Three families of lines at 60 degrees: a lattice of triangles, like
+		// the facets of the crystals growing out of it.
+		vec2 n1 = vec2(0.8660254, 0.5);
+		vec2 n2 = vec2(-0.8660254, 0.5);
+		float c2 = cell * 1.2;
+		float l0 = abs(fract(g.y / c2 + 0.5) - 0.5) * c2;
+		float l1 = abs(fract(dot(g, n1) / c2 + 0.5) - 0.5) * c2;
+		float l2 = abs(fract(dot(g, n2) / c2 + 0.5) - 0.5) * c2;
+		float tri = smoothstep(1.8, 0.0, min(l0, min(l1, l2)) * zoom);
+		float c4 = c2 * 4.0;
+		float m0 = abs(fract(g.y / c4 + 0.5) - 0.5) * c4;
+		float m1 = abs(fract(dot(g, n1) / c4 + 0.5) - 0.5) * c4;
+		float m2 = abs(fract(dot(g, n2) / c4 + 0.5) - 0.5) * c4;
+		float tmaj = smoothstep(2.6, 0.2, min(m0, min(m1, m2)) * zoom);
+		minor = mix(minor, tri, shard);
+		major = mix(major, tmaj, shard);
+		dots *= 1.0 - shard;
+	}
 
 	// Nebula.
 	float n1 = fbm(w * 0.0009 + vec2(t * 0.006, -t * 0.004));
@@ -131,6 +152,11 @@ void fragment() {
 	// The Abyss: a deep indigo sea with teal currents.
 	col = mix(col, vec3(0.008, 0.008, 0.03) + vec3(0.08, 0.04, 0.26) * pow(n1, 2.8) * 1.8
 			+ vec3(0.0, 0.14, 0.18) * pow(n2, 3.0) * 1.5, abyss * (1.0 - night));
+	// The Shardfield: deep glacier blue with ribbons of rose and teal light.
+	float rib = pow(0.5 + 0.5 * sin(w.x * 0.0021 + w.y * 0.0013 + n1 * 5.0 + t * 0.15), 6.0);
+	col = mix(col, vec3(0.006, 0.016, 0.034) + vec3(0.03, 0.14, 0.24) * pow(n1, 2.6) * 1.8
+			+ vec3(0.22, 0.05, 0.2) * pow(n2, 3.0) * 1.4 + vec3(0.05, 0.22, 0.24) * rib * n2 * 0.6,
+			shard * (1.0 - night));
 	// Corona: an ember sky around a dying sun.
 	col = mix(col, vec3(0.03, 0.008, 0.006) + vec3(0.34, 0.07, 0.02) * pow(n1, 2.7) * 1.7
 			+ vec3(0.2, 0.02, 0.08) * pow(n2, 3.0) * 1.3, corona * (1.0 - night));
@@ -138,6 +164,7 @@ void fragment() {
 	vec3 gridc = mix(tint, vec3(1.0, 0.18, 0.42), clamp(danger, 0.0, 1.0));
 	gridc = mix(gridc, vec3(0.7, 0.55, 1.0), abyss * 0.55);
 	gridc = mix(gridc, vec3(1.0, 0.5, 0.2), corona * 0.6);
+	gridc = mix(gridc, vec3(0.6, 0.9, 1.0), shard * 0.5);
 	gridc = mix(gridc, vec3(1.0, 0.22, 0.55), night * 0.75);
 	gridc = mix(gridc, vec3(1.0, 0.66, 0.26), gauntlet * 0.6);
 	float near = exp(-pdist / 650.0);
@@ -170,6 +197,7 @@ void fragment() {
 	wallc = mix(wallc, vec3(1.0, 0.78, 0.35), gauntlet);
 	wallc = mix(wallc, vec3(0.6, 0.45, 1.0), abyss * (1.0 - night));
 	wallc = mix(wallc, vec3(1.0, 0.45, 0.2), corona * (1.0 - night));
+	wallc = mix(wallc, vec3(0.5, 0.85, 1.0), shard * (1.0 - night));
 	if (r > arena_r) {
 		col *= 0.3;
 		float stripe = step(0.5, fract((w.x + w.y) / 70.0 - t * 0.4));

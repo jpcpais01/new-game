@@ -58,8 +58,8 @@ func _init() -> void:
 				var b := s.boss_index()
 				line += "\n  %3ds lvl%2d en%3d hp%4.0f/%4.0f hurt%5.0f kills%5d%s" % [int(s.seconds()), s.level, s.en, s.hp, s.max_hp, hurt, s.kills,
 					(" boss %.0f%%" % (100.0 * s.e_hp[b] / s.e_maxhp[b])) if b >= 0 else ""]
-		var sec := "" if s.sector == 0 else " sector %d (eaten %d, best maw %d, flares passed %d, hurt by sector %.0f)" % [
-				s.sector, s.maws_eaten, s.maw_best, s.flares_passed, sector_hurt]
+		var sec := "" if s.sector == 0 else " sector %d (eaten %d, best maw %d, flares passed %d, hurt by sector %.0f, shattered %d, absorbed %d, covered %d)" % [
+				s.sector, s.maws_eaten, s.maw_best, s.flares_passed, sector_hurt, s.shards_broken, s.shots_absorbed, s.beams_covered]
 		print("seed %d -> state %d at %ds, lvl %d, kills %d, max_en %d, flux %d%s %s" % [100 + sd, s.state, int(s.seconds()), s.level, s.kills, max_en, s.flux_earned(), sec,
 			str(s.weapons.map(func(w): return "%s%d" % [w.id, w.lvl])) + str(s.passives) + str(s.relics)])
 		print(line)

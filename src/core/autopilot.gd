@@ -111,6 +111,18 @@ static func move(s: Sim) -> Vector2i:
 		var c := _corona(s)
 		fx += c.x
 		fy += c.y
+	# Crystals: slide round them rather than pinning yourself against one.
+	for c in s.shards:
+		if int(c.st) >= 2:
+			continue
+		var dx: float = s.px - float(c.x)
+		var dy: float = s.py - float(c.y)
+		var d := sqrt(dx * dx + dy * dy) + 1.0
+		var gap: float = float(c.r) + 90.0
+		if d < gap:
+			var w := (gap - d) / 90.0 * 1.6
+			fx += dx / d * w
+			fy += dy / d * w
 	var threat := sqrt(fx * fx + fy * fy)
 	var chased := false
 	if threat < 0.9:

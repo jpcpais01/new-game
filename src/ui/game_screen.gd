@@ -63,7 +63,7 @@ func begin(seed_value: int, loadout: Dictionary) -> void:
 	arena.coach.connect(_on_coach)
 	arena.card_taken.connect(_on_card_taken)
 	arena.resonance_formed.connect(_on_resonance)
-	Sfx.music("run")
+	Sfx.music("run", "" if sim.sector == 0 else String(Defs.sector(sim.sector).id))
 	if not bool(Save.data.tutorial_done):
 		_show_hint()
 	if not sim.mods.is_empty():
@@ -243,7 +243,7 @@ func _offer_night() -> void:
 			sim.continue_night()
 			arena.handle_events()
 			arena.night_fall()
-			Sfx.music("run")
+			Sfx.music("run", "" if sim.sector == 0 else String(Defs.sector(sim.sector).id))
 		else:
 			_on_end(false))
 	add_child(p)
@@ -290,6 +290,10 @@ const COACH := {
 			"core: when it collapses, everything it ate bursts back out as light."],
 	"flare": ["SOLAR FLARE", "The sun is about to erupt. The cool lanes are the gaps in its wall of fire: " +
 			"be inside one when the front reaches you."],
+	"shard": ["CRYSTALS", "Fight beside a crystal to charge it: full, it shatters in a burst of light that " +
+			"tears through the swarm. Standing, it stops the swarm, its shots and its lasers."],
+	"cover": ["TAKE COVER", "A crystal just took a laser for you. Put one between you and a Sentinel or the " +
+			"Seraph and their beams cannot reach you."],
 }
 
 

@@ -25,9 +25,10 @@ throws all four bosses at you back to back, then again, stronger, and times ever
 fight: race your best splits, clear it under four minutes, see how many cycles you last.
 Nine pairs of weapons resonate: hold both at level 2 and a bonus effect switches on (Pulse bolts
 that leap on as lightning, glaives that refract beams, mines that sow from Scythe kills...), mapped
-as a ring of weapons in the Codex. Three sectors to fly: the Neon Grid, the Abyss (black holes that drag in the swarm, your
-gems and you, then burst with everything they ate) and Corona (a sun at the centre whose
-flares race outwards as walls of fire with gaps to slip through).
+as a ring of weapons in the Codex. Four sectors to fly, each with its own soundtrack: the Neon Grid, the Abyss (black holes that drag in the swarm, your
+gems and you, then burst with everything they ate), Corona (a sun at the centre whose
+flares race outwards as walls of fire with gaps to slip through) and the Shardfield (giant crystals
+that stop the swarm, its shots and its lasers, and shatter in a burst of light when you fight beside them).
 Built with Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
@@ -38,7 +39,7 @@ publishes a new release automatically.
 
 | Path | What lives there |
 | --- | --- |
-| `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions, the Chain), `missions.gd` (mission progress), `daily.gd` (the day's seed, ship and mutators), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). Sector hazards (the Abyss's black holes, Corona's sun and flares) and weapon resonances live in `sim.gd` too. |
+| `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions, the Chain), `missions.gd` (mission progress), `daily.gd` (the day's seed, ship and mutators), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). Sector hazards (the Abyss's black holes, Corona's sun and flares, the Shardfield's crystals) and weapon resonances live in `sim.gd` too. |
 | `src/view/` | Drawing only: `arena.gd` (runs the sim in real time, camera, shake, slow-mo, events → effects/sound), `entities.gd`, `fx.gd` (particles, rings, beams, lightning, damage numbers), `background.gdshader` (warping grid). |
 | `src/ui/` | Screens: title (live autopilot demo behind it), the Gauntlet, game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex (with the resonance web), Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |

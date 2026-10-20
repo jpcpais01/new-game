@@ -119,6 +119,10 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 					v = maxi(v, int(mw.eaten))
 		"flares":
 			v = run.flares_passed if run != null else 0
+		"shards":
+			v = run.shards_broken if run != null else 0
+		"cover":
+			v = run.beams_covered if run != null else 0
 		"sectors":
 			var sb = data.get("sector_best", {})
 			for k in Defs.SECTORS.size():

@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 19:00 UTC
+
+- **A fourth sector: the Shardfield.** A glacier-blue sky over a lattice of light, with fifteen giant crystals standing across the arena, cut like gems and casting pools of light on the floor. They are solid: you and the swarm slide around them, darts break their dash on them, and they are a different map every run. Score x1.25, Flux x1.2, unlocked by defeating the Seraph.
+- **Take cover.** Nothing gets through a crystal but your own light. Your weapons fire straight through them, but enemy shots die against them and Sentinel and Seraph lasers stop dead at their faces with a shower of sparks. Put a crystal between you and a beam and it cannot touch you.
+- **Make them shatter.** Every kill beside a crystal charges it (an elite charges it a lot, and so does every enemy shot it swallows). A ring fills, cracks of light open and, full, it hums for a heartbeat and shatters: a blast of light, six prismatic beams flung out across the arena and glass of every colour, all of it tearing through the swarm and topping up your Overdrive. It grows back after 22 seconds. Bosses smash straight through crystals, and it hurts them.
+- **A soundtrack for every sector.** The Abyss now has its own slow, deep track with a growling bass and dripping bells, Corona a fast, burning one with rolling toms, and the Shardfield bright bell arpeggios over a two-step beat. Each still builds its drums and leads as the swarm grows, like the Neon Grid's.
+- **Three new missions.** Shatterpoint (shatter 20 crystals in one run), Bulwark (take cover from 10 lasers in one run) and Atlas (reach the dawn in all four sectors), worth 1,800 Flux together. Cartographer now asks for the dawn in three different sectors.
+
 ## Oct 20, 2026 · 16:00 UTC
 
 - **Resonances.** Weapons now sing together. Nine pairs of weapons resonate: hold both at level 2 and a bonus effect switches on for the rest of the run. Every weapon has two partners, so four weapons in a row on the ring can carry three resonances at once.

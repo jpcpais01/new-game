@@ -35,6 +35,7 @@ func _init() -> void:
 	_test_leviathan()
 	_test_gauntlet()
 	_test_sectors()
+	_test_shardfield()
 	_test_resonances()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
@@ -1582,6 +1583,121 @@ func _test_sectors() -> void:
 		check(rr.tick == r.tick and rr.checksum() == r.checksum() and rr.maws_eaten == r.maws_eaten and
 				rr.flares_passed == r.flares_passed, "%s replays bit for bit (eaten %d, flares %d)" % [
 				Defs.sector(k).name, r.maws_eaten, r.flares_passed])
+
+
+func _test_shardfield() -> void:
+	var sh := Defs.SECTOR_SHARD
+	var s := Sim.new(91, {"sector": sh})
+	var s2 := Sim.new(91, {"sector": sh})
+	check(s.shards.size() >= 12, "the Shardfield places its crystals (%d)" % s.shards.size())
+	var placed := true
+	for k in s.shards.size():
+		var c: Dictionary = s.shards[k]
+		var d := sqrt(float(c.x) * float(c.x) + float(c.y) * float(c.y))
+		if d < Defs.SHARD_CLEAR + float(c.r) or d + float(c.r) > Sim.ARENA_R - Defs.SHARD_GAP + 0.01:
+			placed = false
+		if float(c.x) != float(s2.shards[k].x):
+			placed = false
+		for j in range(k + 1, s.shards.size()):
+			var o: Dictionary = s.shards[j]
+			var dx := float(c.x) - float(o.x)
+			var dy := float(c.y) - float(o.y)
+			if sqrt(dx * dx + dy * dy) < float(c.r) + float(o.r) + Defs.SHARD_GAP - 0.01:
+				placed = false
+	check(placed, "crystals keep clear of the start, the wall and each other, and the same seed places them the same")
+	check(Sim.new(1, {}).shards.is_empty() and Sim.new(1, {"sector": sh, "gauntlet": true}).shards.is_empty(),
+			"crystals only grow in the Shardfield")
+	var c0: Dictionary = s.shards[0]
+	var cx: float = c0.x
+	var cy: float = c0.y
+	var cr: float = c0.r
+	# Solid: you are pushed out of it.
+	s.px = cx + 5.0
+	s.py = cy
+	s.iframes = 999
+	_quiet_step(s, 1)
+	var pd := sqrt((s.px - cx) * (s.px - cx) + (s.py - cy) * (s.py - cy))
+	check(pd >= cr + Sim.PLAYER_R - 0.01, "a crystal pushes you out (%.1f of %.1f)" % [pd, cr + Sim.PLAYER_R])
+	# ...and the swarm slides off it.
+	s.px = cx + cr + 400.0
+	s.py = cy
+	s.en = 0
+	var e := s._spawn(Defs.DRIFTER, cx + 3.0, cy + 2.0, false, 0)
+	s.spawn_acc = -1e9
+	s.step(0, 0)
+	var ed := sqrt((s.e_x[e] - cx) * (s.e_x[e] - cx) + (s.e_y[e] - cy) * (s.e_y[e] - cy))
+	check(ed >= cr + s.e_r[e] * 0.85 - 0.01, "the swarm cannot pass through a crystal")
+	s.en = 0
+	# It drinks enemy shots, and they charge it.
+	s._fire_orb(cx + cr + 30.0, cy, Trig.HALF, 230.0, 10.0)
+	_quiet_step(s, 20)
+	check(s.qn == 0 and s.shots_absorbed == 1 and float(c0.charge) >= 1.0, "a crystal absorbs a shot and charges")
+	# It shields you from a beam.
+	s.px = cx + cr + 60.0
+	s.py = cy
+	var bx := cx - cr - 200.0
+	check(not s._beam_hit(bx, cy, 0, 900.0, 12.0) and s.beams_covered == 1, "a crystal blocks a beam aimed through it")
+	check(s.beam_reach(bx, cy, 0, 900.0) < 200.0 + 0.5, "a blocked beam stops at the crystal's face")
+	c0.st = 2
+	check(s._beam_hit(bx, cy, 0, 900.0, 12.0), "a shattered crystal no longer blocks")
+	c0.st = 0
+	# Kills beside it fill it; full, it resonates and shatters, hurting the swarm.
+	c0.charge = 0.0
+	var need := int(ceil(s.shard_full()))
+	for k in need:
+		s._shard_feed(cx + cr + 40.0, cy, 1.0)
+	check(int(c0.st) == 1, "%d kills beside a crystal make it resonate" % need)
+	s.px = cx + 1100.0
+	s.py = cy
+	var victim := s._spawn(Defs.BRUTE, cx + cr + 120.0, cy, false, 0)
+	var vhp := s.e_hp[victim]
+	var flux0 := s.score()
+	for k in Defs.SHARD_FUSE + 1:
+		s.spawn_acc = -1e9
+		s.iframes = 999
+		s.step(0, 0)
+	check(int(c0.st) == 2 and s.shards_broken == 1, "a resonating crystal shatters after its fuse")
+	check(s.en == 0 or s.e_hp[0] < vhp, "the shatter tears through the swarm around it")
+	check(s.score() > flux0, "a shattered crystal adds to the score")
+	# It grows back once you are clear of the spot.
+	c0.t = 1
+	_quiet_step(s, 2)
+	check(int(c0.st) == 3, "a shattered crystal starts to grow back")
+	_quiet_step(s, Defs.SHARD_GROW + 1)
+	check(int(c0.st) == 0 and float(c0.charge) == 0.0, "it stands again, uncharged")
+	# A boss smashes straight through, and it hurts.
+	s.en = 0
+	var w := s._spawn(Defs.WARDEN, cx + 4.0, cy, false, 0)
+	var whp := s.e_hp[w]
+	s.spawn_acc = -1e9
+	s.step(0, 0)
+	check(s.shards_broken == 2 and s.e_hp[0] < whp - s.e_maxhp[0] * 0.03, "a boss smashes a crystal and takes damage")
+	s.en = 0
+	# Caches never land inside a crystal.
+	var c1: Dictionary = s.shards[1]
+	s._drop_pickup("chest", float(c1.x), float(c1.y))
+	var p: Dictionary = s.pickups[s.pickups.size() - 1]
+	var pdx := float(p.x) - float(c1.x)
+	var pdy := float(p.y) - float(c1.y)
+	check(sqrt(pdx * pdx + pdy * pdy) >= float(c1.r) + 45.0, "a cache is nudged out of a crystal")
+	# Missions.
+	var ms := Sim.new(1, {"sector": sh})
+	ms.shards_broken = 20
+	check(Missions.done(_find_mission("shatterpoint"), ms, {}), "Shatterpoint mission")
+	ms.beams_covered = 10
+	check(Missions.done(_find_mission("bulwark"), ms, {}), "Bulwark mission")
+	var atlas := {"sector_best": {"grid": {"dawn": true}, "abyss": {"dawn": true}, "corona": {"dawn": true}}}
+	check(Missions.done(_find_mission("cartographer"), null, atlas) and
+			not Missions.done(_find_mission("atlas"), null, atlas), "Atlas needs the dawn in all four sectors")
+	ms.dawn = true
+	check(Missions.done(_find_mission("atlas"), ms, atlas), "Atlas counts this run's dawn")
+	# Replays.
+	var r := Sim.new(93, {"sector": sh, "hull": 2})
+	Autopilot.play(r, 200 * Sim.TPS)
+	var rr := Sim.from_replay(r.to_replay())
+	check(rr.tick == r.tick and rr.checksum() == r.checksum() and rr.shards_broken == r.shards_broken and
+			rr.shots_absorbed == r.shots_absorbed, "the Shardfield replays bit for bit (shattered %d, absorbed %d)" % [
+			r.shards_broken, r.shots_absorbed])
 
 
 func _test_runs() -> void:
