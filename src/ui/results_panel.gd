@@ -225,6 +225,10 @@ func _sector() -> void:
 		text += "  ·  %s DEVOURED" % UiKit.fmt_int(sim.maws_eaten)
 	elif sim.sector == Defs.SECTOR_CORONA:
 		text += "  ·  %d FLARE%s SLIPPED" % [sim.flares_passed, "" if sim.flares_passed == 1 else "S"]
+	elif sim.sector == Defs.SECTOR_SHARD:
+		text += "  ·  %d SHATTERED" % sim.shards_broken
+		if sim.beams_covered > 0:
+			text += "  ·  %d BEAM%s BLOCKED" % [sim.beams_covered, "" if sim.beams_covered == 1 else "S"]
 	if beat.has("sector_dawn"):
 		text += "  ·  FIRST DAWN"
 	h.add_child(UiKit.glow_label(text, 30, col.lerp(Color.WHITE, 0.2)))

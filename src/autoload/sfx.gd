@@ -26,6 +26,8 @@ const SOUNDS := {
 	"maw_open": [1, 0.4, -3.0], "maw_eat": [3, 0.05, -14.0], "maw_collapse": [2, 0.3, -1.0],
 	"flare_warn": [1, 0.5, -4.0], "flare": [1, 0.4, -2.0], "flare_pass": [1, 0.3, -6.0],
 	"resonance": [1, 0.5, -1.0],
+	"shard_charge": [3, 0.1, -9.0], "shard_break": [3, 0.08, -2.0], "shard_ping": [3, 0.05, -15.0],
+	"shard_grow": [2, 0.2, -10.0],
 }
 
 var _pools := {}
@@ -34,6 +36,8 @@ var _last := {}
 var _menu: AudioStreamPlayer
 var _run: AudioStreamPlayer
 var _drive: AudioStreamPlayer
+var _tracks := {}   # run track id -> [base, drive] players ("" is the Neon Grid's)
+var _track := ""
 var _intensity := 0.0
 var _mode := ""
 
@@ -60,6 +64,7 @@ func _ready() -> void:
 	_menu = _music_player("music_menu")
 	_run = _music_player("music_run")
 	_drive = _music_player("music_drive")
+	_tracks[""] = [_run, _drive]
 	apply_settings()
 
 
@@ -112,13 +117,32 @@ func buzz(ms: int) -> void:
 		Input.vibrate_handheld(ms)
 
 
-## "menu" or "run". Crossfades between the two music beds.
-func music(mode: String) -> void:
-	if mode == _mode:
+## A run soundtrack's players: its own for a sector that has one, else the
+## Neon Grid's.
+func _track_players(id: String) -> Array:
+	if not _tracks.has(id):
+		if ResourceLoader.exists("res://assets/audio/music_run_%s.ogg" % id):
+			_tracks[id] = [_music_player("music_run_" + id), _music_player("music_drive_" + id)]
+		else:
+			return _tracks[""]
+	return _tracks[id]
+
+
+## "menu" or "run" (with the sector's track id). Crossfades between the music
+## beds.
+func music(mode: String, track := "") -> void:
+	if mode == _mode and (mode != "run" or track == _track):
 		return
 	_mode = mode
 	if mode == "run":
 		_fade(_menu, -80.0, 0.8)
+		var pair := _track_players(track)
+		if pair[0] != _run:
+			_fade(_run, -80.0, 0.8)
+			_fade(_drive, -80.0, 0.8)
+		_track = track
+		_run = pair[0]
+		_drive = pair[1]
 		_run.play(0.0)
 		_drive.play(0.0)
 		_run.volume_db = -30.0

@@ -856,6 +856,219 @@ def sfx_resonance():
     write_wav("resonance", x, 0.85)
 
 
+# --- round 14: the Shardfield's sounds and a soundtrack per sector -------------------
+
+def bell(m, dur, bright=1.0):
+    """A struck glass bell: a sine with inharmonic partials that die away first."""
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    f = mtof(m)
+    x = np.sin(2 * np.pi * f * tt) * expdecay(n, 2.6)
+    x += 0.45 * bright * np.sin(2 * np.pi * f * 2.0 * tt) * expdecay(n, 4.5)
+    x += 0.3 * bright * np.sin(2 * np.pi * f * 2.76 * tt) * expdecay(n, 8.0)
+    x += 0.14 * bright * np.sin(2 * np.pi * f * 5.4 * tt) * expdecay(n, 15.0)
+    return x * np.minimum(1.0, np.arange(n) / (0.002 * SR))
+
+
+def glass(m, dur, index=2.4):
+    """An FM pluck with a bright, glassy attack."""
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    f = mtof(m)
+    mod = index * np.exp(-tt * 14.0) * np.sin(2 * np.pi * f * 3.5 * tt)
+    return np.sin(2 * np.pi * f * tt + mod) * expdecay(n, 6.5) * np.minimum(1.0, np.arange(n) / (0.001 * SR))
+
+
+def sub(m, dur):
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    x = np.sin(2 * np.pi * mtof(m) * tt) + 0.18 * np.sin(4 * np.pi * mtof(m) * tt)
+    return x * env(n, 0.01, 0.1, 0.8, min(0.2, dur * 0.3), max(0.0, dur - 0.32))
+
+
+def reese(m, dur, cutoff=420.0):
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    ph = 2 * np.pi * mtof(m) * tt
+    x = saw_from_phase(ph, 10) + saw_from_phase(ph * 1.012 + 1.3, 10)
+    x = lowpass(x, cutoff) * (0.8 + 0.2 * np.sin(2 * np.pi * 0.5 * tt))
+    return x * env(n, 0.04, 0.2, 0.85, 0.15, max(0.0, dur - 0.4))
+
+
+def tom(f0):
+    n = int(0.4 * SR)
+    return np.sin(sweep_phase(f0, f0 * 0.55, n, 0.4)) * expdecay(n, 9) + lowpass(noise(n), 900) * expdecay(n, 40) * 0.2
+
+
+def rim():
+    n = int(0.08 * SR)
+    tt = np.arange(n) / SR
+    return highpass(noise(n), 2500) * expdecay(n, 90) * 0.6 + np.sin(2 * np.pi * 1700 * tt) * expdecay(n, 70) * 0.5
+
+
+def swell(dur):
+    """Reversed noise rising into the next bar."""
+    n = int(dur * SR)
+    return lowpass(highpass(noise(n), 500), 5000) * np.linspace(0, 1, n) ** 3
+
+
+def sfx_shards():
+    """The Shardfield: a crystal humming full, shattering, drinking a shot and growing back (own RNG)."""
+    global rng
+    rng = np.random.default_rng(521)
+    # Resonating: a glassy tone that climbs and beats faster as it fills.
+    n = int(0.85 * SR)
+    tt = np.arange(n) / SR
+    f = np.linspace(880, 1760, n) ** 1.0
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    trem = 0.6 + 0.4 * np.sin(2 * np.pi * np.cumsum(np.linspace(6, 26, n)) / SR)
+    x = (np.sin(ph) + 0.4 * np.sin(ph * 2.76)) * trem * np.linspace(0.2, 1.0, n) ** 1.5 * 0.45
+    x += highpass(noise(n), 6000) * np.linspace(0, 1, n) ** 3 * 0.12
+    write_wav("shard_charge", x, 0.7)
+    # Shatter: a crack, a spray of glass, a deep thump and a ringing bell chord.
+    n = int(2.0 * SR)
+    x = np.zeros(n)
+    crack = int(0.04 * SR)
+    x[:crack] += highpass(noise(crack), 1500) * np.linspace(1, 0, crack) * 1.0
+    shards = (rng.random(n) < 0.012).astype(float) * rng.uniform(-1, 1, n) * expdecay(n, 5)
+    x += highpass(shards, 3500) * 0.9
+    x += np.sin(sweep_phase(140, 40, n, 0.4)) * expdecay(n, 7) * 0.7
+    for k, m in enumerate([84, 88, 91, 95, 98, 102]):
+        st = int((0.01 + 0.025 * k) * SR)
+        x[st:] += bell(m, (n - st + 2) / SR, 0.8)[: n - st] * 0.14
+    write_wav("shard_break", x, 0.9)
+    # Absorbed a shot: a tiny high tink.
+    n = int(0.22 * SR)
+    x = glass(100, 0.22, 1.6) * 0.5
+    write_wav("shard_ping", x, 0.6)
+    # Growing back: a soft upward shimmer of bells.
+    n = int(1.4 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([76, 81, 83, 88, 93]):
+        st = int(0.12 * k * SR)
+        x[st:] += bell(m, (n - st + 2) / SR, 0.5)[: n - st] * 0.16
+    x += highpass(noise(n), 7000) * env(n, 0.6, 0.8) * 0.05
+    write_wav("shard_grow", x, 0.6)
+
+
+def _drive_drums(drive, t0, beat, kicks, snares, hats, hat_vol=0.08, open_hats=(), snare_vol=0.4):
+    for k in kicks:
+        place(drive, pan(kick(), 0.0) * 0.7, (t0 + k * beat) * SR)
+    for k in snares:
+        place(drive, pan(snare(), -0.1) * snare_vol, (t0 + k * beat) * SR)
+    for k in hats:
+        place(drive, pan(hat(), 0.3) * hat_vol, (t0 + k * beat) * SR)
+    for k in open_hats:
+        place(drive, pan(hat(True), 0.25) * 0.11, (t0 + k * beat) * SR)
+
+
+def music_sectors():
+    """A soundtrack per sector, each a base bed plus a drive layer locked to it (own RNG)."""
+    global rng
+    rng = np.random.default_rng(907)
+
+    # The Abyss: slow and deep in D minor, a growling reese bass, half-time drums,
+    # bells that drip into the dark.
+    bpm = 100.0
+    beat = 60.0 / bpm
+    bars = 16
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    drive = np.zeros((2, n))
+    prog = [[50, 53, 57], [46, 50, 53], [43, 46, 50], [45, 49, 52]]  # Dm Bb Gm A
+    roots = [38, 34, 31, 33]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        if bar % 2 == 0:
+            p_ = pad(prog[c], 8 * beat)
+            place(base, pan(lowpass(p_, 900), 0.0) * 0.4, t0 * SR)
+            place(base, pan(reese(roots[c], 8 * beat), 0.0) * 0.42, t0 * SR)
+        m = prog[c][(bar * 2) % 3] + 24
+        place(base, pan(bell(m, 3.0, 0.6), 0.5 if bar % 2 else -0.5) * 0.09, (t0 + beat * (bar % 3)) * SR)
+        _drive_drums(drive, t0, beat, [0, 2.5] if bar % 4 != 3 else [0, 1.75, 2.5], [2],
+                     [i * 0.5 + 0.25 for i in range(8)], 0.07, [3.5])
+        for s_ in range(8):
+            m2 = prog[c][(s_ * 2 + bar) % 3] + 12 + (12 if s_ % 4 == 3 else 0)
+            place(drive, pan(lowpass(glass(m2, beat, 1.4), 1800), 0.4 if s_ % 2 else -0.4) * 0.12,
+                  (t0 + s_ * beat * 0.5) * SR)
+        if bar % 4 == 3:
+            place(drive, pan(swell(beat * 2), 0.0) * 0.18, (t0 + beat * 2) * SR)
+        place(drive, pan(sub(roots[c] + 12, beat * 0.9), 0.0) * 0.2, (t0 + beat * 2.5) * SR)
+    write_ogg("music_run_abyss", norm(base, 0.7))
+    write_ogg("music_drive_abyss", norm(drive, 0.75))
+
+    # Corona: fast and burning in E phrygian, a pulsing sixteenth bass, four on
+    # the floor and toms rolling into every fourth bar.
+    bpm = 138.0
+    beat = 60.0 / bpm
+    bars = 16
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    drive = np.zeros((2, n))
+    prog = [[52, 55, 59], [53, 57, 60], [55, 59, 62], [53, 57, 60]]  # Em F G F
+    roots = [40, 41, 43, 41]
+    lead = [[76, 77, 79, 83], [77, 81, 84, 81], [79, 83, 86, 83], [77, 81, 76, 77]]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        if bar % 2 == 0:
+            place(base, pan(lowpass(pad(prog[c], 8 * beat), 2200), 0.0) * 0.3, t0 * SR)
+        for e in range(16):
+            m = roots[c] + (12 if e % 4 == 2 else 0)
+            acc = 1.0 if e % 4 == 0 else 0.7
+            place(base, pan(bass(m, beat * 0.25), 0.0) * 0.33 * acc, (t0 + e * beat * 0.25) * SR)
+        fill = bar % 4 == 3
+        _drive_drums(drive, t0, beat, [0, 1, 2, 3], [1, 3] + ([3.75] if bar % 2 else []),
+                     [i * 0.5 + 0.5 for i in range(8) if i % 2 == 0] + [i * 0.25 for i in range(16) if i % 2 == 1],
+                     0.06, [0.5, 1.5, 2.5] + ([] if fill else [3.5]))
+        if fill:
+            for k, f0 in enumerate([220, 180, 150, 120]):
+                place(drive, pan(tom(f0), -0.4 + 0.27 * k) * 0.35, (t0 + 3 * beat + k * beat * 0.25) * SR)
+        for s_ in range(16):
+            m = lead[c][(s_ + bar) % 4] + (12 if s_ % 8 == 6 else 0)
+            x = lowpass(square_from_phase(2 * np.pi * mtof(m) * np.arange(int(beat * 0.25 * SR)) / SR, 7)
+                        * expdecay(int(beat * 0.25 * SR), 14), 3200 + 1800 * (s_ % 4 == 0))
+            place(drive, pan(x, 0.3 if s_ % 2 else -0.3) * 0.08, (t0 + s_ * beat * 0.25) * SR)
+    write_ogg("music_run_corona", norm(base, 0.7))
+    write_ogg("music_drive_corona", norm(drive, 0.75))
+
+    # The Shardfield: bright and crystalline, D lydian colours, bell arpeggios
+    # and glass plucks over a two-step beat.
+    bpm = 122.0
+    beat = 60.0 / bpm
+    bars = 16
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    drive = np.zeros((2, n))
+    prog = [[54, 57, 61, 64], [50, 54, 57, 61], [55, 59, 62, 66], [57, 61, 64, 68]]  # D(maj9) Bm9 Gmaj7#11 A
+    roots = [38, 35, 43, 45]
+    tones = [[74, 78, 81, 85, 88], [71, 74, 78, 81, 85], [74, 79, 83, 85, 90], [76, 81, 85, 88, 92]]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        if bar % 2 == 0:
+            place(base, pan(lowpass(pad(prog[c], 8 * beat), 1800), 0.0) * 0.34, t0 * SR)
+        for k, e in enumerate([0, 0.75, 1.5, 2.5, 3.0]):
+            place(base, pan(sub(roots[c] + (12 if k == 3 else 0), beat * 0.6), 0.0) * 0.32, (t0 + e * beat) * SR)
+        if bar % 2 == 1:
+            m = tones[c][(bar // 2) % 5] + 12
+            place(base, pan(bell(m, 2.5, 0.5), -0.6 if bar % 4 == 1 else 0.6) * 0.07, (t0 + beat * 1.5) * SR)
+        _drive_drums(drive, t0, beat, [0, 1.5] + ([2.75] if bar % 2 else []), [], [i * 0.25 for i in range(16)], 0.035)
+        for k in (1, 3):
+            place(drive, pan(rim(), -0.2) * 0.32, (t0 + k * beat) * SR)
+        place(drive, pan(snare(), 0.1) * 0.3, (t0 + 3 * beat) * SR)
+        for s_ in range(16):
+            idx = (s_ * 3 + bar) % 5 if bar % 4 < 2 else (4 - (s_ * 2 + bar) % 5)
+            m = tones[c][idx]
+            v = bell(m, beat * 1.2, 0.7) if s_ % 2 == 0 else glass(m + 12, beat * 0.6, 1.8)
+            place(drive, pan(v, 0.45 if s_ % 2 else -0.45) * (0.1 if s_ % 2 == 0 else 0.06), (t0 + s_ * beat * 0.25) * SR)
+        if bar % 8 == 7:
+            place(drive, pan(swell(beat * 2), 0.0) * 0.14, (t0 + beat * 2) * SR)
+    write_ogg("music_run_shard", norm(base, 0.7))
+    write_ogg("music_drive_shard", norm(drive, 0.75))
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -898,6 +1111,14 @@ if __name__ == "__main__":
         sfx_resonance()
         print("resonance audio ok")
         sys.exit(0)
+    if "--shards" in sys.argv:
+        sfx_shards()
+        print("shard audio ok")
+        sys.exit(0)
+    if "--soundtrack" in sys.argv:
+        music_sectors()
+        print("sector soundtrack ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -915,4 +1136,6 @@ if __name__ == "__main__":
     sfx_gauntlet()
     sfx_sectors()
     sfx_resonance()
+    sfx_shards()
+    music_sectors()
     print("audio ok")

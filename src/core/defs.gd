@@ -328,7 +328,7 @@ const METEOR_EVERY := 15
 ## Sectors: the arena a run is flown in. Each has its own sky, its own hazard
 ## and a tilt to the swarm, and pays a bigger score and more Flux. Kinds are
 ## indices into SECTORS; `unlock` is the mission that opens it.
-enum { SECTOR_GRID, SECTOR_ABYSS, SECTOR_CORONA }
+enum { SECTOR_GRID, SECTOR_ABYSS, SECTOR_CORONA, SECTOR_SHARD }
 const SECTORS := [
 	{"id": "grid", "name": "Neon Grid", "title": "Where every pilot learns the light", "color": Color(0.35, 0.95, 1.0),
 		"text": "The arena as you know it: an open grid of light and nothing in your way but the swarm.",
@@ -339,12 +339,16 @@ const SECTORS := [
 	{"id": "corona", "name": "Corona", "title": "A dying sun at the heart of it all", "color": Color(1.0, 0.55, 0.22),
 		"text": "A sun burns at the centre of the arena and erupts every few seconds: a wall of fire races outwards with gaps in it. Slip through a gap. Everything else burns.",
 		"score": 1.35, "flux": 1.25, "unlock": "dawn", "lock": "Reach the dawn to unlock."},
+	{"id": "shard", "name": "The Shardfield", "title": "Where the light froze into stone", "color": Color(0.55, 0.9, 1.0),
+		"text": "Giant crystals stand all over the arena. Nothing gets through them but your own light: they stop the swarm, its shots and its lasers. Kills beside a crystal charge it until it shatters in a burst of light, then it grows back.",
+		"score": 1.25, "flux": 1.2, "unlock": "seraphfall", "lock": "Defeat the Seraph to unlock."},
 ]
 ## Swarm weight multipliers per sector: [type, factor].
 const SECTOR_TILT := [
 	[],
 	[[WEAVER, 1.7], [PHANTOM, 1.6], [DART, 0.8]],
 	[[BOMBER, 1.6], [SPITTER, 1.5], [BRUTE, 1.2]],
+	[[SENTINEL, 1.8], [SPITTER, 1.5], [DART, 1.3], [WEAVER, 0.7]],
 ]
 
 # The Abyss: black holes ("maws").
@@ -370,6 +374,24 @@ const FLARE_SPEED := 330.0     # px/s the front races outwards
 const FLARE_W := 48.0          # thickness of the front
 const FLARE_GAP := 42          # half-width of each gap, in Trig steps (1024 a turn)
 const FLARE_SPIN_FROM := 240   # seconds: from here the gaps turn as the front flies
+
+# The Shardfield: crystals of frozen light.
+const SHARD_COUNT := 15        # crystals placed at the start of a run
+const SHARD_R_MIN := 50.0
+const SHARD_R_MAX := 92.0
+const SHARD_GAP := 170.0       # least open space between two crystals (and the wall)
+const SHARD_CLEAR := 330.0     # none this close to where you warp in
+const SHARD_FEED := 150.0      # kills this close to a crystal's face charge it
+const SHARD_FULL := 26         # charge to resonate at the start (an elite is worth 8, an absorbed shot 1)...
+const SHARD_FULL_MIN := 4      # ...plus this per minute
+const SHARD_FUSE := 48         # ticks a crystal resonates before it shatters
+const SHARD_BLAST := 300.0
+const SHARD_BEAMS := 6         # beams of light it throws out when it shatters
+const SHARD_BEAM_LEN := 820.0
+const SHARD_BEAM_W := 20.0
+const SHARD_REGROW := 22       # seconds until a shattered crystal grows back
+const SHARD_GROW := 90         # ticks it takes to grow back
+const SHARD_SCORE := 300
 
 
 static func sector(k: int) -> Dictionary:
@@ -617,8 +639,14 @@ const MISSIONS := [
 		"kind": "maw", "goal": MAW_SATED, "flux": 300},
 	{"id": "sunrunner", "name": "Sunrunner", "text": "Slip through 15 solar flares in one run in Corona.",
 		"kind": "flares", "goal": 15, "flux": 300},
-	{"id": "cartographer", "name": "Cartographer", "text": "Reach the dawn in all three sectors.",
+	{"id": "cartographer", "name": "Cartographer", "text": "Reach the dawn in three different sectors.",
 		"kind": "sectors", "goal": 3, "flux": 800},
+	{"id": "shatterpoint", "name": "Shatterpoint", "text": "Shatter 20 crystals in one run in the Shardfield.",
+		"kind": "shards", "goal": 20, "flux": 300},
+	{"id": "bulwark", "name": "Bulwark", "text": "Take cover behind a crystal from 10 laser beams in one run.",
+		"kind": "cover", "goal": 10, "flux": 300},
+	{"id": "atlas", "name": "Atlas", "text": "Reach the dawn in all four sectors.", "kind": "sectors", "goal": 4,
+		"flux": 1200},
 	{"id": "harmonist", "name": "Harmonist", "text": "Discover 5 resonances.", "kind": "res_codex", "goal": 5,
 		"flux": 300},
 	{"id": "chorus", "name": "Chorus", "text": "Hold 3 resonances at once in one run.", "kind": "resonances",
