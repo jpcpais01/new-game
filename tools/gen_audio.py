@@ -1069,6 +1069,256 @@ def music_sectors():
     write_ogg("music_drive_shard", norm(drive, 0.75))
 
 
+# --- boss themes -------------------------------------------------------------------
+
+def brass(chord, dur, bright=2600.0):
+    """A brassy stab: stacked saws whose filter snaps open, then closes."""
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for m in chord:
+        for det in (-0.08, 0.08):
+            x += saw_from_phase(2 * np.pi * mtof(m + det) * tt + rng.uniform(0, 6), 10)
+    x /= len(chord)
+    # A crude filter sweep: blend a bright and a dark copy by the envelope.
+    e = expdecay(n, 5.0)
+    x = lowpass(x, bright) * e + lowpass(x, 500) * (1 - e) * 0.6
+    return x * env(n, 0.006, 0.12, 0.7, 0.08, max(0.0, dur - 0.2))
+
+
+def choir(chord, dur):
+    """Airy voices: sines with a slow vibrato, a soft second partial and a long swell."""
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for k, m in enumerate(chord):
+        for det in (-0.07, 0.0, 0.07):
+            f = mtof(m + det)
+            vib = 0.004 * np.sin(2 * np.pi * (5.1 + 0.3 * k) * tt + rng.uniform(0, 6))
+            ph = 2 * np.pi * f * np.cumsum(1.0 + vib) / SR
+            x += np.sin(ph) + 0.28 * np.sin(2 * ph) + 0.12 * np.sin(3 * ph)
+    x = lowpass(x, 3200) / (len(chord) * 3)
+    return x * env(n, dur * 0.3, 0.1, 1.0, dur * 0.3, dur * 0.4)
+
+
+def dist_bass(m, dur, drive=3.0):
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    ph = 2 * np.pi * mtof(m) * tt
+    x = saw_from_phase(ph, 12) + 0.6 * np.sin(ph * 0.5)
+    x = np.tanh(lowpass(x, 1100) * drive) * 0.7
+    return x * env(n, 0.003, 0.06, 0.75, 0.03, max(0.0, dur - 0.1))
+
+
+def supersaw(chord, dur, cutoff=3000.0):
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    for m in chord:
+        for det in (-0.3, -0.18, -0.07, 0.0, 0.07, 0.18, 0.3):
+            x += saw_from_phase(2 * np.pi * mtof(m + det) * tt + rng.uniform(0, 6), 9)
+    x = lowpass(x, cutoff) / (len(chord) * 4)
+    return x * env(n, 0.02, 0.2, 0.85, 0.2, max(0.0, dur - 0.45))
+
+
+def lead(m, dur, vib=0.006, bright=3800.0, square=0.5):
+    """A singing lead: saw + square, a delayed vibrato and a soft attack."""
+    n = int(dur * SR)
+    tt = np.arange(n) / SR
+    depth = vib * np.minimum(1.0, tt / 0.25)
+    ph = 2 * np.pi * mtof(m) * np.cumsum(1.0 + depth * np.sin(2 * np.pi * 5.6 * tt)) / SR
+    x = saw_from_phase(ph, 12) * (1 - square) + square_from_phase(ph, 9) * square
+    return lowpass(x, bright) * env(n, 0.012, 0.15, 0.8, 0.06, max(0.0, dur - 0.22))
+
+
+def crash():
+    n = int(1.6 * SR)
+    return highpass(noise(n), 4000) * expdecay(n, 2.6) * 0.5 + highpass(noise(n), 9000) * expdecay(n, 9) * 0.3
+
+
+def clap():
+    n = int(0.22 * SR)
+    x = np.zeros(n)
+    for k, d in enumerate([0.0, 0.011, 0.022]):
+        st = int(d * SR)
+        x[st:] += highpass(noise(n - st), 900) * expdecay(n - st, 30 if k < 2 else 13)
+    return lowpass(x, 6000) * 0.7
+
+
+def music_bosses():
+    """A theme per boss: a base layer, plus a fury layer locked to it that comes in
+    when the boss is wounded (own RNG so every other sound stays byte-identical)."""
+    global rng
+    rng = np.random.default_rng(1601)
+
+    # The Leviathan: C# harmonic minor, a slithering sixteenth bass under taiko
+    # drums; in fury a snake-charmer lead coils over it.
+    bpm = 140.0
+    beat = 60.0 / bpm
+    bars = 16
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    fury = np.zeros((2, n))
+    prog = [[49, 52, 56], [45, 49, 52], [50, 53, 57], [48, 51, 56]]  # C#m A Dm G#(b9-ish)
+    roots = [37, 33, 38, 32]
+    slither = [0, 0, 3, 2, 0, 1, 0, 3, 0, 0, 3, 4, 3, 1, 0, -1]
+    charm = [[73, 74, 77, 76, 74, 73, 72, 73], [73, 76, 77, 80, 77, 76, 74, 73],
+             [74, 77, 81, 80, 77, 76, 74, 76], [80, 77, 76, 74, 73, 72, 73, 68]]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        if bar % 2 == 0:
+            place(base, pan(lowpass(pad(prog[c], 8 * beat), 900), 0.0) * 0.32, t0 * SR)
+            place(base, pan(reese(roots[c] - 12, 8 * beat, 300.0), 0.0) * 0.3, t0 * SR)
+        for e in range(16):
+            m = roots[c] + slither[e]
+            acc = 1.0 if e % 4 == 0 else 0.62
+            place(base, pan(bass(m, beat * 0.25), 0.0) * 0.36 * acc, (t0 + e * beat * 0.25) * SR)
+        for k, (b, f0) in enumerate([(0, 90), (1.5, 120), (2.0, 90), (2.75, 150), (3.0, 110)]):
+            place(base, pan(tom(f0), -0.3 + 0.15 * k) * 0.5, (t0 + b * beat) * SR)
+        place(base, pan(kick(), 0.0) * 0.6, t0 * SR)
+        place(base, pan(kick(), 0.0) * 0.5, (t0 + 2 * beat) * SR)
+        for e in range(8):
+            place(base, pan(hat(), 0.35) * 0.06, (t0 + e * beat * 0.5 + beat * 0.25) * SR)
+        # Fury: the charmer's lead, glass hisses and a backbeat.
+        line = charm[c] if bar % 2 == 0 else charm[c][4:] + charm[c][:4]
+        for s_ in range(8):
+            place(fury, pan(lead(line[s_], beat * 0.5, 0.012, 3000.0, 0.3), 0.15) * 0.16,
+                  (t0 + s_ * beat * 0.5) * SR)
+        for s_ in range(16):
+            place(fury, pan(hat(), 0.4 if s_ % 2 else -0.4) * (0.09 if s_ % 4 == 2 else 0.05),
+                  (t0 + s_ * beat * 0.25) * SR)
+        for k in (1, 3):
+            place(fury, pan(snare(), -0.1) * 0.4, (t0 + k * beat) * SR)
+        if bar % 4 == 3:
+            place(fury, pan(swell(beat * 2), 0.0) * 0.2, (t0 + beat * 2) * SR)
+            for k, f0 in enumerate([200, 170, 140, 110]):
+                place(fury, pan(tom(f0), -0.45 + 0.3 * k) * 0.4, (t0 + 3 * beat + k * beat * 0.25) * SR)
+    write_ogg("music_boss_leviathan", norm(base, 0.72))
+    write_ogg("music_fury_leviathan", norm(fury, 0.72))
+
+    # The Warden: industrial A phrygian, a distorted eighth bass, four on the floor
+    # and brass stabs; in fury an alarm siren and rolling toms.
+    bpm = 128.0
+    beat = 60.0 / bpm
+    bars = 16
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    fury = np.zeros((2, n))
+    prog = [[57, 60, 64], [58, 62, 65], [55, 58, 62], [52, 56, 59]]  # Am Bb Gm E
+    roots = [33, 34, 31, 28]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        for e in range(8):
+            m = roots[c] + (12 if e in (3, 6) else 0)
+            place(base, pan(dist_bass(m, beat * 0.5), 0.0) * 0.34, (t0 + e * beat * 0.5) * SR)
+        _drive_drums(base, t0, beat, [0, 1, 2, 3], [], [i + 0.5 for i in range(4)], 0.08)
+        for k in (1, 3):
+            place(base, pan(clap(), 0.05) * 0.5, (t0 + k * beat) * SR)
+        for b in ([0, 1.5] if bar % 2 == 0 else [0, 1.5, 3.5]):
+            place(base, pan(brass([m + 12 for m in prog[c]], beat * 0.9), -0.2) * 0.3, (t0 + b * beat) * SR)
+        place(base, pan(rim(), 0.5) * 0.25, (t0 + 2.75 * beat) * SR)
+        # Fury: the alarm, sixteenth hats, an anvil on the off-beats.
+        for k in range(4):
+            m = 81 if k % 2 == 0 else 82
+            place(fury, pan(lead(m, beat * 0.95, 0.0, 2600.0, 0.8), 0.25 if k % 2 else -0.25) * 0.09,
+                  (t0 + k * beat) * SR)
+        for s_ in range(16):
+            place(fury, pan(hat(), 0.3) * (0.1 if s_ % 4 == 2 else 0.05), (t0 + s_ * beat * 0.25) * SR)
+        for k in (0.75, 2.25, 3.75):
+            place(fury, pan(kick(), 0.0) * 0.45, (t0 + k * beat) * SR)
+        if bar % 4 == 3:
+            for k, f0 in enumerate([220, 190, 160, 130, 110, 95]):
+                place(fury, pan(tom(f0), -0.5 + 0.2 * k) * 0.42, (t0 + 2.5 * beat + k * beat * 0.25) * SR)
+        if bar % 8 == 0:
+            place(fury, pan(crash(), 0.0) * 0.45, t0 * SR)
+    write_ogg("music_boss_warden", norm(base, 0.72))
+    write_ogg("music_fury_warden", norm(fury, 0.72))
+
+    # The Seraph: B minor and holy, choir and bells over a half-time beat; in fury
+    # a cascade of bell sixteenths, four on the floor and brass swells.
+    bpm = 150.0
+    beat = 60.0 / bpm
+    bars = 16
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    fury = np.zeros((2, n))
+    prog = [[59, 62, 66, 71], [55, 59, 62, 67], [50, 54, 57, 62], [57, 61, 64, 69]]  # Bm G D A
+    roots = [35, 31, 38, 33]
+    arps = [[71, 74, 78, 83], [67, 71, 74, 79], [69, 74, 78, 81], [69, 73, 76, 81]]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        if bar % 2 == 0:
+            place(base, pan(choir(prog[c], 8 * beat), 0.0) * 0.5, t0 * SR)
+            place(base, pan(sub(roots[c], 8 * beat), 0.0) * 0.36, t0 * SR)
+        for k in range(4):
+            m = arps[c][(k + bar) % 4] + 12
+            place(base, pan(bell(m, 2.0, 0.7), 0.5 if k % 2 else -0.5) * 0.08, (t0 + k * beat) * SR)
+        _drive_drums(base, t0, beat, [0, 2.5] if bar % 2 == 0 else [0, 1.75, 2.5], [2], [i * 0.5 for i in range(8)],
+                     0.05, [3.5])
+        # Fury: bell cascade, a driving kick, swelling brass.
+        for s_ in range(16):
+            m = arps[c][(s_ * 3 + bar) % 4] + (24 if s_ % 8 == 7 else 12)
+            place(fury, pan(glass(m, beat * 0.6, 1.6), 0.45 if s_ % 2 else -0.45) * 0.08,
+                  (t0 + s_ * beat * 0.25) * SR)
+        for k in range(4):
+            place(fury, pan(kick(), 0.0) * 0.55, (t0 + k * beat) * SR)
+        for k in (1, 3):
+            place(fury, pan(snare(), 0.0) * 0.32, (t0 + k * beat) * SR)
+        for k in range(4):
+            place(fury, pan(hat(True), 0.3) * 0.09, (t0 + k * beat + beat * 0.5) * SR)
+        if bar % 2 == 1:
+            place(fury, pan(brass(prog[c][:3], beat * 3.5, 1800.0), 0.0) * 0.22, (t0 + beat * 0.5) * SR)
+        if bar % 8 == 0:
+            place(fury, pan(crash(), 0.0) * 0.4, t0 * SR)
+    write_ogg("music_boss_seraph", norm(base, 0.72))
+    write_ogg("music_fury_seraph", norm(fury, 0.72))
+
+    # The Eclipse: the finale, F minor drum and bass, supersaw chords and a reese;
+    # in fury a soaring lead, snare rolls and crashes.
+    bpm = 172.0
+    beat = 60.0 / bpm
+    bars = 24
+    n = int(bars * 4 * beat * SR)
+    base = np.zeros((2, n))
+    fury = np.zeros((2, n))
+    prog = [[53, 56, 60], [49, 53, 56], [56, 60, 63], [51, 55, 58]]  # Fm Db Ab Eb
+    roots = [29, 25, 32, 27]
+    melody = [[77, 75, 72, 75, 77, 80, 79, 75], [73, 72, 70, 72, 73, 77, 75, 73],
+              [75, 77, 80, 84, 82, 80, 77, 80], [79, 77, 75, 74, 75, 79, 82, 79]]
+    for bar in range(bars):
+        c = (bar // 2) % 4
+        t0 = bar * 4 * beat
+        if bar % 2 == 0:
+            place(base, pan(supersaw(prog[c], 8 * beat, 2400.0), 0.0) * 0.3, t0 * SR)
+            place(base, pan(reese(roots[c], 8 * beat, 380.0), 0.0) * 0.42, t0 * SR)
+        # Two-step break: kick on 1 and the "and" of 3, snare on 2 and 4.
+        _drive_drums(base, t0, beat, [0, 2.5] + ([3.75] if bar % 4 == 3 else []), [1, 3],
+                     [i * 0.5 for i in range(8)], 0.07, [], 0.46)
+        place(base, pan(sub(roots[c] + 12, beat * 0.4), 0.0) * 0.22, (t0 + beat * 1.5) * SR)
+        # Fury: the lead sings, the hats double, a roll every fourth bar.
+        line = melody[c]
+        for s_ in range(8):
+            ln = beat * (1.0 if s_ % 4 == 3 else 0.5)
+            place(fury, pan(lead(line[s_], ln * 0.98, 0.008, 4200.0, 0.4), -0.1) * 0.14,
+                  (t0 + s_ * beat * 0.5) * SR)
+            place(fury, pan(lead(line[s_] + 12, ln * 0.98, 0.008, 3000.0, 0.2), 0.3) * 0.05,
+                  (t0 + s_ * beat * 0.5 + 0.012) * SR)
+        for s_ in range(16):
+            place(fury, pan(hat(), 0.35 if s_ % 2 else -0.2) * (0.08 if s_ % 2 == 0 else 0.045),
+                  (t0 + s_ * beat * 0.25) * SR)
+        if bar % 4 == 3:
+            for k in range(8):
+                place(fury, pan(snare(), 0.0) * (0.12 + 0.04 * k), (t0 + 2 * beat + k * beat * 0.25) * SR)
+            place(fury, pan(swell(beat * 2), 0.0) * 0.18, (t0 + beat * 2) * SR)
+        if bar % 4 == 0:
+            place(fury, pan(crash(), 0.0) * 0.4, t0 * SR)
+    write_ogg("music_boss_eclipse", norm(base, 0.72))
+    write_ogg("music_fury_eclipse", norm(fury, 0.72))
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -1119,6 +1369,10 @@ if __name__ == "__main__":
         music_sectors()
         print("sector soundtrack ok")
         sys.exit(0)
+    if "--bosses" in sys.argv:
+        music_bosses()
+        print("boss themes ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -1138,4 +1392,5 @@ if __name__ == "__main__":
     sfx_resonance()
     sfx_shards()
     music_sectors()
+    music_bosses()
     print("audio ok")

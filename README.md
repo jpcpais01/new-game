@@ -29,6 +29,10 @@ as a ring of weapons in the Codex. Four sectors to fly, each with its own soundt
 gems and you, then burst with everything they ate), Corona (a sun at the centre whose
 flares race outwards as walls of fire with gaps to slip through) and the Shardfield (giant crystals
 that stop the swarm, its shots and its lasers, and shatter in a burst of light when you fight beside them).
+Every boss has its own theme, with a fury layer that joins in as you wear it down. After every run
+(and from the pause menu mid-run) an after-action report ranks every weapon, resonance and hazard by
+the damage it dealt and draws the run as a timeline of damage, hull, boss fights and turning points.
+From Oct 21, 2026 the Daily Run rotates through the sectors.
 Built with Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
@@ -41,10 +45,10 @@ publishes a new release automatically.
 | --- | --- |
 | `src/core/` | The deterministic game: `sim.gd` (all rules, struct-of-arrays entities, spatial hash, director, weapons, bosses, replays), `defs.gd` (data: enemies, weapons, ships, missions, the Chain), `missions.gd` (mission progress), `daily.gd` (the day's seed, ship and mutators), `rng.gd` (xoshiro128**), `trig.gd` (table trig), `autopilot.gd` (bot for the title demo and tests). Sector hazards (the Abyss's black holes, Corona's sun and flares, the Shardfield's crystals) and weapon resonances live in `sim.gd` too. |
 | `src/view/` | Drawing only: `arena.gd` (runs the sim in real time, camera, shake, slow-mo, events → effects/sound), `entities.gd`, `fx.gd` (particles, rings, beams, lightning, damage numbers), `background.gdshader` (warping grid). |
-| `src/ui/` | Screens: title (live autopilot demo behind it), the Gauntlet, game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results), Hangar, Missions, Daily Run, Codex (with the resonance web), Forge, settings. |
+| `src/ui/` | Screens: title (live autopilot demo behind it), the Gauntlet, game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results, the after-action report), Hangar, Missions, Daily Run, Codex (with the resonance web), Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |
 | `assets/` | Generated sprites/icons/audio (see `tools/`) and fonts (Orbitron, Rajdhani; OFL). |
-| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `levi_probe.gd` (how the bot fares against the Leviathan), `gauntlet_probe.gd` (the bot in the Gauntlet), `shots.tscn` (screenshots). |
+| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `levi_probe.gd` (how the bot fares against the Leviathan), `gauntlet_probe.gd` (the bot in the Gauntlet), `report_probe.gd` (damage by source in bot runs), `shots.tscn` (screenshots). |
 
 ```sh
 godot --headless --path . --import

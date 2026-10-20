@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 20, 2026 · 22:00 UTC
+
+- **Every boss has its own theme.** When a boss arrives, the run's music sinks away under its own track: a slithering snake-charmer piece over taiko drums for the Leviathan, a pounding industrial march with brass stabs for the Warden, a choir and bells for the Seraph and a drum and bass finale with supersaw chords for the Eclipse. Wear a boss down past half its health and a fury layer joins in (a lead line, rolling toms, alarms, snare rolls) until it falls, then your run's music swells back. The Gauntlet and the Afterdark nights use them too.
+- **After-action report.** Every results screen now shows your three biggest damage dealers with animated bars, and FULL REPORT opens the whole story of the run: every weapon, evolution, resonance, your Overdrive, relics and sector hazards ranked by the damage they dealt, with their kills and damage per second while you carried them.
+- **Your run as a timeline.** The report draws the run in from left to right: your damage per second rising as the build comes together, your hull dipping and recovering, every boss fight as a band in its colour, and markers where you evolved a weapon, formed a resonance, took a relic, revived or reached the dawn. Below it, each boss with the time you took to fell it, and highlights: your biggest hit, peak damage, closest call, the biggest swarm you faced, best Chain and kill rate.
+- **Check your build mid-run.** The pause menu has a new REPORT button with the same breakdown for the run so far, so you can see which weapon is carrying you before you pick your next card.
+- **Daily Runs visit the sectors.** From Oct 21 every Daily Run is flown in one of the four sectors, shown on the Daily screen and the title button, with that sector's score bonus and soundtrack. If you have not unlocked it yet, you fly it anyway for the day. The "new sector" banner on the results screen also fits narrow screens now.
+
 ## Oct 20, 2026 · 19:00 UTC
 
 - **A fourth sector: the Shardfield.** A glacier-blue sky over a lattice of light, with fifteen giant crystals standing across the arena, cut like gems and casting pools of light on the floor. They are solid: you and the swarm slide around them, darts break their dash on them, and they are a different map every run. Score x1.25, Flux x1.2, unlocked by defeating the Seraph.

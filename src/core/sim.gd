@@ -288,6 +288,25 @@ var _rs_volleys := 0          # Pulse volleys fired (Salvo launches on every thi
 var _rs_refract := -100       # tick of the last Refraction beam
 var _rs_home := -100          # tick of the last Homecoming shockwave
 
+# --- after-action report (bookkeeping only: nothing here feeds back into the rules) ---
+var _src := ""                # what is dealing damage right now: a weapon id, resonance id, "od", "wake"...
+var dmg_by := {}              # source -> damage that landed (overkill not counted)
+var kills_by := {}            # source -> killing blows
+var got_at := {}              # weapon id -> tick it joined the loadout
+var best_hit := 0.0           # biggest single hit
+var best_hit_src := ""
+var low_hp := -1.0            # lowest hull you survived a hit on (-1: never hit)
+var peak_en := 0              # most enemies alive at once
+var tl_hp := PackedFloat32Array()     # one sample every TL_TICKS: hull fraction
+var tl_dps := PackedFloat32Array()    # damage per second over the sample
+var tl_kills := PackedInt32Array()    # kills during the sample
+# [tick, kind, data]: "boss"/"down" type, "evo"/"res"/"relic" id, "revive", "dawn", "night" n
+var tl_marks: Array = []
+var boss_log: Array = []      # [type, tick it arrived, tick it left (-1 still up), escaped]
+var _tl_dmg := 0.0
+var _tl_kills := 0
+const TL_TICKS := 300
+
 # --- director -------------------------------------------------------------------
 var spawn_acc := 0.0
 var sched_i := 0
@@ -341,6 +360,7 @@ var b_pierce := PackedInt32Array()
 var b_kind := PackedInt32Array()   # 0 bolt, 1 missile, 2 hydra mini, 3 star-bolt, 4 glaive, 5 glaive flying home, 6 Encore glaive
 var b_last := PackedInt32Array()
 var b_n := PackedInt32Array()      # ricochets a glaive has landed
+var b_src := PackedStringArray()   # damage source, for the after-action report
 
 # --- enemy projectiles ------------------------------------------------------------
 var qn := 0
@@ -407,6 +427,7 @@ func _init(seed_in: int = 1, loadout_in: Dictionary = {}) -> void:
 	revives = int(loadout.get("revive", 0))
 	rerolls = int(loadout.get("reroll", 0)) + int(ship_stats.get("reroll", 0))
 	weapons.append({"id": sd.weapon, "lvl": int(ship_stats.get("wlvl", 1)), "t": 20, "k": 0, "a": 0})
+	got_at[sd.weapon] = 0
 	if gauntlet:
 		# The Gauntlet opens with a draft of level-up cards before the first boss.
 		level = 1 + Defs.GAUNTLET_DRAFT
@@ -436,7 +457,7 @@ func _alloc() -> void:
 	b_x.resize(MAX_B); b_y.resize(MAX_B); b_ox.resize(MAX_B); b_oy.resize(MAX_B); b_vx.resize(MAX_B)
 	b_vy.resize(MAX_B); b_dmg.resize(MAX_B); b_r.resize(MAX_B); b_tx.resize(MAX_B); b_ty.resize(MAX_B)
 	b_blast.resize(MAX_B); b_life.resize(MAX_B); b_pierce.resize(MAX_B); b_kind.resize(MAX_B); b_last.resize(MAX_B)
-	b_n.resize(MAX_B)
+	b_n.resize(MAX_B); b_src.resize(MAX_B)
 	q_x.resize(MAX_Q); q_y.resize(MAX_Q); q_ox.resize(MAX_Q); q_oy.resize(MAX_Q); q_vx.resize(MAX_Q)
 	q_vy.resize(MAX_Q); q_dmg.resize(MAX_Q); q_life.resize(MAX_Q)
 	g_x.resize(MAX_G); g_y.resize(MAX_G); g_ox.resize(MAX_G); g_oy.resize(MAX_G); g_val.resize(MAX_G)
@@ -480,24 +501,34 @@ func step(ix: int, iy: int, burst := false) -> void:
 	events.clear()
 	tick += 1
 	_snapshot()
+	_src = ""
 	_move_player(ix, iy)
 	_director()
+	_src = "rift"
 	_update_rift()
 	if sector == Defs.SECTOR_ABYSS:
+		_src = "maw"
 		_update_maws()
 	elif sector == Defs.SECTOR_CORONA:
+		_src = "sun"
 		_update_corona()
 	elif sector == Defs.SECTOR_SHARD:
+		_src = "shard"
 		_update_shards()
+	_src = ""
 	_update_enemies()
 	_grid_build()
 	_separate()
 	if sector == Defs.SECTOR_SHARD:
+		_src = "shard"
 		_shard_solid()
+		_src = ""
 	_levi_body()
 	_aegis_aura()
 	_update_chain()
+	_src = "wake"
 	_update_wake_trail()
+	_src = "od"
 	if burst and od_ready():
 		_overdrive()
 	_update_overdrive()
@@ -506,11 +537,13 @@ func step(ix: int, iy: int, burst := false) -> void:
 	_update_wells()
 	_update_mines()
 	_update_bullets()
+	_src = ""
 	_update_orbs()
 	_contact()
 	_reap()
 	_update_gems()
 	_update_pickups()
+	_report_tick()
 	if state == RUNNING:
 		if pending_relics > 0:
 			_start_relic()
@@ -986,6 +1019,7 @@ func _night_boss() -> void:
 	var a := rng.range_i(Trig.STEPS)
 	_spawn_at_safe(type, px + Trig.cos_i(a) * 620.0, py + Trig.sin_i(a) * 620.0, false, 150)
 	events.append([EV_NIGHT, night])
+	tl_marks.append([tick, "night", night])
 	events.append([EV_BOSS, type])
 	# The swarm surges with them.
 	surge_until = tick + 20 * TPS
@@ -1101,7 +1135,7 @@ func _beacon() -> void:
 		_drop_pickup("chest", rift.x, rift.y)
 		var r := 460.0
 		novas.append({"x": rift.x, "y": rift.y, "r": 0.0, "max": r, "step": r / 16.0, "dmg": 30.0 * _od_scale(),
-				"hit": {}})
+				"hit": {}, "src": _src})
 		events.append([EV_NOVA, rift.x, rift.y, r])
 		_close_rift(true)
 
@@ -1426,6 +1460,7 @@ func _maw_pull(m: Dictionary, grip: float) -> void:
 			e_hp[i] = 0.0
 			e_flash[i] = 5
 			_eaten[e_uid[i]] = m
+			kills_by["maw"] = int(kills_by.get("maw", 0)) + 1
 	# Loose gems drift in, and what reaches the core is eaten (for now).
 	var g := gn - 1
 	while g >= 0:
@@ -1968,6 +2003,8 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	if radiance >= 4:
 		dmm *= 1.2
 	if type >= Defs.WARDEN:
+		boss_log.append([type, tick, -1, false])
+		tl_marks.append([tick, "boss", type])
 		hpm = boss_mult * (1.3 if radiance >= 5 else 1.0)
 		spm = 1.0
 		dmm = (1.0 + 0.15 * float(night + g_stage / Defs.GAUNTLET.size())) * (1.2 if radiance >= 4 else 1.0)
@@ -2649,7 +2686,7 @@ func _levi_body() -> void:
 			var k := lv_n - lv_pop
 			lv_pop -= 1
 			events.append([EV_LEVI, lv_x[k], lv_y[k], 5, k])
-			_blasts.append([lv_x[k], lv_y[k], 90.0, 20.0 * _od_scale()])
+			_blasts.append([lv_x[k], lv_y[k], 90.0, 20.0 * _od_scale(), "levi"])
 			_drop_gem(lv_x[k], lv_y[k], 2.0)
 			if lv_pop <= 0:
 				lv_n = 0
@@ -2813,6 +2850,7 @@ func _separate() -> void:
 func _weapons() -> void:
 	for w in weapons:
 		var spec: Dictionary = Defs.WEAPONS[w.id].levels[w.lvl - 1]
+		_src = w.id
 		if w.id == "orbit":
 			_orbit(spec)
 			continue
@@ -2921,6 +2959,7 @@ func _add_bullet(kind: int, x: float, y: float, a: int, speed: float, dmg: float
 	b_blast[i] = blast
 	b_tx[i] = x + b_vx[i]
 	b_ty[i] = y + b_vy[i]
+	b_src[i] = _src
 	return i
 
 
@@ -2930,7 +2969,7 @@ func _b_remove(i: int) -> void:
 		b_kind[i] = b_kind[l]; b_x[i] = b_x[l]; b_y[i] = b_y[l]; b_ox[i] = b_ox[l]; b_oy[i] = b_oy[l]
 		b_vx[i] = b_vx[l]; b_vy[i] = b_vy[l]; b_dmg[i] = b_dmg[l]; b_r[i] = b_r[l]; b_pierce[i] = b_pierce[l]
 		b_life[i] = b_life[l]; b_last[i] = b_last[l]; b_blast[i] = b_blast[l]; b_tx[i] = b_tx[l]
-		b_ty[i] = b_ty[l]; b_n[i] = b_n[l]
+		b_ty[i] = b_ty[l]; b_n[i] = b_n[l]; b_src[i] = b_src[l]
 	bn = l
 
 
@@ -3016,7 +3055,8 @@ func _fire_arc(spec: Dictionary) -> bool:
 
 func _fire_nova(spec: Dictionary) -> bool:
 	var mr: float = spec.r * st_area
-	novas.append({"x": px, "y": py, "r": 0.0, "max": mr, "step": mr / 16.0, "dmg": spec.dmg, "hit": {}})
+	novas.append({"x": px, "y": py, "r": 0.0, "max": mr, "step": mr / 16.0, "dmg": spec.dmg, "hit": {},
+			"src": _src})
 	events.append([EV_NOVA, px, py, mr])
 	if rs_surge:
 		surge_t = SURGE_TICKS
@@ -3030,7 +3070,8 @@ func _fire_nova(spec: Dictionary) -> bool:
 			wx = e_x[t]
 			wy = e_y[t]
 		var wr: float = spec.well * st_area
-		wells.append({"x": wx, "y": wy, "r": wr, "t": WELL_TICKS, "max": WELL_TICKS, "dmg": spec.well_dmg})
+		wells.append({"x": wx, "y": wy, "r": wr, "t": WELL_TICKS, "max": WELL_TICKS, "dmg": spec.well_dmg,
+				"src": _src})
 		events.append([EV_WELL, wx, wy, wr])
 	return true
 
@@ -3040,6 +3081,7 @@ func _update_wells() -> void:
 	var k := wells.size() - 1
 	while k >= 0:
 		var w: Dictionary = wells[k]
+		_src = String(w.get("src", "nova"))
 		w.t -= 1
 		var wx: float = w.x
 		var wy: float = w.y
@@ -3071,6 +3113,7 @@ func _update_novas() -> void:
 	var k := novas.size() - 1
 	while k >= 0:
 		var n: Dictionary = novas[k]
+		_src = String(n.get("src", "nova"))
 		n.r += n.step
 		var hit: Dictionary = n.hit
 		var nx: float = n.x
@@ -3162,7 +3205,9 @@ func _fire_lance(spec: Dictionary, w: Dictionary) -> bool:
 		# Payload: the beam ends in a missile blast (Spectrum: on its first sweep).
 		if rs_payload and far >= 0.0 and int(w.k) == 0:
 			var ss := wspec("seeker")
+			_src = "payload"
 			_explode(fx, fy, float(ss.blast) * 1.15 * st_area, float(ss.dmg))
+			_src = "lance"
 	return true
 
 
@@ -3302,6 +3347,7 @@ func _update_mines() -> void:
 		k -= 1
 	if evo and tick % 8 == 0:
 		var hw := 14.0
+		_src = "mine"
 		for l in mine_links():
 			var ax: float = l[0]
 			var ay: float = l[1]
@@ -3560,6 +3606,7 @@ func _check_resonances() -> void:
 			"tesla":
 				rs_tesla = true
 		events.append([EV_RESONANCE, id, r.a, r.b])
+		tl_marks.append([tick, "res", id])
 
 
 ## A lightning chain from (x, y) through up to n enemies within reach of each
@@ -3584,18 +3631,24 @@ func _chain_bolt(x: float, y: float, n: int, reach: float, dmg: float, hit: Dict
 ## Conductor: a Pulse bolt that landed on enemy e leaps on as lightning.
 func _conduct(e: int) -> void:
 	var spec := wspec("arc")
+	var prev := _src
+	_src = "conductor"
 	_chain_bolt(e_x[e], e_y[e], 2, 220.0 * st_area, float(spec.dmg) * 0.5, {e_uid[e]: true})
+	_src = prev
 
 
 ## Salvo: two hunter missiles fly out beside the volley, at its target t.
 func _salvo(t: int, a: int) -> void:
 	var spec := wspec("seeker")
+	var prev := _src
+	_src = "salvo"
 	for k in 2:
 		var j := _add_bullet(2, px, py, a + (160 if k == 0 else -160), 420.0, float(spec.dmg) * 0.6, 9.0, 0, 110,
 				float(spec.blast) * 0.6 * st_area)
 		if j >= 0:
 			b_tx[j] = e_x[t]
 			b_ty[j] = e_y[t]
+	_src = prev
 	events.append([EV_SHOT, "salvo", px, py, a])
 
 
@@ -3614,6 +3667,8 @@ func _refract(e: int, nxt: int) -> void:
 	var wd: float = float(spec.w) * 0.55 * st_area
 	var dmg: float = float(spec.dmg) * 0.4
 	var skip := e_uid[e]
+	var prev := _src
+	_src = "refraction"
 	for i in en:
 		if e_spawn[i] > 0 or e_hp[i] <= 0.0 or e_uid[i] == skip:
 			continue
@@ -3624,6 +3679,7 @@ func _refract(e: int, nxt: int) -> void:
 			continue
 		if absf(rx * uy - ry * ux) < wd * 0.5 + e_r[i]:
 			_damage(i, dmg, ux * 120.0, uy * 120.0)
+	_src = prev
 	events.append([EV_RESFX, "refraction", x0, y0, x0 + ux * REFRACT_LEN, y0 + uy * REFRACT_LEN, wd])
 
 
@@ -3633,7 +3689,7 @@ func _homecoming() -> void:
 	var spec := wspec("nova")
 	var mr: float = float(spec.r) * 0.6 * st_area
 	novas.append({"x": px, "y": py, "r": 0.0, "max": mr, "step": mr / 12.0, "dmg": float(spec.dmg) * 0.7,
-			"hit": {}})
+			"hit": {}, "src": "homecoming"})
 	events.append([EV_RESFX, "homecoming", px, py, mr])
 
 
@@ -3644,6 +3700,8 @@ func _bladestorm(dmg: float) -> void:
 	var rad := orbit_radius()
 	var br := 100.0 * st_area
 	var cosh := Trig.cos_i(BLADESTORM_HALF)
+	var prev := _src
+	_src = "bladestorm"
 	for k in n:
 		var ba := orbit_ang + k * Trig.STEPS / n
 		var ux := Trig.cos_i(ba)
@@ -3662,6 +3720,7 @@ func _bladestorm(dmg: float) -> void:
 				continue
 			_damage(i, dmg, rx / d * 260.0, ry / d * 260.0)
 		events.append([EV_RESFX, "bladestorm", bx, by, ba, br, BLADESTORM_HALF])
+	_src = prev
 
 
 ## Reap and Sow: a mine planted where the Scythe cut an enemy down, armed almost at once.
@@ -3671,16 +3730,20 @@ func _sow(x: float, y: float) -> void:
 		var old: Dictionary = mines.pop_front()
 		_mine_boom(old)
 	mines.append({"x": x, "y": y, "t": 8, "life": MINE_LIFE, "dmg": float(spec.dmg),
-			"blast": float(spec.blast) * st_area})
+			"blast": float(spec.blast) * st_area, "src": "sow"})
 	events.append([EV_MINE, x, y])
 
 
 ## A Photon Mine detonates (Tesla Field: and discharges lightning).
 func _mine_boom(m: Dictionary) -> void:
+	var prev := _src
+	_src = String(m.get("src", "mine"))
 	_explode(m.x, m.y, m.blast, m.dmg)
 	if rs_tesla:
 		var spec := wspec("arc")
+		_src = "tesla"
 		_chain_bolt(m.x, m.y, 3, 300.0 * st_area, float(spec.dmg) * 0.8, {})
+	_src = prev
 
 
 # --- relics -------------------------------------------------------------------------
@@ -3761,6 +3824,7 @@ func _take_relic(id: String) -> void:
 	r_crown = relics.has("u_crown")
 	_recompute()
 	events.append([EV_RELIC, id])
+	tl_marks.append([tick, "relic", id])
 	events.append([EV_PICK, id, 1])
 
 
@@ -3825,7 +3889,8 @@ func _overdrive() -> void:
 		"halcyon":
 			od_t = 150
 			var r := 650.0 * st_area
-			wells.append({"x": px, "y": py, "r": r, "t": 150, "max": 150, "dmg": 160.0 * sc, "grind": 10.0 * sc})
+			wells.append({"x": px, "y": py, "r": r, "t": 150, "max": 150, "dmg": 160.0 * sc, "grind": 10.0 * sc,
+					"src": _src})
 			events.append([EV_WELL, px, py, r])
 			for g in gn:
 				g_mag[g] = 1
@@ -3950,6 +4015,7 @@ func _update_overdrive() -> void:
 func _update_bullets() -> void:
 	var i := bn - 1
 	while i >= 0:
+		_src = b_src[i]
 		if b_kind[i] >= 4:
 			if _update_glaive(i):
 				_b_remove(i)
@@ -4067,6 +4133,50 @@ func _update_orbs() -> void:
 
 # --- damage -----------------------------------------------------------------------
 
+# --- after-action report -------------------------------------------------------------
+
+## Samples the run's timeline every TL_TICKS (hull, damage per second, kills).
+func _report_tick() -> void:
+	peak_en = maxi(peak_en, en)
+	if tick % TL_TICKS != 0:
+		return
+	tl_hp.append(clampf(hp / max_hp, 0.0, 1.0))
+	tl_dps.append(_tl_dmg / (float(TL_TICKS) / TPS))
+	tl_kills.append(kills - _tl_kills)
+	_tl_dmg = 0.0
+	_tl_kills = kills
+
+
+## Closes the newest open entry of a boss in the log.
+func _boss_fell(type: int, escaped: bool) -> void:
+	for k in range(boss_log.size() - 1, -1, -1):
+		if int(boss_log[k][0]) == type and int(boss_log[k][2]) == -1:
+			boss_log[k][2] = tick
+			boss_log[k][3] = escaped
+			break
+	tl_marks.append([tick, "escape" if escaped else "down", type])
+
+
+## Damage by source, biggest first: [[source, damage, kills], ...].
+func damage_report() -> Array:
+	var out: Array = []
+	for k in dmg_by:
+		out.append([k, float(dmg_by[k]), int(kills_by.get(k, 0))])
+	for k in kills_by:
+		if not dmg_by.has(k):
+			out.append([k, 0.0, int(kills_by[k])])
+	out.sort_custom(func(a, b): return a[1] > b[1] or (a[1] == b[1] and a[2] > b[2]))
+	return out
+
+
+## Highest damage per second over any TL_TICKS sample.
+func peak_dps() -> float:
+	var best := 0.0
+	for v in tl_dps:
+		best = maxf(best, v)
+	return best
+
+
 func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 	if e_hp[i] <= 0.0:
 		return
@@ -4087,7 +4197,15 @@ func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 		dd *= 1.5
 	if e_shd[i] == 1:
 		dd *= 0.5
+	var landed := minf(dd, e_hp[i])
+	dmg_by[_src] = float(dmg_by.get(_src, 0.0)) + landed
+	_tl_dmg += landed
+	if dd > best_hit:
+		best_hit = dd
+		best_hit_src = _src
 	e_hp[i] -= dd
+	if e_hp[i] <= 0.0:
+		kills_by[_src] = int(kills_by.get(_src, 0)) + 1
 	damage_dealt += dd
 	e_flash[i] = 5
 	e_vx[i] += kx * e_kb[i]
@@ -4155,14 +4273,17 @@ func _hurt(dmg: float) -> void:
 	if ship_id == "vesper":
 		var vr := 260.0 * st_area
 		novas.append({"x": px, "y": py, "r": 0.0, "max": vr, "step": vr / 14.0, "dmg": 18.0 * _od_scale() * 0.5,
-				"hit": {}})
+				"hit": {}, "src": "ship"})
 		events.append([EV_NOVA, px, py, vr])
+	if hp > 0.0 and (low_hp < 0.0 or hp < low_hp):
+		low_hp = hp
 	if hp <= 0.0:
 		if revives > 0:
 			revives -= 1
 			hp = max_hp * 0.6
 			iframes = 150
 			events.append([EV_REVIVE])
+			tl_marks.append([tick, "revive", 0])
 			for i in en:
 				var dx := e_x[i] - px
 				var dy := e_y[i] - py
@@ -4212,7 +4333,9 @@ func _reap() -> void:
 			var bl := _blasts
 			_blasts = []
 			for b in bl:
+				_src = String(b[4])
 				_explode(b[0], b[1], b[2], b[3])
+			_src = ""
 
 
 func _on_death(i: int) -> void:
@@ -4225,6 +4348,7 @@ func _on_death(i: int) -> void:
 		return
 	if e_state[i] == 9 and type == Defs.LEVIATHAN:
 		# It escaped into the dark, and took its prize with it.
+		_boss_fell(type, true)
 		events.append([EV_LEVI, x, y, 4, lv_n])
 		lv_n = 0
 		lv_uid = 0
@@ -4235,6 +4359,8 @@ func _on_death(i: int) -> void:
 	if elite:
 		elite_kills += 1
 	events.append([EV_KILL, x, y, type, elite, e_r[i]])
+	if type >= Defs.WARDEN:
+		_boss_fell(type, false)
 	if gauntlet and type >= Defs.WARDEN:
 		_gauntlet_passed(true)
 	chain += 1
@@ -4251,9 +4377,12 @@ func _on_death(i: int) -> void:
 		var t := _nearest(x, y, GLAIVE_HOP)
 		if t >= 0:
 			_encore_n += 1
+			var prev := _src
+			_src = "od"
 			_throw_glaive(6, x, y, t, 18.0 * _od_scale(), 18.0, 2)
+			_src = prev
 	if mods.has("volatile") and type < Defs.WARDEN and rng.unit() < 0.25:
-		_blasts.append([x, y, 95.0, 16.0 * _od_scale()])
+		_blasts.append([x, y, 95.0, 16.0 * _od_scale(), "volatile"])
 	if od_t <= 0:
 		var was_ready := od >= od_need
 		var gain := 40.0 if type >= Defs.WARDEN else (12.0 if elite else 1.0)
@@ -4287,7 +4416,7 @@ func _on_death(i: int) -> void:
 				var a := e_ang[i] + k * Trig.STEPS / 3
 				_spawn(Defs.MITE, x + Trig.cos_i(a) * 18.0, y + Trig.sin_i(a) * 18.0, false, 0)
 		Defs.BOMBER:
-			_blasts.append([x, y, 110.0, 30.0])
+			_blasts.append([x, y, 110.0, 30.0, "bomber"])
 		Defs.WARDEN:
 			bosses_killed += 1
 			warden_down = true
@@ -4342,6 +4471,7 @@ func _on_death(i: int) -> void:
 				dawn_tick = tick
 				state = WON
 				events.append([EV_WIN])
+				tl_marks.append([tick, "dawn", 0])
 	if elite:
 		_drop_pickup("chest", x, y)
 		# The first elite of a run guards a relic (unless the Leviathan's cache already did).
@@ -4488,6 +4618,7 @@ func _open_chest(big: bool, x: float, y: float, relic := false) -> void:
 			evolutions += 1
 			rewards.append([w.id, Defs.EVO_LEVEL])
 			events.append([EV_EVOLVE, w.id])
+			tl_marks.append([tick, "evo", w.id])
 			events.append([EV_PICK, w.id, Defs.EVO_LEVEL])
 			break
 	var want := 3 if big else 1
@@ -4589,6 +4720,7 @@ func _apply_card(id: String) -> void:
 				found = true
 		if not found:
 			weapons.append({"id": id, "lvl": 1, "t": 10, "k": 0, "a": 0})
+			got_at[id] = tick
 		events.append([EV_PICK, id, weapon_level(id)])
 		_check_resonances()
 	elif Defs.PASSIVES.has(id):

@@ -298,9 +298,28 @@ func _update_view(delta: float) -> void:
 		target_danger = maxf(target_danger, 0.7 + 0.3 * sin(vtime * 6.0))
 	_danger = lerpf(_danger, target_danger, clampf(delta * 1.5, 0.0, 1.0))
 	if not demo:
-		Sfx.set_intensity(clampf(float(sim.en) / 160.0 + (0.6 if sim.boss_index() >= 0 else 0.0), 0.0, 1.0))
+		var bi := sim.boss_index()
+		Sfx.set_intensity(clampf(float(sim.en) / 160.0 + (0.6 if bi >= 0 else 0.0), 0.0, 1.0))
+		_boss_music(bi)
 	fx.update_fx(delta * (_slow if _hitstop <= 0.0 else 0.15))
 	_update_bg(delta, p)
+
+
+## Boss themes: the boss on the field picks the track; its wounds bring in the
+## fury layer (from 62% hull down to 42%, or at once when it overloads).
+func _boss_music(bi: int) -> void:
+	if bi < 0 or sim.state == Sim.DEAD:
+		Sfx.boss_theme("", 0.0)
+		return
+	var frac := sim.e_hp[bi] / maxf(1.0, sim.e_maxhp[bi])
+	var fury := clampf((0.62 - frac) / 0.2, 0.0, 1.0)
+	if sim.e_t[bi] >= sim.overload_ticks:
+		fury = 1.0
+	Sfx.boss_theme(BOSS_THEMES.get(sim.e_type[bi], ""), fury)
+
+
+const BOSS_THEMES := {Defs.LEVIATHAN: "leviathan", Defs.WARDEN: "warden", Defs.SERAPH: "seraph",
+		Defs.ECLIPSE: "eclipse"}
 
 
 ## Samples the ship's path for its light trail; Starwake and Prism shed stars.

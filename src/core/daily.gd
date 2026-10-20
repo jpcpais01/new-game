@@ -6,6 +6,9 @@ extends RefCounted
 
 ## Day numbers are mixed with this so day 1 and seed 1 are unrelated runs.
 const SALT := 0x5EED_D41
+## From this day (Oct 21, 2026) every Daily Run is flown in one of the sectors;
+## earlier days stay on the Neon Grid so their records still hold.
+const SECTOR_FROM := 20747
 
 ## Everything that defines a day's run: seed, ship and mutators. Daily runs
 ## ignore the Forge so every pilot starts equal.
@@ -20,10 +23,18 @@ static func for_day(day: int) -> Dictionary:
 		var j := r.range_i(banes.size())
 		mods.append(banes[j])
 		banes.remove_at(j)
-	return {
-		"day": day, "seed": r.next_u32(), "ship": ship, "mods": mods,
+	var run_seed := r.next_u32()
+	var out := {
+		"day": day, "seed": run_seed, "ship": ship, "mods": mods, "sector": 0,
 		"loadout": {"ship": ship, "mods": mods, "daily": day},
 	}
+	if day >= SECTOR_FROM:
+		# Drawn from the day hash (not the stream above), so the ship, mutators and
+		# seed are the same as they would have been without sectors.
+		var sector := GlowRng.mix32(h ^ 0x5EC7_0125) % Defs.SECTORS.size()
+		out.sector = sector
+		out.loadout.sector = sector
+	return out
 
 
 ## Score multiplier for a set of mutators (each bane adds its share).

@@ -37,6 +37,7 @@ func _init() -> void:
 	_test_sectors()
 	_test_shardfield()
 	_test_resonances()
+	_test_report()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -44,6 +45,49 @@ func _init() -> void:
 	else:
 		print("%d of %d CHECKS FAILED" % [_fails, _checks])
 	quit(1 if _fails > 0 else 0)
+
+
+## The after-action report: damage and kills by source, the timeline, the boss
+## log. Bookkeeping only, so it must never change a run.
+func _test_report() -> void:
+	var s := Sim.new(77, {"ship": "lumen"})
+	Autopilot.play(s, 150 * Sim.TPS)
+	var rep := s.damage_report()
+	var total := 0.0
+	var kills := 0
+	for r in rep:
+		total += float(r[1])
+		kills += int(r[2])
+	check(not rep.is_empty() and String(rep[0][0]) != "", "the report names its top damage source (%s)" % str(rep[0]))
+	check(s.dmg_by.has("pulse"), "the starting Pulse Cannon is on the report")
+	check(total > 0.0 and total <= s.damage_dealt + 0.001, "landed damage never exceeds raw damage (%.0f / %.0f)" % [
+			total, s.damage_dealt])
+	check(absi(kills - s.kills) <= s.kills / 20 + 5, "killing blows add up to the kills (%d vs %d)" % [kills, s.kills])
+	for k in rep.size() - 1:
+		if float(rep[k][1]) < float(rep[k + 1][1]):
+			check(false, "the report is sorted by damage")
+	check(s.tl_hp.size() == s.tick / Sim.TL_TICKS, "a timeline sample every 5 s (%d)" % s.tl_hp.size())
+	check(s.peak_dps() > 0.0 and s.peak_en > 0, "peak damage and peak swarm are tracked")
+	check(s.best_hit > 0.0 and s.best_hit_src != "", "the biggest hit has a source")
+	check(int(s.got_at.get("pulse", -1)) == 0, "the starting weapon joined at tick 0")
+	var boss := false
+	for b in s.boss_log:
+		if int(b[0]) == Defs.LEVIATHAN and int(b[1]) == 120 * Sim.TPS:
+			boss = true
+	check(boss, "the Leviathan's arrival is in the boss log (%s)" % str(s.boss_log))
+	var marks := {}
+	for m in s.tl_marks:
+		marks[m[1]] = true
+	check(marks.has("boss"), "boss arrivals are marked on the timeline")
+	# Resonance and Overdrive damage are credited to themselves, not to the weapons.
+	var r := Sim.new(5, {"ship": "lumen"})
+	r.weapons = [{"id": "pulse", "lvl": 3, "t": 5, "k": 0, "a": 0}, {"id": "arc", "lvl": 3, "t": 5, "k": 0, "a": 0}]
+	r._check_resonances()
+	Autopilot.play(r, 90 * Sim.TPS)
+	check(r.dmg_by.has("conductor"), "Conductor arcs are credited to the resonance")
+	# The bookkeeping leaves replays bit-identical.
+	var c := Sim.from_replay(s.to_replay())
+	check(c.checksum() == s.checksum() and c.dmg_by.size() == s.dmg_by.size(), "a replay rebuilds the same report")
 
 
 func check(cond: bool, what: String) -> void:
@@ -323,6 +367,22 @@ func _test_daily() -> void:
 			check(false, "day %d: one boon and two distinct banes (%s)" % [20000 + d, str(mods)])
 		check(not dd.loadout.has("power") and dd.loadout.daily == 20000 + d, "daily loadout has no Forge")
 	check(ships.size() >= 5, "dailies rotate through the fleet (%d ships)" % ships.size())
+	# Sectors join the Daily Run from Oct 21, 2026 without changing anything else about a day.
+	var before := Daily.for_day(Daily.SECTOR_FROM - 1)
+	check(int(before.sector) == 0 and not before.loadout.has("sector"), "days before the rotation stay on the Grid")
+	check(int(before.seed) == 162032110 and before.ship == "aurora" and before.mods == ["gilded", "horde", "dusk"],
+			"Oct 20 is still the same run")
+	var first := Daily.for_day(Daily.SECTOR_FROM)
+	check(int(first.seed) == 3418196574 and first.ship == "halcyon", "the rotation leaves seeds and ships alone")
+	var sectors := {}
+	for d in 28:
+		var dd := Daily.for_day(Daily.SECTOR_FROM + d)
+		sectors[int(dd.sector)] = true
+		if int(dd.loadout.get("sector", -1)) != int(dd.sector):
+			check(false, "day %d: the sector rides in the loadout" % (Daily.SECTOR_FROM + d))
+	check(sectors.size() == Defs.SECTORS.size(), "four weeks of dailies visit every sector (%d)" % sectors.size())
+	var ds := Sim.new(int(first.seed), first.loadout)
+	check(ds.sector == int(first.sector) and ds.sector > 0, "a daily's sector reaches the sim")
 	var s := Sim.new(int(a.seed), a.loadout)
 	check(s.mods.size() == 3, "daily mutators reach the sim")
 	check(s.score_mult() > 1.3, "banes raise the score multiplier (%.2f)" % s.score_mult())
