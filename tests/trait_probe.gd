@@ -1,6 +1,6 @@
 extends SceneTree
 ## Balance probe (not run in CI): how the bot fares against trait elites.
-## godot --headless --path . -s tests/trait_probe.gd -- [seeds] [loadout-json] [minutes]
+## godot --headless --path . -s tests/trait_probe.gd -- [seeds] [loadout-json] [minutes] [first seed]
 ## Prints every elite: its traits, how long it lived and the damage the bot
 ## took while it was alive, then totals per trait.
 
@@ -10,10 +10,11 @@ func _init() -> void:
 	var seeds := int(args[0]) if args.size() > 0 else 6
 	var loadout: Dictionary = JSON.parse_string(args[1]) if args.size() > 1 else {"mods": ["gilded"]}
 	var minutes := float(args[2]) if args.size() > 2 else 9.0
+	var first := int(args[3]) if args.size() > 3 else 100
 	var per := {}   # trait -> [elites, seconds alive, damage taken while alive]
 	var deaths := 0
 	for sd in seeds:
-		var s := Sim.new(100 + sd, loadout)
+		var s := Sim.new(first + sd, loadout)
 		var alive := {}   # uid -> [mask, tick, hurt]
 		var lines: Array = []
 		while s.tick < int(minutes * 60.0) * Sim.TPS and (s.state == Sim.RUNNING or s.state == Sim.CHOOSING):
@@ -54,7 +55,7 @@ func _init() -> void:
 					alive.erase(u)
 		if s.state == Sim.DEAD:
 			deaths += 1
-		print("seed %d: %s at %s, lvl %d, elites %d, trait kills %d (%d exalted)" % [100 + sd,
+		print("seed %d: %s at %s, lvl %d, elites %d, trait kills %d (%d exalted)" % [first + sd,
 				"DIED" if s.state == Sim.DEAD else ("DAWN" if s.dawn else "alive"), "%d:%02d" % [int(s.seconds()) / 60, int(s.seconds()) % 60], s.level,
 				s.elite_kills, s.trait_kills, s.exalted_kills])
 		for l in lines:

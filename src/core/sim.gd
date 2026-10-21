@@ -2211,7 +2211,7 @@ func _traits(i: int, dx: float, dy: float, d: float) -> float:
 			_spawn(Defs.MITE, x + Trig.cos_i(a) * rr, y + Trig.sin_i(a) * rr, false, 12)
 		events.append([EV_TRAIT, x, y, "brood", 0])
 	if m & Defs.trait_bit("starcaller") and tt % Defs.STAR_EVERY == 40 and d < 1000.0:
-		var sd := 18.0 if boss else e_dmg[i]
+		var sd := 18.0 if boss else e_dmg[i] * 0.8
 		for k in Defs.STAR_N:
 			var sx := px
 			var sy := py
