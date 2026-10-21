@@ -1319,6 +1319,80 @@ def music_bosses():
     write_ogg("music_fury_eclipse", norm(fury, 0.72))
 
 
+# --- round 16: elite traits -------------------------------------------------------------
+
+def sfx_traits():
+    """Elite traits: the arrival sting, a barrier breaking and coming back, a pulsar burst, a brood hatching,
+    a star being called down, a leech drinking and the trophy chime when a trait elite falls (own RNG)."""
+    global rng
+    rng = np.random.default_rng(1607)
+    # Arrival: a low brass stab under a metallic shimmer that rises, then a crown of bells.
+    n = int(1.5 * SR)
+    tt = np.arange(n) / SR
+    x = np.zeros(n)
+    stab = brass([45, 52, 57, 60], 1.3)
+    x[:len(stab)] += stab * 0.5
+    x += lowpass(highpass(noise(n), 2500), 9000) * env(n, 0.35, 0.6) * 0.18
+    for k, m in enumerate([81, 84, 88, 93]):
+        st = int((0.28 + 0.06 * k) * SR)
+        x[st:] += bell(m, (n - st + 2) / SR, 0.9)[: n - st] * 0.12
+    x += np.sin(sweep_phase(80, 40, n, 0.5)) * expdecay(n, 3.5) * 0.4
+    write_wav("elite_call", x, 0.85)
+    # Barrier breaks: a crack, a downward electric zap and falling glass.
+    n = int(0.8 * SR)
+    x = np.zeros(n)
+    c = int(0.03 * SR)
+    x[:c] += highpass(noise(c), 1800) * np.linspace(1, 0, c)
+    x += square_from_phase(sweep_phase(1400, 120, n, 0.5), 7) * expdecay(n, 9) * 0.35
+    glint = (rng.random(n) < 0.01).astype(float) * rng.uniform(-1, 1, n) * expdecay(n, 6)
+    x += highpass(glint, 4000) * 0.8
+    write_wav("barrier_break", x, 0.85)
+    # Barrier back: a quick rising hum with a glassy top.
+    n = int(0.55 * SR)
+    ph = sweep_phase(220, 660, n, 0.7)
+    x = (np.sin(ph) + 0.3 * np.sin(ph * 2.01)) * env(n, 0.25, 0.25) * 0.5
+    x += glass(93, 0.55, 1.2) * np.linspace(0, 1, n) * 0.3
+    write_wav("barrier_up", x, 0.6)
+    # Pulsar burst: a sub whump and a ring of chirps flying out.
+    n = int(0.7 * SR)
+    x = np.sin(sweep_phase(160, 45, n, 0.35)) * expdecay(n, 7) * 0.8
+    for k in range(6):
+        st = int(0.012 * k * SR)
+        m = int(0.12 * SR)
+        x[st:st + m] += np.sin(sweep_phase(900 + 90 * k, 1500 + 90 * k, m)) * expdecay(m, 30) * 0.12
+    write_wav("pulsar", x, 0.8)
+    # Brood: three wet chirps.
+    n = int(0.45 * SR)
+    x = np.zeros(n)
+    for k in range(3):
+        st = int(0.11 * k * SR)
+        m = int(0.09 * SR)
+        f0 = 500 + 140 * k
+        ch = np.sin(sweep_phase(f0, f0 * 2.2, m, 0.6)) * env(m, 0.005, 0.08)
+        x[st:st + m] += lowpass(ch + 0.3 * noise(m) * env(m, 0.002, 0.03), 3000) * 0.5
+    write_wav("brood", x, 0.6)
+    # A star is called: a falling whistle with a shimmer.
+    n = int(0.95 * SR)
+    ph = sweep_phase(2400, 700, n, 0.8)
+    x = np.sin(ph) * env(n, 0.05, 0.6, 0.4, 0.3) * 0.4
+    x += highpass(noise(n), 6000) * env(n, 0.1, 0.8) * 0.08
+    write_wav("star_call", x, 0.6)
+    # Leech: a soft dark slurp.
+    n = int(0.28 * SR)
+    x = lowpass(noise(n), 700) * env(n, 0.03, 0.2) * 0.7
+    x += np.sin(sweep_phase(300, 120, n, 0.5)) * env(n, 0.02, 0.22) * 0.4
+    write_wav("leech", x, 0.55)
+    # Trophy: a bright rising arpeggio and a bell on top.
+    n = int(1.3 * SR)
+    x = np.zeros(n)
+    for k, m in enumerate([72, 76, 79, 84, 88]):
+        st = int(0.055 * k * SR)
+        x[st:] += glass(m, (n - st + 2) / SR, 1.8)[: n - st] * 0.22
+    st = int(0.3 * SR)
+    x[st:] += bell(96, (n - st + 2) / SR, 0.8)[: n - st] * 0.2
+    write_wav("trophy", x, 0.8)
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -1373,6 +1447,10 @@ if __name__ == "__main__":
         music_bosses()
         print("boss themes ok")
         sys.exit(0)
+    if "--traits" in sys.argv:
+        sfx_traits()
+        print("trait audio ok")
+        sys.exit(0)
     if "--od" in sys.argv:
         sfx_overdrive()
         print("overdrive audio ok")
@@ -1393,4 +1471,5 @@ if __name__ == "__main__":
     sfx_shards()
     music_sectors()
     music_bosses()
+    sfx_traits()
     print("audio ok")

@@ -54,6 +54,7 @@ func build() -> void:
 	_radiance()
 	_trail()
 	_evolutions()
+	_trophies()
 	_missions()
 	_new_sectors()
 	_footer()
@@ -431,6 +432,31 @@ func _evolutions() -> void:
 		return
 	body.add_child(row)
 	UiKit.pop_in(row, 0.6, 20)
+
+
+## Traits whose carriers fell this run (how many of each), first-time trophies marked NEW.
+func _trophies() -> void:
+	if sim.traits_slain.is_empty():
+		return
+	var head := UiKit.label("TROPHIES  ·  %d ELITE%s WITH TRAITS" % [sim.trait_kills, "" if sim.trait_kills == 1 else "S"],
+			24, Defs.TRAIT_COLOR, UiKit.display_light())
+	body.add_child(head)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 18)
+	var fresh: Array = beat.get("traits", [])
+	for id in Defs.TRAIT_ORDER:
+		if not sim.traits_slain.has(id):
+			continue
+		var cell := VBoxContainer.new()
+		cell.add_theme_constant_override("separation", 0)
+		cell.add_child(UiKit.icon_rect("trait_" + id, 70))
+		var col: Color = Defs.TRAITS[id].color
+		var txt := "NEW" if fresh.has(id) else "×%d" % int(sim.traits_slain[id])
+		cell.add_child(UiKit.label(txt, 20, UiKit.GOLD if fresh.has(id) else Color(col, 0.85), UiKit.display()))
+		row.add_child(cell)
+	body.add_child(row)
+	UiKit.pop_in(row, 0.65, 20)
 
 
 ## Missions completed this run, and any ship they unlocked.

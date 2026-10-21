@@ -756,6 +756,40 @@ def resonance_icons():
         save(base, "i_res_" + name)
 
 
+# Round 16: elite traits. One icon per trait in its colour, plus the elite
+# crest (a crown over a ring) used by the Codex and the elite card.
+def trait_icons():
+    def at(pts, cx, cy, k=1.0):
+        return [(cx + x * k, cy + y * k) for x, y in pts]
+    icons_ = {
+        "swift": ([], [[(-0.9, -0.62), (-0.28, 0.0), (-0.9, 0.62)], [(-0.2, -0.62), (0.42, 0.0), (-0.2, 0.62)],
+                       [(0.42, -0.62), (0.98, 0.0), (0.42, 0.62)]], (1.0, 0.9, 0.3)),
+        "pulsar": ([regular(20, 0.3)] + [at(regular(10, 0.1), math.cos(a) * 0.74, math.sin(a) * 0.74)
+                                         for a in np.linspace(0, 2 * math.pi, 9)[:-1]],
+                   [[(math.cos(a) * 0.5, math.sin(a) * 0.5) for a in np.linspace(0, 2 * math.pi, 33)]],
+                   (1.0, 0.36, 0.8)),
+        "leech": ([at(drop(), 0.0, -0.02, 0.95)], [[(-0.22, 0.32), (-0.1, 0.52), (0.02, 0.32)],
+                                                   [(0.04, 0.32), (0.16, 0.52), (0.28, 0.32)]], (1.0, 0.2, 0.28)),
+        "brood": ([regular(18, 0.3)] + [tri_at(math.cos(a) * 0.68, math.sin(a) * 0.68, 0.24, a)
+                                        for a in (-math.pi / 2, math.pi / 6, 5 * math.pi / 6)], [],
+                  (0.62, 1.0, 0.32)),
+        "phasing": ([at(DIAMOND, 0.18, 0.0, 0.7), at(DIAMOND, -0.32, 0.0, 0.55)],
+                    [[(-0.95, -0.5), (-0.7, -0.5)], [(-0.98, 0.5), (-0.74, 0.5)]], (0.72, 0.5, 1.0)),
+        "shielded": ([regular(6, 0.95, math.pi / 6), regular(6, 0.6, math.pi / 6)], [], (0.35, 0.82, 1.0)),
+        "graviton": ([regular(20, 0.2)], spiral(3, 0.32, 0.98, -0.4), (0.3, 1.0, 0.82)),
+        "starcaller": ([at(star(5, 0.5, 0.21, -math.pi / 2), 0.3, 0.3)],
+                       [[(-0.15, -0.15), (-0.8, -0.8)], [(0.3, -0.3), (-0.2, -0.95)], [(-0.3, 0.3), (-0.95, -0.2)]],
+                       (1.0, 0.6, 0.22)),
+    }
+    for name, (shapes, lines, col) in icons_.items():
+        save(neon(shapes, col, size=96, radius=34, line=3.8, glow=8.0, fill=0.4, lines=lines, core_white=0.75),
+             "i_trait_" + name)
+    crown = [(-0.7, 0.2), (-0.7, -0.5), (-0.36, -0.18), (0.0, -0.66), (0.36, -0.18), (0.7, -0.5), (0.7, 0.2)]
+    gems = [at(regular(10, 0.09), x, y) for x, y in ((-0.7, -0.68), (0.0, -0.86), (0.7, -0.68))]
+    save(neon([crown] + gems, (1.0, 0.78, 0.36), size=96, radius=34, line=3.8, glow=8.5, fill=0.45,
+              lines=[[(-0.7, 0.48), (0.7, 0.48)]], core_white=0.75), "i_trait")
+
+
 if __name__ == "__main__":
     import sys
     if "--threats" in sys.argv:
@@ -798,6 +832,10 @@ if __name__ == "__main__":
         resonance_icons()
         print("resonance art ok")
         sys.exit(0)
+    if "--traits" in sys.argv:
+        trait_icons()
+        print("trait art ok")
+        sys.exit(0)
     if "--mods" in sys.argv:
         mod_icons()
         print("mutator icons ok")
@@ -817,5 +855,6 @@ if __name__ == "__main__":
     sector_icons()
     shard_icons()
     resonance_icons()
+    trait_icons()
     app_icon()
     print("art ok")

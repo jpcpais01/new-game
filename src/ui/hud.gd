@@ -59,6 +59,7 @@ var _split_time: Label
 var _split_sub: Label
 var _res_queue: Array = []
 var _res_box: Control
+var _elite_card: EliteCard
 
 
 func _ready() -> void:
@@ -144,7 +145,21 @@ func bind(a: Arena) -> void:
 		if arena.sim.gauntlet:
 			_boss_name.text = ""
 		if arena.sim.endless:
-			_boss_name.text += "  ·  NIGHT %d" % arena.sim.night)
+			_boss_name.text += "  ·  NIGHT %d" % arena.sim.night
+		var bi := arena.sim.boss_index()
+		if bi >= 0 and arena.sim.e_tr[bi] != 0:
+			var adj: Array = []
+			for id in Defs.trait_ids(arena.sim.e_tr[bi]):
+				adj.append(String(Defs.TRAITS[id].adj))
+			_boss_name.text = " ".join(adj) + "  ·  " + _boss_name.text)
+	a.elite_arrived.connect(_on_elite)
+	a.trophy.connect(func(type: int, mask: int):
+		if type >= Defs.WARDEN:
+			return
+		var n := Defs.trait_ids(mask).size()
+		var tag := "EXALTED TROPHY" if n >= Defs.TRAIT_MAX else "TROPHY"
+		show_banner(tag, Defs.TRAIT_COLOR, "%s  ·  +%s" % [String(Defs.ENEMY[type].name).to_upper(),
+				UiKit.fmt_int(Defs.TRAIT_SCORE * n)]))
 	a.card_taken.connect(func(_id, _lvl): _rebuild_loadout())
 	a.resonance_formed.connect(func(id: String):
 		_rebuild_loadout()
@@ -257,6 +272,19 @@ func _rebuild_loadout() -> void:
 			tw.tween_property(ic, "modulate", Color.WHITE, 0.45)
 	if _boss_type == -1 and _loadout.get_child_count() > 0:
 		_loadout.modulate.a = 0.9
+
+
+## An elite arrives: its card drops in under the HUD, naming it and its traits.
+func _on_elite(type: int, mask: int) -> void:
+	if arena.demo or mask == 0:
+		return
+	if is_instance_valid(_elite_card):
+		_elite_card.queue_free()
+	var w := minf(size.x - 80.0, 900.0)
+	var slain = Save.data.get("trait_kills", {})
+	_elite_card = EliteCard.make(type, mask, slain if slain is Dictionary else {}, w)
+	_elite_card.position = Vector2((size.x - w) * 0.5, top + 400.0)
+	add_child(_elite_card)
 
 
 ## A boss arrives: letterbox bars slide in around a title card with its name.
@@ -556,6 +584,14 @@ func _draw() -> void:
 		for k in range(1, 10):
 			var x := br.position.x + bw * k / 10.0
 			draw_line(Vector2(x, by), Vector2(x, by + 18), Color(0, 0, 0, 0.5 * _boss_alpha), 2.0)
+		# A Shielded night boss: its barrier as a strip over the bar.
+		var bi := arena.sim.boss_index()
+		if bi >= 0:
+			var ts := arena.sim.trait_state(bi)
+			if float(ts.get("bmax", 0.0)) > 0.0:
+				var bf := clampf(float(ts.bar) / float(ts.bmax), 0.0, 1.0)
+				draw_rect(Rect2(br.position + Vector2(0, -9), Vector2(bw * bf, 6)),
+						Color(Defs.TRAITS.shielded.color * 1.6, _boss_alpha))
 
 
 ## Resonating weapons in the loadout are bridged by an arc of the
@@ -754,15 +790,34 @@ func _draw_rift() -> void:
 			Rect2(pos - dir * 52.0 - Vector2(32, 32), Vector2(64, 64)), false, Color(1.3, 1.3, 1.3, 0.95))
 
 
-## Off-screen Prism Caches get a pulsing arrow on the screen edge.
+## Off-screen Prism Caches (and elites) get a pulsing arrow on the screen edge.
 func _draw_cache_arrows() -> void:
-	if arena == null or arena.sim == null or arena.sim.pickups.is_empty():
+	if arena == null or arena.sim == null:
 		return
 	var vs := size
 	var center := arena.camera.get_screen_center_position()
 	var half := vs * 0.5
 	var t := arena.vtime
-	for p in arena.sim.pickups:
+	var s := arena.sim
+	for i in s.en:
+		if s.e_elite[i] == 0 or s.e_spawn[i] > 0 or s.e_type[i] >= Defs.WARDEN:
+			continue
+		var rel2 := Vector2(s.e_x[i], s.e_y[i]) - center
+		if absf(rel2.x) < half.x - 40.0 and absf(rel2.y) < half.y - 40.0:
+			continue
+		var dir2 := rel2.normalized()
+		var lim2 := half - Vector2(70.0, 70.0)
+		var k2 := minf(lim2.x / maxf(absf(dir2.x), 0.001), lim2.y / maxf(absf(dir2.y), 0.001))
+		var pos2 := half + dir2 * k2
+		pos2.y = clampf(pos2.y, top + 220.0, vs.y - 70.0)
+		var pulse2 := 1.0 + 0.12 * sin(t * 6.0)
+		var side2 := dir2.orthogonal() * 18.0 * pulse2
+		var tip2 := pos2 + dir2 * 28.0 * pulse2
+		draw_colored_polygon(PackedVector2Array([tip2, pos2 - dir2 * 4.0 + side2, pos2 - dir2 * 4.0 - side2]),
+				Color(Defs.TRAIT_COLOR * 1.2, 0.9))
+		draw_texture_rect(Art.icon("trait"), Rect2(pos2 - dir2 * 44.0 - Vector2(26, 26), Vector2(52, 52)), false,
+				Color(1.3, 1.3, 1.3, 0.9))
+	for p in s.pickups:
 		if p.k != "chest" and p.k != "bigchest":
 			continue
 		var rel := Vector2(p.x, p.y) - center

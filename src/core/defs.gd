@@ -291,6 +291,94 @@ static func resonance_partners(weapon: String) -> Array:
 	return out
 
 
+## Elite traits: every elite arrives with one or more, each its own trick,
+## and more of them as the night wears on. Bit k of a trait mask is
+## TRAIT_ORDER[k]. "boss": a night boss can carry it too (from the second
+## night). An elite with more traits drops a richer Prism Cache.
+const TRAITS := {
+	"swift": {"name": "Swift", "adj": "SWIFT", "color": Color(1.0, 0.9, 0.3), "boss": false,
+		"hint": "LUNGES ALONG A MARKED LINE",
+		"text": "45% faster, and it lunges along a marked line. Step out of the line."},
+	"pulsar": {"name": "Pulsar", "adj": "PULSAR", "color": Color(1.0, 0.36, 0.8), "boss": true,
+		"hint": "BURSTS IN RINGS OF ORBS",
+		"text": "Swells with light, then bursts in a ring of orbs. Slip through the gaps."},
+	"leech": {"name": "Leech", "adj": "LEECHING", "color": Color(1.0, 0.2, 0.28), "boss": false,
+		"hint": "HEALS AS THE SWARM DIES NEAR IT",
+		"text": "Drinks the light of the swarm dying near it to heal. Draw it away from the crowd."},
+	"brood": {"name": "Brood", "adj": "BROODING", "color": Color(0.62, 1.0, 0.32), "boss": true,
+		"hint": "HATCHES MITES",
+		"text": "Hatches a clutch of mites around itself every few seconds."},
+	"phasing": {"name": "Phasing", "adj": "PHASING", "color": Color(0.72, 0.5, 1.0), "boss": false,
+		"hint": "BLINKS BESIDE YOU WHEN HURT",
+		"text": "Every time it loses a sixth of its health it marks a ring beside you and blinks into it."},
+	"shielded": {"name": "Shielded", "adj": "SHIELDED", "color": Color(0.35, 0.82, 1.0), "boss": true,
+		"hint": "A BARRIER THAT RECHARGES",
+		"text": "A barrier soaks up the first hits, and recharges if you let up. Keep the pressure on."},
+	"graviton": {"name": "Graviton", "adj": "GRAVITIC", "color": Color(0.3, 1.0, 0.82), "boss": false,
+		"hint": "DRAGS YOU IN",
+		"text": "Drags you towards it when you fly close. Its pull is weaker than your engines."},
+	"starcaller": {"name": "Starcaller", "adj": "STARCALLER", "color": Color(1.0, 0.6, 0.22), "boss": true,
+		"hint": "CALLS DOWN FALLING STARS",
+		"text": "Calls falling stars down on you, and on any of the swarm beneath them."},
+}
+const TRAIT_ORDER := ["swift", "pulsar", "leech", "brood", "phasing", "shielded", "graviton", "starcaller"]
+const TRAIT_COLOR := Color(1.0, 0.78, 0.36)
+const TRAIT_MAX := 3                # traits an elite can carry
+const TRAIT_SECOND := 270           # seconds: elites carry two traits from here...
+const TRAIT_THIRD := 420            # ...and three from here (and in the Afterdark)
+const TRAIT_SCORE := 150            # score per trait when a trait elite falls
+const TRAIT_HP := 0.4               # elite HP +40% per trait
+const TRAIT_NIGHT := 2              # night bosses carry a trait from this night (two from night 4)
+const SWIFT_MULT := 1.45
+const SWIFT_EVERY := 210            # ticks between lunges
+const SWIFT_MARK := 32              # ticks the lunge line is marked
+const SWIFT_DASH := 26              # ticks a lunge lasts
+const SWIFT_SPEED := 640.0
+const PULSAR_EVERY := 170           # ticks between bursts
+const PULSAR_SWELL := 48            # ticks it swells before one
+const PULSAR_ORBS := 12
+const PULSAR_SPEED := 175.0
+const LEECH_R := 320.0
+const LEECH_HEAL := 0.03            # of its max HP, per kill near it
+const BROOD_EVERY := 240
+const BROOD_N := 3
+const PHASE_STEP := 1.0 / 6.0       # of its max HP lost between blinks
+const PHASE_MARK := 36              # ticks between the mark and the blink
+const PHASE_DIST := 230.0
+const BARRIER := 0.4                # barrier, as a share of max HP (bosses: BARRIER_BOSS)
+const BARRIER_BOSS := 0.12
+const BARRIER_WAIT := 240           # ticks without a hit before it recharges...
+const BARRIER_REGEN := 0.25         # ...at this share of the barrier per second
+const GRAVITON_R := 480.0
+const GRAVITON_PULL := 120.0        # px/s at its side, falling off to 0 at GRAVITON_R
+const STAR_EVERY := 190
+const STAR_N := 3
+const STAR_FALL := 60               # ticks from the mark to impact
+const STAR_R := 82.0
+
+
+## Trait ids in a mask, in TRAIT_ORDER.
+static func trait_ids(mask: int) -> Array:
+	var out: Array = []
+	for k in TRAIT_ORDER.size():
+		if mask & (1 << k):
+			out.append(TRAIT_ORDER[k])
+	return out
+
+
+static func trait_bit(id: String) -> int:
+	return 1 << TRAIT_ORDER.find(id)
+
+
+## "SHIELDED PULSAR BRUTE": an elite's name from its traits and kind.
+static func elite_name(type: int, mask: int) -> String:
+	var parts: Array = []
+	for id in trait_ids(mask):
+		parts.append(String(TRAITS[id].adj))
+	parts.append(String(ENEMY[type].name).to_upper())
+	return " ".join(parts)
+
+
 ## Rifts: every minute or so a rift opens somewhere in the arena with a
 ## challenge and a prize. Kinds are indices into RIFTS.
 enum { RIFT_BEACON, RIFT_WISP, RIFT_TRIAL, RIFT_STARFALL }
@@ -419,7 +507,7 @@ const BASE_BANISHES := 1
 const RADIANCE := [
 	{"name": "Kindled", "text": "The swarm has +15% HP."},
 	{"name": "Restless", "text": "The swarm gathers 15% faster."},
-	{"name": "Hunted", "text": "Elites hunt you from 2:30, every 40 to 60 seconds."},
+	{"name": "Hunted", "text": "Elites hunt you from 2:30, every 40 to 60 seconds, each with an extra trait."},
 	{"name": "Sharp", "text": "Enemies hit 20% harder."},
 	{"name": "Titans", "text": "Bosses have +30% HP."},
 	{"name": "Scarcity", "text": "All healing is 35% weaker."},
@@ -653,6 +741,12 @@ const MISSIONS := [
 		"goal": 3, "flux": 400},
 	{"id": "symphony", "name": "Symphony", "text": "Discover all 9 resonances.", "kind": "res_codex", "goal": 9,
 		"flux": 800},
+	{"id": "exalted", "name": "Exalted", "text": "Slay an elite carrying three traits.", "kind": "exalted",
+		"goal": 1, "flux": 250},
+	{"id": "big_game", "name": "Big Game", "text": "Slay 5 elites in one run.", "kind": "elites", "goal": 5,
+		"flux": 300},
+	{"id": "trophy_wall", "name": "Trophy Wall", "text": "Slay elites carrying every one of the 8 traits.",
+		"kind": "trait_codex", "goal": 8, "flux": 600},
 	{"id": "kindled", "name": "Kindled", "text": "Reach the dawn at Radiance 1.", "kind": "radiance", "goal": 1,
 		"flux": 300},
 	{"id": "zenith", "name": "Zenith", "text": "Reach the dawn at Radiance 5.", "kind": "radiance", "goal": 5,

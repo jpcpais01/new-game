@@ -32,7 +32,9 @@ that stop the swarm, its shots and its lasers, and shatter in a burst of light w
 Every boss has its own theme, with a fury layer that joins in as you wear it down. After every run
 (and from the pause menu mid-run) an after-action report ranks every weapon, resonance and hazard by
 the damage it dealt and draws the run as a timeline of damage, hull, boss fights and turning points.
-From Oct 21, 2026 the Daily Run rotates through the sectors.
+From Oct 21, 2026 the Daily Run rotates through the sectors. Every elite carries traits (eight of them, up to three at once late in the run): Swift lunges, Pulsar orb rings,
+Leech healing, Brood mites, Phasing blinks, Shielded barriers, Graviton pull and Starcaller falling stars. Slay them for
+richer caches and trophies in the Codex.
 Built with Godot 4.7 (GDScript, Mobile renderer).
 
 **Download:** grab the latest `Afterglow-v*.apk` from
@@ -48,7 +50,7 @@ publishes a new release automatically.
 | `src/ui/` | Screens: title (live autopilot demo behind it), the Gauntlet, game (joystick, HUD, Overdrive button, level-up cards, Prism Cache reveal, pause, results, the after-action report), Hangar, Missions, Daily Run, Codex (with the resonance web), Forge, settings. |
 | `src/autoload/` | `Save` (local JSON) and `Sfx` (pooled sounds, layered music, haptics). |
 | `assets/` | Generated sprites/icons/audio (see `tools/`) and fonts (Orbitron, Rajdhani; OFL). |
-| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `levi_probe.gd` (how the bot fares against the Leviathan), `gauntlet_probe.gd` (the bot in the Gauntlet), `report_probe.gd` (damage by source in bot runs), `shots.tscn` (screenshots). |
+| `tests/` | `run_tests.gd` (CI logic checks + replay determinism), `tune.gd` (balance timeline), `weapon_probe.gd` (damage per second of every weapon level), `hurt_probe.gd` (what damages the bot, by source), `daily_probe.gd` (bot plays Daily Runs), `levi_probe.gd` (how the bot fares against the Leviathan), `gauntlet_probe.gd` (the bot in the Gauntlet), `report_probe.gd` (damage by source in bot runs), `trait_probe.gd` (how the bot fares against trait elites), `shots.tscn` (screenshots). |
 
 ```sh
 godot --headless --path . --import

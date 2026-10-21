@@ -63,6 +63,10 @@ func _ready() -> void:
 		await _shard_shots()
 		get_tree().quit()
 		return
+	if args.has("traits"):
+		await _trait_shots()
+		get_tree().quit()
+		return
 	if args.has("report"):
 		await _report_shots()
 		get_tree().quit()
@@ -737,6 +741,82 @@ func _shard_shots() -> void:
 	main.go_codex()
 	await _wait(1.2)
 	await _shot("c7_codex")
+
+
+func _trait_shots() -> void:
+	Save.data.tutorial_done = true
+	Save.data.trait_kills = {"brood": 3, "swift": 1}
+	main.start_run()
+	await _wait(1.0)
+	var gs = main.screen
+	var s: Sim = gs.sim
+	gs._hide_hint()
+	_ff(s, func(): return s.seconds() > 150.0, 170 * Sim.TPS)
+	s.hp = s.max_hp
+	s.xp = 0.0
+	# Clear the field, then bring in a cast of trait elites around the ship.
+	for i in s.en:
+		s.e_hp[i] = 0.0
+	s.step(0, 0)
+	s.events.clear()
+	var cast := [[Defs.BRUTE, 260.0, -300.0, ["shielded", "pulsar"]], [Defs.SPITTER, -280.0, -220.0, ["starcaller"]],
+			[Defs.WEAVER, 300.0, 260.0, ["graviton", "leech", "swift"]], [Defs.SPLITTER, -260.0, 280.0, ["brood", "phasing"]]]
+	for c in cast:
+		var i := s._spawn(c[0], s.px + c[1], s.py + c[2], true, 0)
+		var mask := 0
+		for id in c[3]:
+			mask |= Defs.trait_bit(id)
+		s._give_traits(i, 0, false, mask)
+	for k in 14:
+		var a := k * Trig.STEPS / 14
+		s._spawn(Defs.DRIFTER, s.px + Trig.cos_i(a) * 520.0, s.py + Trig.sin_i(a) * 520.0, false, 0)
+	main.arena.elite_arrived.emit(Defs.WEAVER, Defs.trait_bit("graviton") | Defs.trait_bit("leech") |
+			Defs.trait_bit("swift"))
+	main.arena.demo = true
+	for k in 20:
+		s.step(0, 0)
+	# A pulsar mid-swell, a barrier, stars on the way down.
+	for i in s.en:
+		var st := s.trait_state(i)
+		if not st.is_empty():
+			st.tt = Defs.PULSAR_EVERY - 20
+	s.stars.append([s.px + 40.0, s.py + 10.0, 24, 0, 10.0])
+	s.stars.append([s.px - 150.0, s.py + 120.0, 44, 0, 10.0])
+	main.arena.demo = false
+	await _wait(0.5)
+	await _shot("t1_card")
+	main.arena.demo = true
+	await _wait(1.6)
+	await _shot("t2_field")
+	# A trophy: the exalted weaver falls.
+	for i in s.en:
+		if s.e_tr[i] == (Defs.trait_bit("graviton") | Defs.trait_bit("leech") | Defs.trait_bit("swift")):
+			s.e_hp[i] = 1.0
+			s._damage(i, 9999.0, 0.0, 0.0)
+	main.arena.demo = false
+	await _wait(0.5)
+	await _shot("t3_trophy")
+	s.state = Sim.DEAD
+	gs._on_end(false)
+	await _wait(2.4)
+	await _shot("t4_results")
+	main.go_codex()
+	await _wait(1.0)
+	var sc := _find_scroll(main.screen)
+	if sc != null:
+		sc.scroll_vertical = 5200
+	await _wait(0.6)
+	await _shot("t5_codex")
+
+
+func _find_scroll(n: Node) -> ScrollContainer:
+	if n is ScrollContainer:
+		return n
+	for c in n.get_children():
+		var f := _find_scroll(c)
+		if f != null:
+			return f
+	return null
 
 
 func _resonance_shots() -> void:
