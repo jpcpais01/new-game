@@ -277,7 +277,7 @@ func _resume() -> void:
 # --- coach tips ---------------------------------------------------------------------
 
 const COACH := {
-	"elite": ["ELITE HUNT", "Gold-haloed elites are tough. Destroy one for a Prism Cache; the first also guards a relic."],
+	"elite": ["ELITE HUNT", "Every elite carries traits, shown over its head. Slay it for a Prism Cache: one upgrade per trait. The first also guards a relic."],
 	"boss": ["BOSS", "Bosses telegraph every attack. Defeat one for a big cache, a core and a heart."],
 	"laser": ["LASERS", "A thin line warns you before a beam fires. Step out of it."],
 	"chain": ["THE CHAIN", "Kills in a row build your Chain and multiply your score. A hit breaks it."],

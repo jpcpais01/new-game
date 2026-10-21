@@ -76,6 +76,25 @@ func _ready() -> void:
 	list.add_child(UiKit.label("UMBRAL RELICS  ·  FROM A WON UMBRAL TRIAL", 30, Defs.UMBRAL_COLOR, UiKit.display()))
 	for id in Defs.UMBRAL_ORDER:
 		list.add_child(_relic_row(id))
+	var trophies = Save.data.get("trait_kills", {})
+	if not trophies is Dictionary:
+		trophies = {}
+	var have := 0
+	for id in Defs.TRAIT_ORDER:
+		if int(trophies.get(id, 0)) > 0:
+			have += 1
+	list.add_child(UiKit.label("ELITE TRAITS  ·  TROPHIES %d / %d" % [have, Defs.TRAIT_ORDER.size()], 30,
+			Defs.TRAIT_COLOR, UiKit.display()))
+	for id in Defs.TRAIT_ORDER:
+		var info: Dictionary = Defs.TRAITS[id]
+		var n := int(trophies.get(id, 0))
+		var line := "Slain %s." % UiKit.fmt_int(n) if n > 0 else "No trophy yet."
+		if info.boss:
+			line += " Night bosses carry it too."
+		var row := _info_row("trait_" + id, String(info.name), String(info.text) + "\n" + line, info.color)
+		if n <= 0:
+			(row.get_child(0).get_child(0) as Control).modulate = Color(0.45, 0.42, 0.6, 0.85)
+		list.add_child(row)
 	list.add_child(UiKit.label("RIFTS  ·  ONE OPENS EVERY MINUTE OR SO", 30, Defs.RIFTS[0].color, UiKit.display()))
 	for r in Defs.RIFTS:
 		list.add_child(_info_row("rift_" + String(r.id), String(r.name), String(r.text), r.color))

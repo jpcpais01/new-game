@@ -94,6 +94,19 @@ static func move(s: Sim) -> Vector2i:
 				var w := (gap - d) / gap * 7.0
 				fx += dx / d * w
 				fy += dy / d * w
+	# Starcaller stars about to land: the same.
+	for st in s.stars:
+		if int(st[2]) > 45:
+			continue
+		var dx: float = s.px - float(st[0])
+		var dy: float = s.py - float(st[1])
+		var gap := Defs.STAR_R + 70.0
+		var d2 := dx * dx + dy * dy
+		if d2 < gap * gap:
+			var d := sqrt(d2) + 1.0
+			var w := (gap - d) / gap * 7.0
+			fx += dx / d * w
+			fy += dy / d * w
 	# Black holes: keep clear of the core and lean out of the pull.
 	for m in s.maws:
 		var dx: float = s.px - float(m.x)

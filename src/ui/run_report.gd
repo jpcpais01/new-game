@@ -41,6 +41,9 @@ static func source_info(sim: Sim, src: String) -> Dictionary:
 		"bomber":
 			return {"name": "Bomber blasts", "tag": "CHAIN REACTIONS", "color": Defs.ENEMY_COLOR[Defs.BOMBER],
 					"tex": Art.tex("e_bomber")}
+		"star":
+			return {"name": "Falling stars", "tag": "STARCALLER ELITES", "color": Defs.TRAITS.starcaller.color,
+					"tex": Art.icon("trait_starcaller")}
 		"volatile":
 			var m: Dictionary = Defs.MUTATORS.volatile
 			return {"name": String(m.name), "tag": "MUTATOR", "color": m.color, "tex": Art.icon("mod_volatile")}

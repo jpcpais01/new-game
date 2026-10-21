@@ -7,7 +7,7 @@ extends RefCounted
 ## device. Entities live in parallel packed arrays (struct of arrays) for
 ## speed. Views read the arrays and drain `events` after every call.
 
-const RULES_VERSION := 14
+const RULES_VERSION := 15
 const TPS := 60
 const DT := 1.0 / 60.0
 const ARENA_R := 1500.0
@@ -89,6 +89,9 @@ const EV_RESFX := 48      # resonance id, then its data (refraction: x1, y1, x2,
                           # bladestorm: x, y, angle, radius, half arc; surge: x, y)
 const EV_SHARD := 49      # x, y, phase (0 a crystal resonates, 1 shatters, 2 absorbs a shot, 3 shields you from a beam,
                           # 4 grows back, 5 crumbles to make room for a rift), crystal index (-1: none), beam angle
+const EV_TRAIT := 50      # x, y, trait id, phase, then data. pulsar 1 bursts; brood 0 hatches; star 0 marked,
+                          # 1 lands; shielded 1 breaks, 2 comes back; leech 0 drinks (data: its x, y);
+                          # "slain" n traits, mask, type (a trait elite or night boss falls)
 
 const BURST_BIT := 1 << 16  # set in a logged move code when Overdrive was pressed
 
@@ -172,6 +175,20 @@ var caches_opened := 0
 var warden_down := false
 var first_hurt := -1         # tick of the first damage taken, -1 if none
 var elite_kills := 0
+
+# --- elite traits ---------------------------------------------------------------------
+# uid -> {tt (ticks alive), dash (0 idle, 1 marked, 2 lunging), dt, dang, bar, bmax, bcd, phase_at, blink, bx, by}
+var traits_of := {}
+var stars: Array = []         # Starcaller stars: [x, y, ticks to impact, caller uid, damage]
+var trait_kills := 0          # elites (and night bosses) with traits slain this run
+var exalted_kills := 0        # ...carrying three traits
+var traits_slain := {}        # trait id -> how many carriers fell this run
+var trait_score := 0
+var _leech_n := 0             # living leeches
+const _SHIELD_BIT := 1 << 5     # Defs.trait_bit("shielded"), for the hot path in _damage
+var _t_over := false          # _traits() set the velocity outright (a Swift lunge)
+var _t_vx := 0.0
+var _t_vy := 0.0
 
 # --- mutators and the Afterdark --------------------------------------------------
 var mods := {}               # mutator id -> true (from loadout.mods)
@@ -341,6 +358,7 @@ var e_uid := PackedInt32Array()
 var e_ax := PackedFloat64Array()   # a point an enemy is heading for (blinks)
 var e_ay := PackedFloat64Array()
 var e_shd := PackedInt32Array()    # 1 while inside a Bastion's aegis
+var e_tr := PackedInt32Array()     # trait bits (Defs.TRAIT_ORDER) of an elite or night boss
 
 # --- player projectiles ---------------------------------------------------------
 var bn := 0
@@ -454,6 +472,7 @@ func _alloc() -> void:
 	e_speed.resize(MAX_E); e_dmg.resize(MAX_E); e_kb.resize(MAX_E); e_t.resize(MAX_E); e_state.resize(MAX_E)
 	e_k.resize(MAX_E); e_ang.resize(MAX_E); e_flash.resize(MAX_E); e_spawn.resize(MAX_E); e_hitcd.resize(MAX_E)
 	e_elite.resize(MAX_E); e_uid.resize(MAX_E); e_ax.resize(MAX_E); e_ay.resize(MAX_E); e_shd.resize(MAX_E)
+	e_tr.resize(MAX_E)
 	b_x.resize(MAX_B); b_y.resize(MAX_B); b_ox.resize(MAX_B); b_oy.resize(MAX_B); b_vx.resize(MAX_B)
 	b_vy.resize(MAX_B); b_dmg.resize(MAX_B); b_r.resize(MAX_B); b_tx.resize(MAX_B); b_ty.resize(MAX_B)
 	b_blast.resize(MAX_B); b_life.resize(MAX_B); b_pierce.resize(MAX_B); b_kind.resize(MAX_B); b_last.resize(MAX_B)
@@ -517,6 +536,7 @@ func step(ix: int, iy: int, burst := false) -> void:
 		_update_shards()
 	_src = ""
 	_update_enemies()
+	_update_stars()
 	_grid_build()
 	_separate()
 	if sector == Defs.SECTOR_SHARD:
@@ -743,7 +763,7 @@ func flux_earned() -> int:
 ## The run's score: what the Daily Run ranks by. Banes multiply it.
 func score() -> int:
 	var base := kills * 10 + elite_kills * 250 + bosses_killed * 2500 + (tick / TPS) * 10 + level * 50 + chain_score \
-			+ rifts_done * Defs.RIFT_SCORE + g_bonus + shards_broken * Defs.SHARD_SCORE
+			+ rifts_done * Defs.RIFT_SCORE + g_bonus + shards_broken * Defs.SHARD_SCORE + trait_score
 	if dawn:
 		base += 10000
 	return int(float(base) * score_mult())
@@ -776,6 +796,10 @@ func checksum() -> int:
 		h = GlowRng.mix32(h ^ (int(float(flare.r) * 100.0) & GlowRng.MASK))
 	for c in shards:
 		h = GlowRng.mix32(h ^ (int(float(c.charge) * 10.0) & 0xFFFF) ^ (int(c.st) << 16) ^ (int(c.t) << 20))
+	for i in en:
+		if e_tr[i] != 0:
+			h = GlowRng.mix32(h ^ e_tr[i] ^ (int(float(trait_state(i).get("bar", 0.0)) * 10.0) << 8))
+	h = GlowRng.mix32(h ^ (stars.size() << 4))
 	h = GlowRng.mix32(h ^ int(rng.state()[0]))
 	return h
 
@@ -949,8 +973,7 @@ func _director() -> void:
 					Defs.SENTINEL, Defs.BASTION]
 			var type: int = kinds[rng.range_i(mini(kinds.size(), 2 + int(tm)))]
 			var a := rng.range_i(Trig.STEPS)
-			_spawn_at_safe(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0, true, 70)
-			events.append([EV_ELITE, type])
+			_elite_at(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0)
 	var cap := mini(MAX_E - 40, 90 + int(tm * 36.0) + (60 if mods.has("horde") else 0) + 25 * night
 			+ (40 if radiance >= 8 else 0))
 	if en < cap:
@@ -1017,7 +1040,10 @@ func _night_boss() -> void:
 	boss_mult = 1.0 + Defs.NIGHT_BOSS_GROWTH * float(night)
 	var type: int = Defs.NIGHT_BOSSES[(night - 1) % Defs.NIGHT_BOSSES.size()]
 	var a := rng.range_i(Trig.STEPS)
-	_spawn_at_safe(type, px + Trig.cos_i(a) * 620.0, py + Trig.sin_i(a) * 620.0, false, 150)
+	var b := _spawn_at_safe(type, px + Trig.cos_i(a) * 620.0, py + Trig.sin_i(a) * 620.0, false, 150)
+	if b >= 0 and night >= Defs.TRAIT_NIGHT:
+		# The deeper the night, the stranger the bosses it sends.
+		_give_traits(b, 2 if night >= Defs.TRAIT_NIGHT + 2 else 1, true)
 	events.append([EV_NIGHT, night])
 	tl_marks.append([tick, "night", night])
 	events.append([EV_BOSS, type])
@@ -1972,8 +1998,7 @@ func _scheduled(ev: Array) -> void:
 			events.append([EV_WAVE, "LASER GRID"])
 		"elite":
 			var a := rng.range_i(Trig.STEPS)
-			_spawn_at_safe(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0, true, 70)
-			events.append([EV_ELITE, type])
+			_elite_at(type, px + Trig.cos_i(a) * 700.0, py + Trig.sin_i(a) * 700.0)
 		"surge":
 			surge_until = tick + 30 * TPS
 			events.append([EV_WAVE, "SURGE"])
@@ -2062,6 +2087,7 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 	e_ax[i] = x
 	e_ay[i] = y
 	e_shd[i] = 0
+	e_tr[i] = 0
 	e_uid[i] = uid_next
 	uid_next += 1
 	if type == Defs.LEVIATHAN:
@@ -2070,6 +2096,10 @@ func _spawn(type: int, x: float, y: float, elite: bool, warm: int) -> int:
 
 
 func _e_remove(i: int) -> void:
+	if e_tr[i] != 0:
+		if e_tr[i] & Defs.trait_bit("leech"):
+			_leech_n -= 1
+		traits_of.erase(e_uid[i])
 	var l := en - 1
 	if i != l:
 		e_type[i] = e_type[l]; e_x[i] = e_x[l]; e_y[i] = e_y[l]; e_ox[i] = e_ox[l]; e_oy[i] = e_oy[l]
@@ -2077,8 +2107,261 @@ func _e_remove(i: int) -> void:
 		e_speed[i] = e_speed[l]; e_dmg[i] = e_dmg[l]; e_kb[i] = e_kb[l]; e_t[i] = e_t[l]; e_state[i] = e_state[l]
 		e_k[i] = e_k[l]; e_ang[i] = e_ang[l]; e_flash[i] = e_flash[l]; e_spawn[i] = e_spawn[l]
 		e_hitcd[i] = e_hitcd[l]; e_elite[i] = e_elite[l]; e_uid[i] = e_uid[l]; e_ax[i] = e_ax[l]
-		e_ay[i] = e_ay[l]; e_shd[i] = e_shd[l]
+		e_ay[i] = e_ay[l]; e_shd[i] = e_shd[l]; e_tr[i] = e_tr[l]
 	en = l
+
+
+# --- elite traits --------------------------------------------------------------------
+
+## An elite enters the arena with its traits.
+func _elite_at(type: int, x: float, y: float) -> void:
+	var i := _spawn_at_safe(type, x, y, true, 70)
+	if i < 0:
+		return
+	_give_traits(i, elite_traits(), false)
+	events.append([EV_ELITE, type, e_tr[i]])
+
+
+## Traits the next elite carries: one, two from 4:30, three from 7:00 and in
+## the Afterdark; Radiance 3 adds one.
+func elite_traits() -> int:
+	var n := 1
+	if tick >= int(float(Defs.TRAIT_SECOND) * sched_scale) * TPS:
+		n += 1
+	if endless or tick >= int(float(Defs.TRAIT_THIRD) * sched_scale) * TPS:
+		n += 1
+	if radiance >= 3:
+		n += 1
+	return mini(n, Defs.TRAIT_MAX)
+
+
+## Rolls n distinct traits for enemy i (bosses only take the ones that suit
+## them), or gives it exactly the traits in `force` (tests and screenshots).
+func _give_traits(i: int, n: int, boss: bool, force := 0) -> void:
+	var pool: Array = []
+	for k in Defs.TRAIT_ORDER.size():
+		var id: String = Defs.TRAIT_ORDER[k]
+		if boss and not Defs.TRAITS[id].boss:
+			continue
+		# Sentinels anchor to fire their beams: no lunges.
+		if id == "swift" and e_type[i] == Defs.SENTINEL:
+			continue
+		pool.append(k)
+	var mask := force
+	for c in (n if force == 0 else 0):
+		if pool.is_empty():
+			break
+		var pick := rng.range_i(pool.size())
+		mask |= 1 << int(pool[pick])
+		pool.remove_at(pick)
+	e_tr[i] = mask
+	var st := {"tt": 0, "dash": 0, "dt": Defs.SWIFT_EVERY / 2 + rng.range_i(60), "dang": 0, "bar": 0.0,
+			"bmax": 0.0, "bcd": 0, "phase_at": 0.0, "blink": 0, "bx": 0.0, "by": 0.0}
+	if not boss:
+		# Every trait makes an elite tougher (and its cache richer).
+		var hm := 1.0 + Defs.TRAIT_HP * float(Defs.trait_ids(mask).size())
+		e_hp[i] *= hm
+		e_maxhp[i] *= hm
+	if mask & Defs.trait_bit("swift"):
+		e_speed[i] *= Defs.SWIFT_MULT
+	if mask & Defs.trait_bit("shielded"):
+		st.bmax = e_maxhp[i] * (Defs.BARRIER_BOSS if boss else Defs.BARRIER)
+		st.bar = st.bmax
+	if mask & Defs.trait_bit("phasing"):
+		st.phase_at = e_maxhp[i] * (1.0 - Defs.PHASE_STEP)
+	if mask & Defs.trait_bit("leech"):
+		_leech_n += 1
+	traits_of[e_uid[i]] = st
+
+
+## The trait state of enemy i ({} if it has none), for the views.
+func trait_state(i: int) -> Dictionary:
+	if e_tr[i] == 0:
+		return {}
+	return traits_of.get(e_uid[i], {})
+
+
+## One tick of an enemy's traits. Returns a speed factor; a Swift lunge sets
+## the velocity outright (_t_over, _t_vx, _t_vy).
+func _traits(i: int, dx: float, dy: float, d: float) -> float:
+	_t_over = false
+	var st: Dictionary = traits_of.get(e_uid[i], {})
+	if st.is_empty():
+		return 1.0
+	var m := e_tr[i]
+	st.tt = int(st.tt) + 1
+	var tt: int = st.tt
+	var x := e_x[i]
+	var y := e_y[i]
+	var boss := e_type[i] >= Defs.WARDEN
+	var f := 1.0
+	if m & Defs.trait_bit("pulsar") and tt % Defs.PULSAR_EVERY == 0:
+		var n := Defs.PULSAR_ORBS + (6 if boss else 0)
+		var off := (tt / Defs.PULSAR_EVERY) * 37
+		var odm := 15.0 if boss else e_dmg[i] * 0.55
+		for k in n:
+			_fire_orb(x, y, off + k * Trig.STEPS / n, Defs.PULSAR_SPEED, odm)
+		events.append([EV_TRAIT, x, y, "pulsar", 1])
+	if m & Defs.trait_bit("brood") and tt % Defs.BROOD_EVERY == Defs.BROOD_EVERY / 2 and en < MAX_E - 40:
+		var nb := Defs.BROOD_N + (2 if boss else 0)
+		var base := rng.range_i(Trig.STEPS)
+		for k in nb:
+			var a := base + k * Trig.STEPS / nb
+			var rr := e_r[i] + 16.0
+			_spawn(Defs.MITE, x + Trig.cos_i(a) * rr, y + Trig.sin_i(a) * rr, false, 12)
+		events.append([EV_TRAIT, x, y, "brood", 0])
+	if m & Defs.trait_bit("starcaller") and tt % Defs.STAR_EVERY == 40 and d < 1000.0:
+		var sd := 18.0 if boss else e_dmg[i] * 0.8
+		for k in Defs.STAR_N:
+			var sx := px
+			var sy := py
+			if k == 1:
+				sx += mvx * st_speed * 0.8
+				sy += mvy * st_speed * 0.8
+			elif k >= 2:
+				var a2 := rng.range_i(Trig.STEPS)
+				var r2 := rng.range_f(110.0, 220.0)
+				sx += Trig.cos_i(a2) * r2
+				sy += Trig.sin_i(a2) * r2
+			var sl := sqrt(sx * sx + sy * sy)
+			var lim := ARENA_R - 40.0
+			if sl > lim:
+				sx = sx / sl * lim
+				sy = sy / sl * lim
+			stars.append([sx, sy, Defs.STAR_FALL + 8 * k, e_uid[i], sd])
+			events.append([EV_TRAIT, sx, sy, "star", 0])
+	if m & Defs.trait_bit("shielded"):
+		if int(st.bcd) > 0:
+			st.bcd = int(st.bcd) - 1
+		elif float(st.bar) < float(st.bmax):
+			var was: float = st.bar
+			st.bar = minf(float(st.bmax), was + float(st.bmax) * Defs.BARRIER_REGEN * DT)
+			if was <= 0.0:
+				events.append([EV_TRAIT, x, y, "shielded", 2])
+	if m & Defs.trait_bit("graviton") and d < Defs.GRAVITON_R and d > e_r[i] + PLAYER_R:
+		# You are dragged in, never faster than you can fly out.
+		var pull := Defs.GRAVITON_PULL * (1.0 - d / Defs.GRAVITON_R) * DT
+		px -= dx / d * pull
+		py -= dy / d * pull
+	if m & Defs.trait_bit("phasing"):
+		if int(st.blink) > 0:
+			st.blink = int(st.blink) - 1
+			f = 0.0
+			if int(st.blink) == 0:
+				events.append([EV_BLINK, x, y, st.bx, st.by, e_type[i], 1])
+				e_x[i] = st.bx
+				e_y[i] = st.by
+				e_ox[i] = e_x[i]
+				e_oy[i] = e_y[i]
+		elif e_hp[i] < float(st.phase_at):
+			st.phase_at = float(st.phase_at) - e_maxhp[i] * Defs.PHASE_STEP
+			var a3 := rng.range_i(Trig.STEPS)
+			var tx := px + Trig.cos_i(a3) * Defs.PHASE_DIST
+			var ty := py + Trig.sin_i(a3) * Defs.PHASE_DIST
+			var td := sqrt(tx * tx + ty * ty)
+			var lim2 := ARENA_R - e_r[i] - 20.0
+			if td > lim2:
+				tx = tx / td * lim2
+				ty = ty / td * lim2
+			st.bx = tx
+			st.by = ty
+			st.blink = Defs.PHASE_MARK
+			st.dash = 0
+			f = 0.0
+			events.append([EV_BLINK, x, y, tx, ty, e_type[i], 0])
+	if m & Defs.trait_bit("swift") and int(st.blink) <= 0:
+		match int(st.dash):
+			0:
+				st.dt = int(st.dt) - 1
+				if int(st.dt) <= 0 and d < 560.0 and d > 120.0:
+					st.dash = 1
+					st.dt = Defs.SWIFT_MARK
+					st.dang = Trig.angle_of(dx, dy)
+					events.append([EV_TELEGRAPH, x, y, st.dang, Defs.SWIFT_SPEED * float(Defs.SWIFT_DASH) / 60.0])
+			1:
+				f = 0.0
+				st.dt = int(st.dt) - 1
+				if int(st.dt) <= 0:
+					st.dash = 2
+					st.dt = Defs.SWIFT_DASH
+			_:
+				_t_over = true
+				_t_vx = Trig.cos_i(int(st.dang)) * Defs.SWIFT_SPEED
+				_t_vy = Trig.sin_i(int(st.dang)) * Defs.SWIFT_SPEED
+				st.dt = int(st.dt) - 1
+				if int(st.dt) <= 0:
+					st.dash = 0
+					st.dt = Defs.SWIFT_EVERY + rng.range_i(80)
+	return f
+
+
+## Starcaller stars fall: each lands on whoever is under it.
+func _update_stars() -> void:
+	if stars.is_empty() or freeze > 0:
+		return
+	var k := stars.size() - 1
+	while k >= 0:
+		var sr: Array = stars[k]
+		sr[2] = int(sr[2]) - 1
+		if int(sr[2]) <= 0:
+			stars.remove_at(k)
+			_star_land(float(sr[0]), float(sr[1]), int(sr[3]), float(sr[4]))
+		k -= 1
+
+
+func _star_land(x: float, y: float, caller: int, dmg: float) -> void:
+	var r := Defs.STAR_R
+	events.append([EV_TRAIT, x, y, "star", 1])
+	var prev := _src
+	_src = "star"
+	var ed := 30.0 * _od_scale()
+	# The grid is stale this early in the tick, so look at every enemy.
+	for i in en:
+		if e_spawn[i] > 0 or e_hp[i] <= 0.0 or e_uid[i] == caller:
+			continue
+		var ex := e_x[i] - x
+		var ey := e_y[i] - y
+		var rr := r + e_r[i]
+		var d2 := ex * ex + ey * ey
+		if d2 < rr * rr:
+			var d := sqrt(d2) + 0.001
+			_damage(i, ed, ex / d * 420.0, ey / d * 420.0)
+	_src = prev
+	var dx := px - x
+	var dy := py - y
+	var hr := r + PLAYER_R * 0.6
+	if dx * dx + dy * dy < hr * hr:
+		_hurt(dmg)
+
+
+## Damage the barrier of a Shielded enemy soaks up from a hit of dd.
+func _barrier_soak(i: int, dd: float) -> float:
+	var st: Dictionary = traits_of.get(e_uid[i], {})
+	if st.is_empty():
+		return 0.0
+	st.bcd = Defs.BARRIER_WAIT
+	var bar: float = st.bar
+	if bar <= 0.0:
+		return 0.0
+	var soak := minf(bar, dd)
+	st.bar = bar - soak
+	if float(st.bar) <= 0.0:
+		events.append([EV_TRAIT, e_x[i], e_y[i], "shielded", 1])
+	return soak
+
+
+## The swarm dying near a Leech heals it.
+func _leech_feed(x: float, y: float) -> void:
+	var bit := Defs.trait_bit("leech")
+	var r2 := Defs.LEECH_R * Defs.LEECH_R
+	for j in en:
+		if not (e_tr[j] & bit) or e_hp[j] <= 0.0 or e_hp[j] >= e_maxhp[j]:
+			continue
+		var dx := e_x[j] - x
+		var dy := e_y[j] - y
+		if dx * dx + dy * dy < r2:
+			e_hp[j] = minf(e_maxhp[j], e_hp[j] + e_maxhp[j] * Defs.LEECH_HEAL)
+			events.append([EV_TRAIT, x, y, "leech", 0, e_x[j], e_y[j]])
 
 
 # --- enemies ------------------------------------------------------------------------
@@ -2204,6 +2487,14 @@ func _update_enemies() -> void:
 				else:
 					vx = ux * sp * v2
 					vy = uy * sp * v2
+		if e_tr[i] != 0:
+			var tf := _traits(i, dx, dy, d)
+			if _t_over:
+				vx = _t_vx
+				vy = _t_vy
+			else:
+				vx *= tf
+				vy *= tf
 		e_x[i] += (vx + e_vx[i]) * DT
 		e_y[i] += (vy + e_vy[i]) * DT
 		e_vx[i] *= 0.86
@@ -4197,6 +4488,14 @@ func _damage(i: int, dmg: float, kx: float, ky: float) -> void:
 		dd *= 1.5
 	if e_shd[i] == 1:
 		dd *= 0.5
+	if e_tr[i] & _SHIELD_BIT:
+		dd -= _barrier_soak(i, dd)
+		if dd <= 0.0:
+			# The barrier took all of it.
+			e_flash[i] = 3
+			e_vx[i] += kx * e_kb[i] * 0.5
+			e_vy[i] += ky * e_kb[i] * 0.5
+			return
 	var landed := minf(dd, e_hp[i])
 	dmg_by[_src] = float(dmg_by.get(_src, 0.0)) + landed
 	_tl_dmg += landed
@@ -4359,6 +4658,20 @@ func _on_death(i: int) -> void:
 	if elite:
 		elite_kills += 1
 	events.append([EV_KILL, x, y, type, elite, e_r[i]])
+	var nt := 0
+	if e_tr[i] != 0:
+		# A trait carrier falls: a trophy for the Codex.
+		var ids := Defs.trait_ids(e_tr[i])
+		nt = ids.size()
+		trait_kills += 1
+		trait_score += Defs.TRAIT_SCORE * nt
+		if nt >= Defs.TRAIT_MAX:
+			exalted_kills += 1
+		for id in ids:
+			traits_slain[id] = int(traits_slain.get(id, 0)) + 1
+		events.append([EV_TRAIT, x, y, "slain", nt, e_tr[i], type])
+	elif _leech_n > 0 and type < Defs.WARDEN:
+		_leech_feed(x, y)
 	if type >= Defs.WARDEN:
 		_boss_fell(type, false)
 	if gauntlet and type >= Defs.WARDEN:
@@ -4366,7 +4679,8 @@ func _on_death(i: int) -> void:
 	chain += 1
 	chain_t = Defs.CHAIN_TICKS * (2 if ship_id == "echo" else 1)
 	chain_best = maxi(chain_best, chain)
-	var worth := 10.0 + (250.0 if elite else 0.0) + (2500.0 if type >= Defs.WARDEN else 0.0)
+	var worth := 10.0 + (250.0 if elite else 0.0) + (2500.0 if type >= Defs.WARDEN else 0.0) \
+			+ float(Defs.TRAIT_SCORE * nt)
 	chain_score += int(worth * (Defs.chain_mult(chain, r_crown) - 1.0) + 0.5)
 	for tier in Defs.CHAIN_TIERS:
 		if chain == int(tier[0]):
@@ -4395,7 +4709,7 @@ func _on_death(i: int) -> void:
 			events.append([EV_OD_READY])
 	var xpv: int = Defs.ENEMY[type].xp
 	if elite:
-		xpv = xpv * 8 + 10
+		xpv = int(float(xpv * 8 + 10) * (1.0 + 0.25 * float(maxi(0, nt - 1))))
 	if mods.has("giants"):
 		xpv *= 2
 	var maw = _eaten.get(e_uid[i])
@@ -4474,10 +4788,15 @@ func _on_death(i: int) -> void:
 				tl_marks.append([tick, "dawn", 0])
 	if elite:
 		_drop_pickup("chest", x, y)
+		# Every trait past the first adds an upgrade to its cache.
+		if nt > 1:
+			pickups[pickups.size() - 1].n = nt
 		# The first elite of a run guards a relic (unless the Leviathan's cache already did).
 		if not relic_given:
 			relic_given = true
 			pickups[pickups.size() - 1].relic = true
+		if nt >= Defs.TRAIT_MAX:
+			_drop_pickup("heart", x + 60.0, y)
 	elif type < Defs.WARDEN:
 		var roll := rng.unit()
 		if roll < 0.004:
@@ -4594,7 +4913,7 @@ func _update_pickups() -> void:
 					xp += xp_need - xp + 0.001
 					_heal(15.0)
 				"chest", "bigchest":
-					_open_chest(p.k == "bigchest", p.x, p.y, p.get("relic", false))
+					_open_chest(p.k == "bigchest", p.x, p.y, p.get("relic", false), int(p.get("n", 1)))
 			events.append([EV_PICKUP, p.k, p.x, p.y])
 			pickups.remove_at(k)
 		k -= 1
@@ -4606,9 +4925,9 @@ func _update_pickups() -> void:
 
 
 ## Prism Cache: evolves the first ready weapon, otherwise upgrades what you
-## own (one item, or three from a boss). Always some Flux on top, and a relic
+## own (one item, three from a boss, one per trait from an elite). Always some Flux on top, and a relic
 ## choice from bosses and the first elite.
-func _open_chest(big: bool, x: float, y: float, relic := false) -> void:
+func _open_chest(big: bool, x: float, y: float, relic := false, n := 1) -> void:
 	caches_opened += 1
 	var rewards: Array = []
 	for w in weapons:
@@ -4621,7 +4940,7 @@ func _open_chest(big: bool, x: float, y: float, relic := false) -> void:
 			tl_marks.append([tick, "evo", w.id])
 			events.append([EV_PICK, w.id, Defs.EVO_LEVEL])
 			break
-	var want := 3 if big else 1
+	var want := 3 if big else maxi(1, n)
 	while rewards.size() < want:
 		var pool: Array = []
 		for w in weapons:

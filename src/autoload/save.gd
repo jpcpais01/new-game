@@ -16,6 +16,7 @@ const DEFAULTS := {
 	"tutorial_done": false,
 	"evolved": [],
 	"resonances": [],
+	"trait_kills": {},
 	"ship": "lumen",
 	"missions": [],
 	"ships_won": [],
@@ -365,6 +366,16 @@ func _record_common(sim: Sim, earned: int, beat: Dictionary) -> Dictionary:
 			heard.append(id)
 			fresh_res.append(id)
 	beat.resonances = fresh_res
+	# Elite traits: trophies per trait, and the ones slain for the first time.
+	if not (data.get("trait_kills") is Dictionary):
+		data.trait_kills = {}
+	var trophies: Dictionary = data.trait_kills
+	var fresh_traits: Array = []
+	for id in sim.traits_slain:
+		if int(trophies.get(id, 0)) <= 0:
+			fresh_traits.append(id)
+		trophies[id] = int(trophies.get(id, 0)) + int(sim.traits_slain[id])
+	beat.traits = fresh_traits
 	# Missions: pay out once, unlock ships.
 	var done: Array = data.missions
 	var fresh: Array = []

@@ -1,5 +1,13 @@
 # Afterglow patch notes
 
+## Oct 21, 2026 · 01:00 UTC
+
+- **Elites have traits.** Every elite now arrives with one of eight traits, each a trick of its own: Swift (45% faster, lunges along a marked line), Pulsar (swells, then bursts in a ring of orbs), Leech (heals whenever the swarm dies near it), Brood (hatches mites), Phasing (blinks into a ring beside you every time it loses a sixth of its health), Shielded (a barrier that soaks the first hits and recharges if you let up), Graviton (drags you in when you fly close) and Starcaller (calls falling stars down on you, and on any of the swarm under them).
+- **They stack.** Elites carry two traits from 4:30 and three from 7:00 and in the Afterdark, and Radiance 3 adds one more, so a late elite can be a Shielded Pulsar Starcaller Brute. Each trait makes it tougher, and its Prism Cache richer: one upgrade per trait, plus a heart from an Exalted (three-trait) elite. Every trait also pays 150 score.
+- **Know what is coming.** When an elite arrives, a card drops in with its name and a line for each trait (NEW if you have never slain it). Elites wear their traits over their heads with a health bar and the barrier of a Shielded one, an arrow points to them when they are off screen, and every trait shows in the arena: the hex barrier, the pulsar's swell, the graviton's pull rings, a leech's reach, a brood's clutch, the starcaller's crown and its stars streaking down onto their marks.
+- **Trophies.** Slaying a trait elite is a trophy, with a burst of each trait's colour and a new chime. The results screen lists the trophies of the run, and the Codex has a new Elite Traits page with every trait, how to beat it and how many you have slain. From the second night of the Afterdark, the bosses carry traits too.
+- **Three new missions.** Exalted (slay an elite carrying three traits), Big Game (slay 5 elites in one run) and Trophy Wall (slay elites carrying all 8 traits), worth 1,150 Flux together.
+
 ## Oct 20, 2026 · 22:00 UTC
 
 - **Every boss has its own theme.** When a boss arrives, the run's music sinks away under its own track: a slithering snake-charmer piece over taiko drums for the Leviathan, a pounding industrial march with brass stabs for the Warden, a choir and bells for the Seraph and a drum and bass finale with supersaw chords for the Eclipse. Wear a boss down past half its health and a fury layer joins in (a lead line, rolling toms, alarms, snare rolls) until it falls, then your run's music swells back. The Gauntlet and the Afterdark nights use them too.

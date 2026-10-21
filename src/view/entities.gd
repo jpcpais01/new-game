@@ -128,6 +128,23 @@ func _draw_enemies() -> void:
 			var fade2 := clampf(1.0 - float(c - 480) / 60.0, 0.0, 1.0)
 			mod = Color(1.5, 2.0, 1.9, 0.25 + 0.75 * fade2)
 			sc *= 0.6 + 0.4 * fade2
+		if s.e_tr[i] != 0:
+			var ts := s.trait_state(i)
+			if int(ts.get("blink", 0)) > 0:
+				# Phasing out: it thins to a flicker before it blinks.
+				var fk := float(ts.blink) / float(Defs.PHASE_MARK)
+				mod = Color(1.3, 1.0, 1.9, mod.a * (0.3 + 0.6 * fk + 0.1 * sin(t * 31.0)))
+				x += randf_range(-3.0, 3.0) * (1.0 - fk)
+			elif int(ts.get("dash", 0)) == 1:
+				mod = Color(2.0, 1.9, 1.1, mod.a)
+				x += randf_range(-3.0, 3.0)
+				y += randf_range(-3.0, 3.0)
+			if s.e_tr[i] & Defs.trait_bit("pulsar"):
+				var c := int(ts.get("tt", 0)) % Defs.PULSAR_EVERY
+				if c >= Defs.PULSAR_EVERY - Defs.PULSAR_SWELL:
+					var sk := float(c - (Defs.PULSAR_EVERY - Defs.PULSAR_SWELL)) / float(Defs.PULSAR_SWELL)
+					sc *= 1.0 + 0.18 * sk * sk
+					mod = mod.lerp(Color(2.0, 1.0, 1.8, mod.a), sk)
 		if s.freeze > 0:
 			# Stopped time: everything turns to cold glass.
 			mod = Color(0.55, 0.65, 1.7, mod.a)
@@ -140,6 +157,176 @@ func _draw_enemies() -> void:
 			var rs := (r + 18.0) / 110.0
 			draw_set_transform(Vector2(x, y), -t * 1.5, Vector2(rs, rs))
 			draw_texture(gold, Vector2(-128, -128), Color(1.6, 1.3, 0.5, 0.75 + 0.25 * sin(t * 6.0)))
+	_draw_plates(s, a, t)
+
+
+## Over every elite (and trait-bearing night boss): its traits as a row of
+## icons over a health bar, with the barrier of a Shielded one laid on top.
+func _draw_plates(s: Sim, a: float, t: float) -> void:
+	for i in s.en:
+		if s.e_spawn[i] > 6 or (s.e_elite[i] == 0 and s.e_tr[i] == 0) or s.e_type[i] >= Defs.WARDEN:
+			continue
+		var x := lerpf(s.e_ox[i], s.e_x[i], a)
+		var y := lerpf(s.e_oy[i], s.e_y[i], a)
+		var r := s.e_r[i]
+		var w := clampf(r * 2.4, 84.0, 140.0)
+		var by := y - r - 34.0
+		var frac := clampf(s.e_hp[i] / s.e_maxhp[i], 0.0, 1.0)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_rect(Rect2(x - w * 0.5 - 3, by - 3, w + 6, 14), Color(0.02, 0.01, 0.05, 0.8))
+		draw_rect(Rect2(x - w * 0.5, by, w * frac, 8), Color(1.9, 1.5, 0.6))
+		var ts := s.trait_state(i)
+		if float(ts.get("bmax", 0.0)) > 0.0:
+			var bf := clampf(float(ts.bar) / float(ts.bmax), 0.0, 1.0)
+			draw_rect(Rect2(x - w * 0.5, by - 7, w * bf, 5), Defs.TRAITS.shielded.color * 1.8)
+		var ids := Defs.trait_ids(s.e_tr[i])
+		var n := ids.size()
+		var isz := 46.0
+		var x0 := x - float(n) * isz * 0.5
+		for k in n:
+			var id: String = ids[k]
+			var pulse := 1.0 + 0.08 * sin(t * 5.0 + float(k) * 1.7)
+			draw_set_transform(Vector2(x0 + isz * (float(k) + 0.5), by - 32.0), 0.0, Vector2.ONE * (isz / 96.0) * pulse)
+			draw_texture(Art.icon("trait_" + id), Vector2(-48, -48), Color(1.5, 1.5, 1.5))
+
+
+## Trait auras (additive): a Shielded barrier, a Pulsar's swell, a Graviton's
+## pull, a Brood's clutch, a Leech's reach, a Starcaller's crown, a Phasing
+## mark and the Swift's wake, then every star falling.
+func _draw_traits(s: Sim, t: float, a: float) -> void:
+	var glow := Art.tex("glow")
+	var ring := Art.tex("ring")
+	for i in s.en:
+		if s.e_tr[i] == 0 or s.e_spawn[i] > 6:
+			continue
+		var m := s.e_tr[i]
+		var ts := s.trait_state(i)
+		if ts.is_empty():
+			continue
+		var x := lerpf(s.e_ox[i], s.e_x[i], a)
+		var y := lerpf(s.e_oy[i], s.e_y[i], a)
+		var r := s.e_r[i]
+		var p := Vector2(x, y)
+		var uid := float(s.e_uid[i])
+		if m & Defs.trait_bit("shielded"):
+			var bf := clampf(float(ts.bar) / maxf(1.0, float(ts.bmax)), 0.0, 1.0)
+			if bf > 0.0:
+				var col: Color = Defs.TRAITS.shielded.color
+				var hr := r * 1.35 + 16.0
+				var hit := float(s.e_flash[i]) / 5.0
+				var pts := PackedVector2Array()
+				for k in 7:
+					var ang := t * 0.6 + uid + TAU * float(k) / 6.0
+					pts.append(Vector2(cos(ang), sin(ang)) * hr)
+				draw_set_transform(p, 0.0, Vector2.ONE)
+				var fill := PackedVector2Array(pts)
+				fill.remove_at(6)
+				draw_colored_polygon(fill, Color(col, (0.06 + 0.1 * hit) * bf))
+				draw_polyline(pts, Color(col * (1.4 + 1.2 * hit), 0.35 + 0.55 * bf), 3.0 + 2.0 * hit)
+				for k in 6:
+					draw_line(pts[k] * 0.55, pts[k], Color(col * 1.4, 0.18 * bf), 1.5)
+		if m & Defs.trait_bit("pulsar"):
+			var col2: Color = Defs.TRAITS.pulsar.color
+			var c := int(ts.tt) % Defs.PULSAR_EVERY
+			var start := Defs.PULSAR_EVERY - Defs.PULSAR_SWELL
+			if c >= start:
+				var sk := float(c - start) / float(Defs.PULSAR_SWELL)
+				var rr := lerpf(r * 4.0, r * 1.1, sk)
+				draw_set_transform(p, t * 2.0, Vector2.ONE * (rr / 110.0))
+				draw_texture(ring, Vector2(-128, -128), Color(col2 * 1.6, 0.25 + 0.6 * sk))
+				draw_set_transform(p, 0.0, Vector2.ONE * (r * (2.0 + 1.5 * sk) / 64.0))
+				draw_texture(glow, Vector2(-64, -64), Color(col2, 0.25 + 0.45 * sk))
+			else:
+				draw_set_transform(p, -t, Vector2.ONE * ((r + 26.0) / 110.0))
+				draw_texture(ring, Vector2(-128, -128), Color(col2, 0.3))
+		if m & Defs.trait_bit("graviton"):
+			var col3: Color = Defs.TRAITS.graviton.color
+			draw_set_transform(p, 0.0, Vector2.ONE)
+			for k in 3:
+				var ph := fmod(t * 0.55 + float(k) / 3.0, 1.0)
+				var rr2 := lerpf(Defs.GRAVITON_R * 0.75, r + 10.0, ph)
+				draw_arc(Vector2.ZERO, rr2, 0.0, TAU, 48, Color(col3 * 1.3, 0.28 * ph), 2.5)
+			var segs := 30
+			for k in segs:
+				var a0 := t * 0.25 + TAU * float(k) / float(segs)
+				draw_arc(Vector2.ZERO, Defs.GRAVITON_R, a0, a0 + TAU / float(segs) * 0.45, 4, Color(col3, 0.22), 2.0)
+		if m & Defs.trait_bit("brood"):
+			var col4: Color = Defs.TRAITS.brood.color
+			var c4 := int(ts.tt) % Defs.BROOD_EVERY
+			var ripe := clampf(float((c4 - Defs.BROOD_EVERY / 2 + Defs.BROOD_EVERY) % Defs.BROOD_EVERY)
+					/ float(Defs.BROOD_EVERY), 0.0, 1.0)
+			for k in 3:
+				var ang2 := t * 1.6 + uid + TAU * float(k) / 3.0
+				var cp := p + Vector2(cos(ang2), sin(ang2)) * (r + 20.0)
+				var sz := 6.0 + 5.0 * ripe
+				var tri := PackedVector2Array()
+				for v in 3:
+					var va := ang2 * 2.0 + TAU * float(v) / 3.0
+					tri.append(cp + Vector2(cos(va), sin(va)) * sz)
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+				draw_colored_polygon(tri, Color(col4 * 1.5, 0.55 + 0.4 * ripe))
+		if m & Defs.trait_bit("leech"):
+			var col5: Color = Defs.TRAITS.leech.color
+			var pulse := 0.5 + 0.5 * sin(t * 3.0 + uid)
+			draw_set_transform(p, 0.0, Vector2.ONE * (r * 2.6 / 64.0))
+			draw_texture(glow, Vector2(-64, -64), Color(col5, 0.18 + 0.15 * pulse))
+			draw_set_transform(p, 0.0, Vector2.ONE)
+			var segs2 := 40
+			for k in segs2:
+				var a1 := -t * 0.2 + TAU * float(k) / float(segs2)
+				draw_arc(Vector2.ZERO, Defs.LEECH_R, a1, a1 + TAU / float(segs2) * 0.3, 3, Color(col5, 0.14), 2.0)
+		if m & Defs.trait_bit("starcaller"):
+			var col6: Color = Defs.TRAITS.starcaller.color
+			for k in 3:
+				var ang3 := -t * 1.2 + TAU * float(k) / 3.0
+				var sp := p + Vector2(cos(ang3), sin(ang3)) * (r + 26.0)
+				draw_set_transform(sp, t * 3.0, Vector2.ONE * 0.11)
+				draw_texture(glow, Vector2(-64, -64), Color(col6 * 2.0, 0.9))
+				var star := PackedVector2Array()
+				for v2 in 10:
+					var va2 := t * 3.0 + TAU * float(v2) / 10.0
+					star.append(sp + Vector2(cos(va2), sin(va2)) * (9.0 if v2 % 2 == 0 else 4.0))
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+				draw_colored_polygon(star, Color(col6 * 1.8, 0.95))
+		if m & Defs.trait_bit("swift"):
+			var col7: Color = Defs.TRAITS.swift.color
+			var v := Vector2(s.e_x[i] - s.e_ox[i], s.e_y[i] - s.e_oy[i])
+			if v.length_squared() > 4.0:
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+				var dir := v.normalized()
+				var side := Vector2(-dir.y, dir.x)
+				var len := minf(160.0, v.length() * 9.0)
+				for k in 3:
+					var o := side * (float(k) - 1.0) * r * 0.55
+					draw_line(p + o - dir * r * 0.6, p + o - dir * (r * 0.6 + len), Color(col7 * 1.5, 0.45), 3.0)
+		if m & Defs.trait_bit("phasing") and int(ts.blink) > 0:
+			var col8: Color = Defs.TRAITS.phasing.color
+			var fk := float(ts.blink) / float(Defs.PHASE_MARK)
+			var tp := Vector2(float(ts.bx), float(ts.by))
+			draw_set_transform(tp, 0.0, Vector2.ONE)
+			draw_circle(Vector2.ZERO, r + 10.0, Color(col8, 0.08 + 0.14 * (1.0 - fk)))
+			draw_arc(Vector2.ZERO, (r + 10.0) * (0.4 + 0.9 * fk), 0.0, TAU, 40, Color(col8 * 1.6, 0.8), 3.0)
+			draw_arc(Vector2.ZERO, r + 10.0, 0.0, TAU, 40, Color(col8 * 1.3, 0.5), 2.0)
+	# Falling stars: a closing mark on the ground and a star streaking down onto it.
+	var comet := Art.tex("comet")
+	var scol: Color = Defs.TRAITS.starcaller.color
+	for st in s.stars:
+		var mx: float = st[0]
+		var my: float = st[1]
+		var left := clampf(float(st[2]) / float(Defs.STAR_FALL), 0.0, 1.0)
+		var near := 1.0 - left
+		var mr := Defs.STAR_R
+		var hot := Color(1.0, 0.4, 0.3) if left < 0.3 else scol
+		draw_set_transform(Vector2(mx, my), 0.0, Vector2.ONE)
+		draw_circle(Vector2.ZERO, mr, Color(hot, 0.06 + 0.14 * near))
+		draw_arc(Vector2.ZERO, mr, 0.0, TAU, 40, Color(hot * 1.6, 0.4 + 0.5 * near), 2.5)
+		draw_arc(Vector2.ZERO, mr * (0.2 + 0.8 * left), 0.0, TAU, 32, Color(hot * 1.9, 0.45 + 0.5 * near), 3.0)
+		var cx := mx + 300.0 * left
+		var cy := my - 820.0 * left
+		draw_set_transform(Vector2(cx, cy), atan2(820.0, -300.0), Vector2.ONE * (0.6 + 0.5 * near))
+		draw_texture(comet, Vector2(-224, -32), Color(scol * 1.9, 0.3 + 0.7 * near))
+		draw_set_transform(Vector2(cx, cy), t * 4.0, Vector2.ONE * (0.25 + 0.3 * near))
+		draw_texture(glow, Vector2(-64, -64), Color(scol * 2.2, 0.9))
 
 
 func _draw_player() -> void:
@@ -187,6 +374,7 @@ func _draw_glow() -> void:
 		draw_set_transform(Vector2(s.e_x[i], s.e_y[i]), t * 3.0 + float(i), Vector2(sc, sc))
 		draw_texture(portal, Vector2(-64, -64), Color(col * 1.6, (1.0 - k) * 0.9 + 0.1))
 	_draw_threats(s, t)
+	_draw_traits(s, t, a)
 	_draw_sector(s, t, a)
 	_draw_levi_glow(s, a, t)
 	# Gems.

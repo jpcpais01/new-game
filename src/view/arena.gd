@@ -25,6 +25,10 @@ signal gauntlet_split(stage: int, ticks: int, felled: bool)
 signal gauntlet_cleared(ticks: int)
 signal gauntlet_cycle(cycle: int)
 signal resonance_formed(id: String)
+## An elite arrived carrying these traits (a Defs.TRAIT_ORDER bit mask).
+signal elite_arrived(type: int, mask: int)
+## A trait carrier fell: its kind, trait mask and the score its traits paid.
+signal trophy(type: int, mask: int)
 
 const TICK := 1.0 / 60.0
 
@@ -626,8 +630,11 @@ func handle_events() -> void:
 			Sim.EV_ELITE:
 				if loud:
 					coach.emit("elite")
-					banner.emit("ELITE " + String(Defs.ENEMY[e[1]].name).to_upper(), UiKit.GOLD)
-					Sfx.play("wave", 0.8)
+					elite_arrived.emit(e[1], e[2] if e.size() > 2 else 0)
+					Sfx.play("elite_call")
+					Sfx.buzz(50)
+			Sim.EV_TRAIT:
+				_on_trait(e, loud)
 			Sim.EV_TELEGRAPH:
 				fx.warn(e[1], e[2], Trig.to_rad(e[3]), e[4], 0.55)
 				if loud:
@@ -1282,6 +1289,83 @@ func _on_kill(e: Array, loud: bool) -> void:
 	elif loud and _kill_sounds < 3:
 		_kill_sounds += 1
 		Sfx.play("kill", randf_range(0.85, 1.25) * (1.25 if r < 15.0 else 1.0))
+
+
+## Elite traits at work: bursts, hatchings, falling stars, barriers, leeches,
+## and the trophy moment when a trait carrier falls.
+func _on_trait(e: Array, loud: bool) -> void:
+	var x: float = e[1]
+	var y: float = e[2]
+	var id := String(e[3])
+	var near := Vector2(x - sim.px, y - sim.py).length_squared() < 900.0 * 900.0
+	if id == "slain":
+		var mask: int = e[5]
+		var k := 0
+		for t in Defs.trait_ids(mask):
+			var tc: Color = Defs.TRAITS[t].color
+			fx.ring(x, y, 30.0, 300.0 + 120.0 * k, 0.55 + 0.15 * k, tc, 1.8)
+			fx.burst(x, y, tc * 1.8, 28, 760.0, 1.2, 0.8)
+			k += 1
+		fx.flash(x, y, 360.0, 0.5, Defs.TRAIT_COLOR)
+		add_wave(x, y, 1.6, 900.0)
+		_flash = maxf(_flash, 0.35)
+		if loud:
+			Sfx.play("trophy")
+			Sfx.buzz(70)
+			trophy.emit(int(e[6]), mask)
+		return
+	var col: Color = Defs.TRAITS[id].color if Defs.TRAITS.has(id) else Defs.TRAITS.starcaller.color
+	match id:
+		"pulsar":
+			fx.ring(x, y, 20.0, 260.0, 0.35, col, 1.6)
+			fx.flash(x, y, 160.0, 0.25, col)
+			fx.burst(x, y, col * 1.8, 18, 520.0, 1.0, 0.4)
+			add_wave(x, y, 0.8, 1000.0)
+			if loud and near:
+				Sfx.play("pulsar", randf_range(0.95, 1.05))
+		"brood":
+			fx.burst(x, y, col * 1.6, 16, 300.0, 0.9, 0.45)
+			fx.ring(x, y, 20.0, 120.0, 0.3, col, 1.0)
+			if loud and near:
+				Sfx.play("brood", randf_range(0.9, 1.15))
+		"star":
+			if int(e[4]) == 0:
+				fx.ring(x, y, Defs.STAR_R * 1.8, Defs.STAR_R, 0.4, col, 1.2)
+				if loud and near:
+					Sfx.play("star_call", randf_range(0.9, 1.1))
+			else:
+				fx.flash(x, y, Defs.STAR_R * 2.4, 0.35, col)
+				fx.ring(x, y, 10.0, Defs.STAR_R * 1.6, 0.35, col, 1.6)
+				fx.burst(x, y, col * 2.0, 26, 620.0, 1.1, 0.5)
+				fx.burst(x, y, Color(2, 2, 2), 8, 380.0, 0.8, 0.3)
+				add_wave(x, y, 1.0, 1000.0)
+				if near:
+					shake(0.18)
+				if loud and near:
+					Sfx.play("meteor", randf_range(1.15, 1.3), -4.0)
+		"shielded":
+			if int(e[4]) == 1:
+				for k in 2:
+					fx.ring(x, y, 50.0, 220.0 + 90.0 * k, 0.35 + 0.1 * k, col, 1.6)
+				fx.burst(x, y, col * 2.0, 40, 700.0, 1.2, 0.6)
+				fx.burst(x, y, Color(2, 2, 2), 12, 500.0, 0.8, 0.35)
+				add_wave(x, y, 1.2, 1000.0)
+				shake(0.2)
+				if loud:
+					_hitstop = maxf(_hitstop, 0.05)
+					Sfx.play("barrier_break")
+					Sfx.buzz(40)
+			else:
+				fx.ring(x, y, 180.0, 40.0, 0.4, col, 1.3)
+				if loud and near:
+					Sfx.play("barrier_up")
+		"leech":
+			var to := Vector2(e[5], e[6])
+			var mid := (Vector2(x, y) + to) * 0.5 + Vector2(randf_range(-30, 30), randf_range(-30, 30))
+			fx.arc(PackedVector2Array([Vector2(x, y), mid, to]), col * 1.4, 0.3)
+			fx.spray(to.x, to.y, col * 1.6, 3, randf() * TAU, TAU, 160.0, 0.6, 0.25)
+			if loud and near:
+				Sfx.play("leech", randf_range(0.9, 1.2))
 
 
 ## Two weapons start to resonate: their colours spiral in from either side of

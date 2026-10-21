@@ -38,6 +38,7 @@ func _init() -> void:
 	_test_shardfield()
 	_test_resonances()
 	_test_report()
+	_test_traits()
 	if not OS.get_cmdline_user_args().has("quick"):
 		_test_runs()
 	if _fails == 0:
@@ -1922,3 +1923,202 @@ func _test_resonances() -> void:
 	var ch := _find_mission("chorus")
 	var run := _pair(311, "pulse", 2, 9, "arc", 2, 9)
 	check(Missions.progress(ch, run, {}) == 1, "Chorus counts resonances held at once")
+
+
+## Elite traits: how many an elite carries, what each one does, the trophies
+## and richer caches they pay, night bosses, missions and replays.
+func _test_traits() -> void:
+	check(Sim._SHIELD_BIT == Defs.trait_bit("shielded"), "the barrier fast path matches the trait order")
+	var s := Sim.new(5, {})
+	check(s.elite_traits() == 1, "the first elites carry one trait")
+	s.tick = Defs.TRAIT_SECOND * Sim.TPS
+	check(s.elite_traits() == 2, "two traits from 4:30")
+	s.tick = Defs.TRAIT_THIRD * Sim.TPS
+	check(s.elite_traits() == 3, "three from 7:00")
+	check(Sim.new(5, {"radiance": 3}).elite_traits() == 2, "Radiance 3 adds a trait")
+	var night := Sim.new(5, {"radiance": 3})
+	night.endless = true
+	check(night.elite_traits() == Defs.TRAIT_MAX, "never more than %d" % Defs.TRAIT_MAX)
+	# Elites arrive with distinct traits, tougher for each, and say so.
+	var e := Sim.new(6, {})
+	e.tick = Defs.TRAIT_THIRD * Sim.TPS
+	var ok := true
+	var swift_sentinel := false
+	for k in 40:
+		e.en = 0
+		e.events.clear()
+		var type := Defs.SENTINEL if k % 2 == 0 else Defs.BRUTE
+		e._elite_at(type, 600.0, 0.0)
+		var ids := Defs.trait_ids(e.e_tr[0])
+		if ids.size() != 3 or e.events.is_empty() or int(e.events[0][2]) != e.e_tr[0]:
+			ok = false
+		if type == Defs.SENTINEL and ids.has("swift"):
+			swift_sentinel = true
+		var base: float = float(Defs.ENEMY[type].hp) * 9.0
+		if e.e_maxhp[0] < base * (1.0 + Defs.TRAIT_HP * 3.0) * 0.99:
+			ok = false
+	check(ok, "elites carry distinct traits, announce them and get +%d%% HP per trait" % int(Defs.TRAIT_HP * 100.0))
+	check(not swift_sentinel, "sentinels never get Swift")
+	# Shielded: the barrier soaks hits first, breaks, and recharges.
+	var b := _trait_sim("shielded", Defs.BRUTE, 700.0)
+	var i := 0
+	var hp0 := b.e_hp[i]
+	var bar0: float = b.trait_state(i).bar
+	check(bar0 > 0.0 and absf(bar0 - b.e_maxhp[i] * Defs.BARRIER) < 0.01, "the barrier starts full")
+	b.st_crit = 0.0
+	b._damage(i, 10.0, 0.0, 0.0)
+	check(b.e_hp[i] == hp0 and float(b.trait_state(i).bar) < bar0, "a hit drains the barrier, not the hull")
+	b.events.clear()
+	b._damage(i, bar0 + 50.0, 0.0, 0.0)
+	var broke := false
+	for ev in b.events:
+		if ev[0] == Sim.EV_TRAIT and ev[3] == "shielded" and ev[4] == 1:
+			broke = true
+	check(broke and float(b.trait_state(i).bar) <= 0.0 and b.e_hp[i] < hp0, "it breaks and the rest gets through")
+	for k in Defs.BARRIER_WAIT + 120:
+		_trait_step(b)
+	check(float(b.trait_state(i).bar) > 0.0, "left alone, the barrier comes back")
+	# Pulsar: a ring of orbs.
+	var p := _trait_sim("pulsar", Defs.BRUTE, 700.0)
+	for k in Defs.PULSAR_EVERY:
+		_trait_step(p)
+	check(p.qn >= Defs.PULSAR_ORBS, "a pulsar bursts in a ring of orbs (%d)" % p.qn)
+	# Brood: mites.
+	var br := _trait_sim("brood", Defs.BRUTE, 700.0)
+	for k in Defs.BROOD_EVERY / 2 + 1:
+		_trait_step(br)
+	var mites := 0
+	for j in br.en:
+		if br.e_type[j] == Defs.MITE:
+			mites += 1
+	check(mites == Defs.BROOD_N, "a brood hatches %d mites (%d)" % [Defs.BROOD_N, mites])
+	# Starcaller: stars fall on you.
+	var sc := _trait_sim("starcaller", Defs.BRUTE, 800.0)
+	for k in 41:
+		_trait_step(sc)
+	check(sc.stars.size() == Defs.STAR_N, "a starcaller calls %d stars (%d)" % [Defs.STAR_N, sc.stars.size()])
+	var hp1 := sc.hp
+	for k in Defs.STAR_FALL + 8 * Defs.STAR_N:
+		_trait_step(sc)
+	check(sc.stars.is_empty() and sc.hp < hp1, "they land, and the one on your mark hurts (%.0f -> %.0f)" % [hp1, sc.hp])
+	# Graviton: you are dragged in.
+	var g := _trait_sim("graviton", Defs.BRUTE, 300.0)
+	var gx := g.px
+	_trait_step(g)
+	check(g.px > gx, "a graviton drags you in (%.2f)" % (g.px - gx))
+	# Phasing: it blinks beside you after losing a sixth of its health.
+	var ph := _trait_sim("phasing", Defs.BRUTE, 900.0)
+	ph.st_crit = 0.0
+	ph._damage(0, ph.e_maxhp[0] * 0.2, 0.0, 0.0)
+	_trait_step(ph)
+	check(int(ph.trait_state(0).blink) > 0, "losing a sixth of its health marks a blink")
+	for k in Defs.PHASE_MARK + 1:
+		_trait_step(ph)
+	var pd := sqrt((ph.e_x[0] - ph.px) * (ph.e_x[0] - ph.px) + (ph.e_y[0] - ph.py) * (ph.e_y[0] - ph.py))
+	check(pd < Defs.PHASE_DIST + 60.0, "...and it arrives beside you (%.0f px)" % pd)
+	# Leech: the swarm dying near it heals it.
+	var le := _trait_sim("leech", Defs.BRUTE, 900.0)
+	le.e_hp[0] = le.e_maxhp[0] * 0.5
+	var lh := le.e_hp[0]
+	var d := le._spawn(Defs.DRIFTER, le.e_x[0] + 60.0, le.e_y[0], false, 0)
+	le.e_hp[d] = 0.0
+	_trait_step(le)
+	check(le.e_hp[0] > lh, "a leech drinks a nearby death (%.0f -> %.0f)" % [lh, le.e_hp[0]])
+	check(le._leech_n == 1, "leeches are counted")
+	le.e_hp[0] = 0.0
+	_trait_step(le)
+	check(le._leech_n == 0 and le.traits_of.is_empty(), "a dead leech leaves nothing behind")
+	# Swift: it marks a line, then lunges along it.
+	var sw := _trait_sim("swift", Defs.BRUTE, 420.0)
+	var marked := false
+	var lunged := false
+	for k in 260:
+		_trait_step(sw)
+		for ev in sw.events:
+			if ev[0] == Sim.EV_TELEGRAPH:
+				marked = true
+		if sw.en > 0 and int(sw.trait_state(0).get("dash", 0)) == 2:
+			lunged = true
+	check(marked and lunged, "a swift elite marks its line and lunges")
+	# Trophies: an exalted elite pays three traits, a richer cache and a heart.
+	var t := Sim.new(8, {})
+	t.en = 0
+	var x := t._spawn(Defs.DRIFTER, 500.0, 0.0, true, 0)
+	t._give_traits(x, 0, false, Defs.trait_bit("pulsar") | Defs.trait_bit("brood") | Defs.trait_bit("graviton"))
+	var sc0 := t.score()
+	t.e_hp[x] = 0.0
+	t.spawn_acc = -1e9
+	t.step(0, 0)
+	check(t.trait_kills == 1 and t.exalted_kills == 1 and t.traits_slain.size() == 3, "an exalted elite is a trophy")
+	check(t.trait_score == Defs.TRAIT_SCORE * 3 and t.score() >= sc0 + Defs.TRAIT_SCORE * 3, "it pays %d score" %
+			(Defs.TRAIT_SCORE * 3))
+	var chest := {}
+	var heart := false
+	for pk in t.pickups:
+		if pk.k == "chest":
+			chest = pk
+		elif pk.k == "heart":
+			heart = true
+	check(int(chest.get("n", 1)) == 3 and heart, "its cache holds three upgrades, with a heart beside it")
+	t.events.clear()
+	t._open_chest(false, 0.0, 0.0, false, 3)
+	var got := 0
+	for ev in t.events:
+		if ev[0] == Sim.EV_CHEST:
+			got = (ev[1] as Array).size() - 1
+	check(got == 3, "a three-trait cache upgrades three things (%d)" % got)
+	# Night bosses carry traits from the second night, and only ones that suit them.
+	var nb := Sim.new(9, {})
+	nb.endless = true
+	nb.night = Defs.TRAIT_NIGHT - 2
+	nb._night_boss()
+	check(nb.e_tr[nb.boss_index()] == 0, "the first night's boss has no traits")
+	nb.en = 0
+	nb._night_boss()
+	var bt := Defs.trait_ids(nb.e_tr[nb.boss_index()])
+	check(bt.size() == 1, "the second night's boss carries a trait (%s)" % str(bt))
+	nb.en = 0
+	nb.night = Defs.TRAIT_NIGHT + 1
+	nb._night_boss()
+	bt = Defs.trait_ids(nb.e_tr[nb.boss_index()])
+	var suits := bt.size() == 2
+	for id in bt:
+		if not Defs.TRAITS[id].boss:
+			suits = false
+	check(suits, "later nights' bosses carry two boss traits (%s)" % str(bt))
+	# Missions.
+	var data := {"trait_kills": {}}
+	check(Missions.done(_find_mission("exalted"), t, data), "Exalted")
+	check(not Missions.done(_find_mission("big_game"), t, data), "one elite is not Big Game")
+	data.trait_kills = {"swift": 1, "pulsar": 2, "leech": 1, "brood": 1, "phasing": 1}
+	check(Missions.progress(_find_mission("trophy_wall"), t, data) == 6, "trophies from the save and this run add up")
+	data.trait_kills.shielded = 1
+	data.trait_kills.starcaller = 4
+	data.trait_kills.graviton = 2
+	check(Missions.done(_find_mission("trophy_wall"), null, data), "Trophy Wall")
+	# A bot run full of elites replays bit for bit.
+	var r := Sim.new(41, {"mods": ["gilded"]})
+	Autopilot.play(r, 300 * Sim.TPS)
+	check(r.trait_kills >= 3, "the bot slays trait elites on a Gilded run (%d)" % r.trait_kills)
+	var rp := Sim.from_replay(r.to_replay())
+	check(rp.checksum() == r.checksum() and rp.trait_kills == r.trait_kills, "trait elites replay")
+
+
+## A quiet arena with one elite carrying exactly one trait, `dist` px to the right of you.
+func _trait_sim(id: String, type: int, dist: float) -> Sim:
+	var s := Sim.new(12, {})
+	s.en = 0
+	s.spawn_acc = -1e9
+	s.rift_next = 1 << 30
+	s.elite_next = 1 << 30
+	s.sched_i = Sim.SCHEDULE.size()
+	s.weapons.clear()
+	var i := s._spawn(type, s.px + dist, s.py, true, 0)
+	s._give_traits(i, 0, false, Defs.trait_bit(id))
+	return s
+
+
+func _trait_step(s: Sim) -> void:
+	s.spawn_acc = -1e9
+	s.iframes = 0
+	s.step(0, 0)

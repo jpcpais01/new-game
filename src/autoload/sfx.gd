@@ -28,6 +28,9 @@ const SOUNDS := {
 	"resonance": [1, 0.5, -1.0],
 	"shard_charge": [3, 0.1, -9.0], "shard_break": [3, 0.08, -2.0], "shard_ping": [3, 0.05, -15.0],
 	"shard_grow": [2, 0.2, -10.0],
+	"elite_call": [1, 0.5, -2.0], "barrier_break": [2, 0.1, -3.0], "barrier_up": [2, 0.2, -9.0],
+	"pulsar": [3, 0.08, -7.0], "brood": [2, 0.1, -10.0], "star_call": [3, 0.08, -11.0], "leech": [3, 0.06, -14.0],
+	"trophy": [1, 0.3, -2.0],
 }
 
 var _pools := {}

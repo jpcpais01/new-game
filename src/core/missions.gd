@@ -64,6 +64,17 @@ static func progress(m: Dictionary, run: Sim, data: Dictionary) -> int:
 						v += 1
 		"resonances":
 			v = run.resonances.size() if run != null else 0
+		"exalted":
+			v = 1 if run != null and run.exalted_kills > 0 else 0
+		"elites":
+			v = run.elite_kills if run != null else 0
+		"trait_codex":
+			var slain = data.get("trait_kills", {})
+			if not slain is Dictionary:
+				slain = {}
+			for id in Defs.TRAIT_ORDER:
+				if int(slain.get(id, 0)) > 0 or (run != null and run.traits_slain.has(id)):
+					v += 1
 		"fleet":
 			v = (data.get("ships_won", []) as Array).size()
 		"overdrives":
